@@ -357,27 +357,33 @@ PassResult affine_collapse(Tape& tape) {
     return n.op == Op::Input || n.op == Op::Affine || collapsed[idx(m)] || !n.tainted;
   };
 
-  // Turns an addend into a term; returns false if it cannot be represented exactly.
+  // Turns an addend into a term; returns false if it cannot be represented exactly. A scaled
+  // (Mul by a Const) or negated (Neg) atom is taken as (coef, atom) whatever its use count: the
+  // Affine computes the same product with the same rounding, so this is exact. The Mul/Neg node
+  // itself is absorbed (dropped) only when this chain is its single use; a shared one is kept
+  // for its other users (two interpolations at different times share a weight·knot product on
+  // the M1 book) and disappears in the following dce once every user has collapsed.
   auto make_term = [&](const Addend& ad, AffineTerm& out, node_id& absorbed_node) {
     const Node& n = nodes[idx(ad.node)];
     absorbed_node = invalid_node;
-    if (!absorbed[idx(ad.node)] && n.op == Op::Mul && uses.count[idx(ad.node)] == 1) {
+    const bool single_use = uses.count[idx(ad.node)] == 1;
+    if (!absorbed[idx(ad.node)] && n.op == Op::Mul) {
       const Node& l = nodes[idx(n.a)];
       const Node& r = nodes[idx(n.b)];
       if (l.op == Op::Const && r.op != Op::Const && atom_ok(n.b)) {
         out = {ad.sign * l.konst, n.b};
-        absorbed_node = ad.node;
+        if (single_use) absorbed_node = ad.node;
         return true;
       }
       if (r.op == Op::Const && l.op != Op::Const && atom_ok(n.a)) {
         out = {ad.sign * r.konst, n.a};
-        absorbed_node = ad.node;
+        if (single_use) absorbed_node = ad.node;
         return true;
       }
     }
-    if (!absorbed[idx(ad.node)] && n.op == Op::Neg && uses.count[idx(ad.node)] == 1 && atom_ok(n.a)) {
+    if (!absorbed[idx(ad.node)] && n.op == Op::Neg && atom_ok(n.a)) {
       out = {-ad.sign, n.a};
-      absorbed_node = ad.node;
+      if (single_use) absorbed_node = ad.node;
       return true;
     }
     if (atom_ok(ad.node)) {

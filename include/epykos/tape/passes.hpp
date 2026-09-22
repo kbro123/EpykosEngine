@@ -23,8 +23,12 @@
 //                   ((c_0 + k_0*x_0) + k_1*x_1) + ... in the recorded order. Exact because
 //                   every rewritten step is an IEEE identity: k*x == x*k, 1*x == x,
 //                   (-1)*x == -x, a - k*x == a + (-k)*x, and -0.0 + y == y (the c_0 of a
-//                   chain with no leading constant is -0.0). Sums of tainted non-affine nodes
-//                   (coupon sums, leg sums) are left alone, so segment structure survives.
+//                   chain with no leading constant is -0.0). A scaled or negated addend is
+//                   taken whatever its use count (the Affine recomputes the same product);
+//                   the Mul/Neg node is dropped when the chain was its only use and kept for
+//                   its other users otherwise (a later dce removes it once they all collapse).
+//                   Sums of tainted non-affine nodes (coupon sums, leg sums) are left alone,
+//                   so segment structure survives.
 #pragma once
 
 #include <cstddef>

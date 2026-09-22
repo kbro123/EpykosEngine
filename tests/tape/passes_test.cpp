@@ -479,7 +479,7 @@ TEST(Affine, ChainStopsAtTheFirstNonAffineAddend) {
   EXPECT_EQ(t[t[o1].a].op, Op::Add);
 }
 
-TEST(Affine, MultiUseScaledTermIsAnAtomNotAbsorbed) {
+TEST(Affine, MultiUseScaledTermIsDuplicatedIntoTheAffineAndKept) {
   Tape t;
   {
     Tape::Scope scope(t);
@@ -487,12 +487,68 @@ TEST(Affine, MultiUseScaledTermIsAnAtomNotAbsorbed) {
     const Rec b = epykos::make_input(2.0);
     const Rec sa = 2.0 * a;
     epykos::register_output(sa + b);
-    epykos::register_output(sa);  // second use: the Mul must survive
+    epykos::register_output(sa);  // second use: the Mul must survive for this output
   }
   epykos::affine_collapse(t);
   EXPECT_EQ(count_op(t, Op::Mul), 1u) << ops_string(t);
-  EXPECT_EQ(count_op(t, Op::Affine), 0u) << "a tainted Mul atom is not affine in inputs";
-  EXPECT_EQ(t[t.outputs()[0]].op, Op::Add);
+  ASSERT_EQ(count_op(t, Op::Affine), 1u) << ops_string(t);
+  const node_id f = t.outputs()[0];
+  ASSERT_EQ(t[f].op, Op::Affine);
+  // 2*a + b with the product recomputed inside the Affine (same rounding as the Mul).
+  const std::vector<node_id> args = args_vec(t, f);
+  ASSERT_EQ(args.size(), 2u);
+  EXPECT_EQ(t[args[0]].op, Op::Input);
+  EXPECT_EQ(t[args[0]].a, 0);
+  EXPECT_EQ(t.coefs(f)[0], 2.0);
+  EXPECT_EQ(t[args[1]].a, 1);
+  EXPECT_EQ(t.coefs(f)[1], 1.0);
+  EXPECT_EQ(t[t.outputs()[1]].op, Op::Mul);
+  EXPECT_NO_THROW(t.validate());
+}
+
+TEST(Affine, ScaledTermSharedByTwoChainsCollapsesBothAndDcesTheMul) {
+  // Two interpolations at different times sharing one weight·knot product, as on the M1 book
+  // when (1 − w) at one time equals w at a neighbouring time bitwise: both become Affine nodes
+  // of the same shape, and the shared Mul has no user left.
+  Tape t;
+  {
+    Tape::Scope scope(t);
+    const Rec z0 = epykos::make_input(0.04);
+    const Rec z1 = epykos::make_input(0.041);
+    const Rec z2 = epykos::make_input(0.042);
+    const Rec shared = 0.25 * z1;
+    epykos::register_output(0.75 * z0 + shared);  // (1 − w)·z0 + w·z1,   w = 0.25
+    epykos::register_output(shared + 0.75 * z2);  // (1 − w')·z1 + w'·z2, 1 − w' = 0.25
+    const Rec nz0 = -z0;                          // a Neg shared by two chains
+    epykos::register_output(nz0 + z1);
+    epykos::register_output(nz0 - z2);
+  }
+  const std::vector<double> in = t.input_values();
+  const std::vector<double> before = epykos::replay(t, in);
+  const PassResult r = epykos::affine_collapse(t);
+  EXPECT_NO_THROW(t.validate());
+  EXPECT_GT(r.changed, 0u);
+  ASSERT_EQ(count_op(t, Op::Affine), 4u) << ops_string(t);
+  EXPECT_EQ(count_op(t, Op::Add), 0u) << ops_string(t);
+  EXPECT_EQ(count_op(t, Op::Sub), 0u) << ops_string(t);
+  // The shared Mul and the shared Neg are still on the tape until dce, then gone.
+  EXPECT_EQ(count_op(t, Op::Mul), 1u) << ops_string(t);
+  EXPECT_EQ(count_op(t, Op::Neg), 1u) << ops_string(t);
+  for (node_id o : t.outputs()) {
+    ASSERT_EQ(t[o].op, Op::Affine);
+    for (node_id a : t.args(o)) EXPECT_EQ(t[a].op, Op::Input);
+  }
+  EXPECT_EQ(t.coefs(t.outputs()[0])[1], 0.25);
+  EXPECT_EQ(t.coefs(t.outputs()[1])[0], 0.25);
+  EXPECT_EQ(t.coefs(t.outputs()[2])[0], -1.0);
+  EXPECT_EQ(t.coefs(t.outputs()[2])[1], 1.0);
+  EXPECT_EQ(t.coefs(t.outputs()[3])[0], -1.0);
+  EXPECT_EQ(t.coefs(t.outputs()[3])[1], -1.0);
+  epykos::dce(t);
+  EXPECT_EQ(count_op(t, Op::Mul), 0u) << ops_string(t);
+  EXPECT_EQ(count_op(t, Op::Neg), 0u) << ops_string(t);
+  const std::vector<double> after = epykos::replay(t, in);
+  for (std::size_t k = 0; k < before.size(); ++k) EXPECT_EQ(bits(after[k]), bits(before[k])) << k;
 }
 
 TEST(Affine, UntaintedOnlyChainsAreNotCollapsed) {

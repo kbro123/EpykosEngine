@@ -248,6 +248,15 @@ TEST(AffineE0, ReplayIsBitIdenticalBeforeAndAfter) {
     const Rec z = 0.25 * c + 0.75 * d;
     epykos::register_output(z * z);
     epykos::register_output(z + 0.5 * a);
+    // A scaled term shared by two chains, by a chain and a non-affine consumer, and a shared
+    // negation: the Affine recomputes the product, the Mul/Neg survive for their other users.
+    const Rec shared = rng.uniform(-2.0, 2.0) * b;
+    epykos::register_output(0.3 * a + shared);
+    epykos::register_output(shared + 0.7 * c);
+    epykos::register_output(exp(shared));
+    const Rec nb = -b;
+    epykos::register_output(nb - d);
+    epykos::register_output(nb * nb);
   }
   std::vector<std::vector<double>> states;
   SplitMix64 rng(22);

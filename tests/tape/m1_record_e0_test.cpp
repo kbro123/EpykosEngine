@@ -270,9 +270,18 @@ TEST(M1RecordE0, ReplayIsBitIdenticalToDoubleAfterEveryPass) {
       // One Sum per leg with two or more coupons, one for the book, one per interpolated time.
       EXPECT_EQ(count_op(t, Op::Sum), 1u + 2u * n_two_plus + n_interior);
     } else if (name == "affine_collapse") {
-      EXPECT_GT(count_op(t, Op::Affine), 0u) << "the interpolation collapsed";
-      EXPECT_EQ(count_op(t, Op::Sum) + count_op(t, Op::Affine), 1u + 2u * n_two_plus + n_interior);
-      EXPECT_GE(count_op(t, Op::Sum), 1u + 2u * n_two_plus) << "coupon and book sums survive";
+      // Every interpolated time is one Affine (including the ones sharing a weight·knot product
+      // with a neighbouring time); the coupon, leg and book sums survive as Sums.
+      EXPECT_EQ(count_op(t, Op::Affine), n_interior) << "one Affine per interpolated time";
+      EXPECT_EQ(count_op(t, Op::Sum), 1u + 2u * n_two_plus) << "coupon and book sums survive";
+    } else if (name == "final_dce") {
+      // A shared weight·knot product is kept by affine_collapse for its other user, which is
+      // another collapsed chain, so it is dead by now: no Mul reads an Input any more.
+      for (const epykos::Node& n : t.nodes()) {
+        if (n.op != Op::Mul) continue;
+        EXPECT_NE(t[n.a].op, Op::Input);
+        EXPECT_NE(t[n.b].op, Op::Input);
+      }
     }
   }
   EXPECT_LT(t.size(), n_recorded);

@@ -4,3 +4,6 @@ build/
 *.a
 .DS_Store
 .worktrees/
+third_party/
+bench/results/*/tmp/
+compile_commands.json

@@ -111,6 +111,7 @@ Linux/GCC checks. No SwapEngine access for agents.
 2026-09-22  M1/P2 recorder  landed: Rec/RecBool, Tape, cse/dce/fold_sum/affine_collapse (E0), Replayer; 6/6 tests pass in release, reference and debug  498afc8
 2026-09-22  M1/P1 maths  done: calendar, Philox/AS241, seeded book+batch, templated curve/pricing, double oracle table; 9 test executables pass on release/reference/debug (Apple clang) and the oracle digests are bit-identical across the three presets  b2debe4
 2026-09-22  M1/P2 integrate  done: record_m1 helper records the UNMODIFIED P1 maths (12 inputs, 1,001 outputs); E0 gate replays bit-identical to price_book<double> at the record point and all 64 states after each of cse/dce/fold_sum/affine_collapse/dce (412,953 nodes recorded -> 112,960 cse -> 84,094 fold_sum -> 79,432 affine -> 75,698 final); affine_collapse fixed to take shared weight·knot products so every interpolated time is one Affine (2,561); 14/14 tests pass on release, reference and debug  25a3389
+2026-09-23  M1/P5 hand  E0 bitwise (reference arithmetic) and E1 gate passed at record point + 64 states; eval_batch(64) bitwise = 64 evals; zero allocations. d448afd70180 (load ~2/16): eval 46.0 us, eval_batch(64) 708 us (11.1 us/state), informational. include/epykos/hand, src/hand, tests/hand, bench/hand
 
 ## 6. Morning report
 Written to the PR description and to §7 below: per milestone, gate results with numbers and fingerprint; kill-path

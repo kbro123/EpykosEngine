@@ -217,13 +217,15 @@ M1HandKernel::M1HandKernel(const m1::Book& book, M1HandOptions options) : opt_(o
   acc_.assign(idx(max_stride_), 0.0);
 }
 
-// DF (and 1/DF) at every unique time for `stride` lanes of zp_, batch innermost. The exp runs
-// over the flat [times × stride] array so it vectorises across times at B = 1 and across lanes in
-// a batch alike; per element the operations are identical either way.
-void M1HandKernel::curve_pass(int stride) const {
+// DF (and 1/DF) at every unique time for the lanes of zp_, batch innermost. The exp runs over the
+// flat [times × stride] array so it vectorises across times at B = 1 and across lanes in a batch
+// alike; per element the operations are identical either way.
+template <int L>
+void M1HandKernel::curve_pass() const {
   const double* zp = zp_.data();
   double* df = df_.data();
   const int nu = n_times_;
+  const int stride = L == 1 ? 1 : max_stride_;
   const std::size_t st = idx(stride);
   // 1. x = (−z(t))·t through W.
   for (int u = 0; u < nu; ++u) {
@@ -355,7 +357,7 @@ void M1HandKernel::eval_impl(const double* z, int B, double* swap_pv, double* bo
     double* out = zp + idx(k) * idx(stride);
     for (int l = 0; l < stride; ++l) out[l] = zk[std::min(l, B - 1)];
   }
-  curve_pass(stride);
+  curve_pass<L>();
   if (opt_.arith == HandArith::reference) {
     coupon_pass<L, false, true>(B, swap_pv);
   } else if (opt_.shared_reciprocal) {

@@ -99,7 +99,8 @@ class M1HandKernel {
  private:
   template <int L>
   void eval_impl(const double* z, int B, double* swap_pv, double* book_pv) const;
-  void curve_pass(int stride) const;
+  template <int L>
+  void curve_pass() const;  // stride 1 (L = 1) or max_stride_
   // L = 1: stride 1, row indices are time indices; L > 1: stride max_stride_, row offsets are
   // premultiplied (time × max_stride_).
   template <int L, bool Shared, bool Ref>

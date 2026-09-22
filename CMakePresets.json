@@ -1,0 +1,60 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "release: -O3 -march=x86-64-v3 -fno-math-errno (D13)",
+      "description": "Gated optimised build. No -ffast-math. The ISA flag is dropped on non-x86-64 hosts.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "EPYKOS_REFERENCE": "OFF"
+      }
+    },
+    {
+      "name": "reference",
+      "displayName": "reference: release flags + -ffp-contract=off",
+      "description": "Bit-identity (E0) reference build: every TU compiled without FMA contraction (D8).",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "EPYKOS_REFERENCE": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "debug: -O0 -g",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "EPYKOS_REFERENCE": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "release",   "configurePreset": "release" },
+    { "name": "reference", "configurePreset": "reference" },
+    { "name": "debug",     "configurePreset": "debug" }
+  ],
+  "testPresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    },
+    { "name": "release",   "inherits": "base", "configurePreset": "release" },
+    { "name": "reference", "inherits": "base", "configurePreset": "reference" },
+    { "name": "debug",     "inherits": "base", "configurePreset": "debug" }
+  ]
+}

@@ -26,23 +26,43 @@ struct Boxed {
   static inline std::uint64_t mixed = 0;  // ops with a double on one side
   static inline std::uint64_t exps = 0;
 
-  [[maybe_unused]] friend Boxed operator+(Boxed a, Boxed b) { ++ops; return {a.v + b.v}; }
-  [[maybe_unused]] friend Boxed operator-(Boxed a, Boxed b) { ++ops; return {a.v - b.v}; }
-  [[maybe_unused]] friend Boxed operator*(Boxed a, Boxed b) { ++ops; return {a.v * b.v}; }
-  [[maybe_unused]] friend Boxed operator/(Boxed a, Boxed b) { ++ops; return {a.v / b.v}; }
-  [[maybe_unused]] friend Boxed operator-(Boxed a) { ++ops; return {-a.v}; }
-  [[maybe_unused]] friend Boxed operator+(double a, Boxed b) { ++ops; ++mixed; return {a + b.v}; }
-  [[maybe_unused]] friend Boxed operator-(double a, Boxed b) { ++ops; ++mixed; return {a - b.v}; }
-  [[maybe_unused]] friend Boxed operator*(double a, Boxed b) { ++ops; ++mixed; return {a * b.v}; }
-  [[maybe_unused]] friend Boxed operator/(double a, Boxed b) { ++ops; ++mixed; return {a / b.v}; }
-  [[maybe_unused]] friend Boxed operator+(Boxed a, double b) { ++ops; ++mixed; return {a.v + b}; }
-  [[maybe_unused]] friend Boxed operator-(Boxed a, double b) { ++ops; ++mixed; return {a.v - b}; }
-  [[maybe_unused]] friend Boxed operator*(Boxed a, double b) { ++ops; ++mixed; return {a.v * b}; }
-  [[maybe_unused]] friend Boxed operator/(Boxed a, double b) { ++ops; ++mixed; return {a.v / b}; }
-  [[maybe_unused]] friend Boxed exp(Boxed a) { ++exps; return {std::exp(a.v)}; }
+  friend Boxed operator+(Boxed a, Boxed b) { ++ops; return {a.v + b.v}; }
+  friend Boxed operator-(Boxed a, Boxed b) { ++ops; return {a.v - b.v}; }
+  friend Boxed operator*(Boxed a, Boxed b) { ++ops; return {a.v * b.v}; }
+  friend Boxed operator/(Boxed a, Boxed b) { ++ops; return {a.v / b.v}; }
+  friend Boxed operator-(Boxed a) { ++ops; return {-a.v}; }
+  friend Boxed operator+(double a, Boxed b) { ++ops; ++mixed; return {a + b.v}; }
+  friend Boxed operator-(double a, Boxed b) { ++ops; ++mixed; return {a - b.v}; }
+  friend Boxed operator*(double a, Boxed b) { ++ops; ++mixed; return {a * b.v}; }
+  friend Boxed operator/(double a, Boxed b) { ++ops; ++mixed; return {a / b.v}; }
+  friend Boxed operator+(Boxed a, double b) { ++ops; ++mixed; return {a.v + b}; }
+  friend Boxed operator-(Boxed a, double b) { ++ops; ++mixed; return {a.v - b}; }
+  friend Boxed operator*(Boxed a, double b) { ++ops; ++mixed; return {a.v * b}; }
+  friend Boxed operator/(Boxed a, double b) { ++ops; ++mixed; return {a.v / b}; }
+  friend Boxed exp(Boxed a) { ++exps; return {std::exp(a.v)}; }
 };
 
 }  // namespace
+
+// Every operator of the contract is exercised once, mixed forms on both sides.
+TEST(M1ScalarE0, ContractOperators) {
+  const Boxed a{3.0};
+  const Boxed b{0.5};
+  EXPECT_EQ((a + b).v, 3.5);
+  EXPECT_EQ((a - b).v, 2.5);
+  EXPECT_EQ((a * b).v, 1.5);
+  EXPECT_EQ((a / b).v, 6.0);
+  EXPECT_EQ((-a).v, -3.0);
+  EXPECT_EQ((2.0 + a).v, 5.0);
+  EXPECT_EQ((2.0 - a).v, -1.0);
+  EXPECT_EQ((2.0 * a).v, 6.0);
+  EXPECT_EQ((2.0 / a).v, 2.0 / 3.0);
+  EXPECT_EQ((a + 2.0).v, 5.0);
+  EXPECT_EQ((a - 2.0).v, 1.0);
+  EXPECT_EQ((a * 2.0).v, 6.0);
+  EXPECT_EQ((a / 2.0).v, 1.5);
+  EXPECT_EQ(exp(b).v, std::exp(0.5));
+}
 
 TEST(M1ScalarE0, RestrictedScalarMatchesDoubleBitwise) {
   const epykos::m1::Book b = epykos::m1::make_m1_book();

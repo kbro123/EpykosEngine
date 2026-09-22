@@ -40,3 +40,70 @@ comparisons.
 
 ## D10 — Verification precedes the compiler (2026-09-22)
 The round-trip identity check and the differential tester land with the first pass that needs them, not after.
+
+## D11 — No code shared with SwapEngine (2026-09-22)
+Supersedes the second sentence of D2. EpykosEngine is a fresh take on the problem; SwapEngine continues separately.
+No source, header, fixture, build script or generated file moves between the two repositories in either direction,
+whether by copying, porting, vendoring, symlinking or `#include`. Agents working in this repository do not open the
+SwapEngine checkout. SwapEngine is withdrawn from the future oracle list; QuantLib remains a candidate test-only
+oracle. The measured numbers already transcribed into `PRIOR_ART.md` stay as informational tables (D9).
+
+## D12 — Toolchain (2026-09-22)
+C++20. CMake (≥ 3.25) + Ninja, installed as build tools via Homebrew. Libraries are vendored under `third_party/`
+(gitignored) by `scripts/bootstrap.sh` at pinned versions with checksums: Eigen (header-only; used on the `double`
+side only), GoogleTest, Google Benchmark. No Homebrew-installed libraries. Compilers: Apple clang 21 on macOS, GCC 13+
+on Linux. GitHub Actions builds and runs the tests on both; performance gates run only locally and are fingerprinted.
+
+## D13 — Flags and ISA (2026-09-22)
+Gated build: `-O3 -march=x86-64-v3 -fno-math-errno`, no `-ffast-math`. Reference TUs (the templated-`double`
+oracle, the hand-fused reference, the round-trip expander) add `-ffp-contract=off`. Fingerprint = CPU brand, core
+count, compiler version, flags. `-march=native` builds may be reported as informational rows under their own
+fingerprint (D9), never as the gate.
+
+## D14 — Recorder representation (2026-09-22)
+`Rec = {double v; node_id id}` with `node_id` a typedef (32-bit to start). Taint ("depends on an input") lives in the
+tape's node table, not in `Rec`. `RecBool = {bool v; node_id id}` comes from comparisons and does not convert to
+`bool`. The recorder has no Eigen dependency. An `Eigen::NumTraits<Rec>` specialisation is provided as an opt-in
+header: matrix expressions over `Scalar` record elementwise and linear ones collapse to `linmap` in the affine pass;
+products are never intercepted. One opcode enum is shared by every pass (record, CSE/DCE/fold-sum, affine collapse,
+signature, expander, interpreter, adjoint, catalogue). `SUM` is variadic from the first commit. The domain IR is
+plain data and serialisable.
+
+## D15 — Batch-axis layout (2026-09-22)
+SoA with the batch axis innermost on every domain. Batch width `B` is a runtime value. Tile size is a runtime
+parameter; M1 sweeps 128/256/512 and records the winner with the fingerprint. Compile-time `B` specialisation is a
+catalogue (M3) decision, not an interpreter one.
+
+## D16 — The M1 book is fixed (2026-09-22)
+The kill-test book is specified exactly in `WORKLOADS.md` §M1 and generated from a fixed seed; there are no data
+files. Linear-in-zero-rate curve on 12 knots; 1,000 OIS par swaps; the float leg is written compounded in the
+templated maths and telescoped by the fusion pass (no `scan` in M1); one ungated bucket of seasoned swaps with a
+realised first fixing. The hand-fused reference and the generic path price exactly this book.
+
+## D17 — Parallelism and random numbers (2026-09-22)
+A `std::thread` pool owned by the engine; no OpenMP or TBB. Counter-based RNG (Philox-4x32-10): the uniform for
+(path, step, dimension) is a pure function of (seed, path, step, dimension); Gaussians come from the inverse CDF
+(Wichura AS241). Every path is therefore bit-identical regardless of tile size or thread count. Reductions across
+paths use a fixed pairwise order so aggregates are thread-count independent too.
+
+## D18 — Milestones are gated and land by PR (2026-09-22)
+M(n+1) starts only when M(n)'s exit gate passes. M1's kill path follows `ROADMAP.md`: up to three tile/layout
+iterations; if still > 2×, M3 moves ahead of M2. Work happens on package branches merged into the integration branch
+`integrate/m1-m5` when each milestone's gates pass; one PR from the integration branch to `main`, merged only by the
+owner. Docs-only commits that record decisions may go to `main` directly.
+
+## D19 — M5 models (2026-09-22)
+Hull–White one-factor and LGM, sharing one affine kernel: `log P(t,T) = A(t,T) − B(t,T)·x_t` as a batched `linmap`,
+with the time step an affine `scan`. Hull–White is the gated model; LGM must reproduce Hull–White prices under the
+equivalent parametrisation to 1e-12 relative.
+
+## D20 — Licence (2026-09-22)
+No licence file yet. The repository is public; with no licence it is all rights reserved by default. Revisit before
+accepting any external contribution.
+
+## D21 — SwapEngine as a black-box benchmark, for the G4 comparison only (2026-09-22)
+Refines D11 for one purpose. The stretch-goal G4 comparison (`ROADMAP.md` §MX) may build and run SwapEngine from its
+own checkout as a black box, and may read its public interface and documentation only as far as needed to feed it the
+same bundle. Nothing derived from SwapEngine source enters this repository; no agent developing engine code opens the
+checkout; the comparison lives under `bench/compare/` with a README stating exactly what was and was not like-for-like.
+Its numbers are informational (D9).

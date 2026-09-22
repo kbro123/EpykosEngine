@@ -1,86 +1,117 @@
-# RESUME — EpykosEngine handoff (2026-09-22)
+# RESUME — EpykosEngine overnight run (launched 2026-09-22, Mac Pro)
 
-For the next session (local, remote-control, on the Mac Pro). Read this, then `CLAUDE.md`, then `docs/DESIGN.md`.
+This is the launch brief for the M1–M5 run and the handoff for the morning. Agents: read §0–§3 before touching code.
 
-## 1. State of the repo
+## 0. Read first
+`CLAUDE.md` → `docs/DESIGN.md` → `docs/ROADMAP.md` → `docs/DECISIONS.md` (D1–D20) → `docs/WORKLOADS.md`.
+`docs/PRIOR_ART.md` is informational only.
 
-- `kbro123/EpykosEngine` was created empty today. Local clone in the cloud session: `/home/user/epykosengine`, branch `main`.
-- Files written in this session (design only, **no code**):
-  `README.md`, `CLAUDE.md`, `.gitignore`, `docs/DESIGN.md`, `docs/ROADMAP.md`, `docs/DECISIONS.md`, `docs/PRIOR_ART.md`, `docs/RESUME.md` (this file).
-- Owner decisions taken in this session (recorded in `docs/DECISIONS.md`):
-  - M0 = **design doc only**; code starts at M1.
-  - **Standalone** repo; SwapEngine/QuantLib are test-only oracles later, never build dependencies.
-  - Initial scaffold goes to **`main`** (repo had no history); later work on branches.
-- Owner intent: iterate on the design doc first; then, tonight, spin up agents to work on it until morning.
+## 1. Rules for every agent
+- **No SwapEngine (D11).** Do not open `../SwapEngine` or any other checkout. Everything is written from these docs.
+- Maths once, templated on `Scalar`; recording discipline as in `CLAUDE.md`; verification before features (D10).
+- Fixtures come from the seed in `WORKLOADS.md`; no data files.
+- Dependencies are fixed by D12: Eigen (double side only), GoogleTest, Google Benchmark, nothing else.
+- Numbers: fingerprinted (`scripts/fingerprint.sh`), load-checked, flags stated; estimates labelled (D9, D13).
+- Git: work on a package branch cut from `integrate/m1-m5`; commit as `type(scope): summary`; no model identifiers;
+  merge back only when the package's own tests pass; never touch `main` (D18).
+- Docs: op-set / pipeline / milestone changes update `DESIGN.md` / `ROADMAP.md` in the same commit; new decisions
+  append to `DECISIONS.md`; each package appends one line to §5 of this file when it merges.
+- Report honestly: a failed gate is reported as failed with the numbers, never softened.
 
-## 2. Where this came from (context you need)
+## 2. Repository layout (fixed by M1/P0)
+```
+CMakeLists.txt  CMakePresets.json        presets: release (D13 flags), reference (+ -ffp-contract=off), debug
+scripts/bootstrap.sh                     fetch pinned third_party with checksums
+scripts/fingerprint.sh                   CPU brand, cores, compiler, flags → id; prints 1-min load
+include/epykos/                          public headers, namespace epykos, macros EPY_*
+  scalar/     Rec, RecBool, Dual, scalar traits, select/structural_if
+  maths/      templated pricing maths: calendar, schedules, curve, legs, swaps, book (M1); schemes (M4); models (M5)
+  tape/       node table, opcode enum (one for every pass), CSE/DCE, fold-sum, affine collapse
+  ir/         domain IR (plain data, serialisable), signature pass, expander (round-trip)
+  exec/       tiled interpreter, tile/batch layout, thread pool (M5)
+  adjoint/    M2      rewrite/  M3      catalogue/  M3      solver/  M4      mc/  M5
+src/                                     non-template implementation
+src/catalogue/generated/                 committed generated kernels (M3)
+tests/                                   gtest: unit, roundtrip, differential, adjoint, mutation
+bench/                                   Google Benchmark; results in bench/results/<fingerprint>/
+tools/catalogue/                         M3 generator
+third_party/                             gitignored
+.github/workflows/ci.yml                 tests only: ubuntu-latest GCC 13, macos-latest Apple clang
+```
 
-SwapEngine (`kbro123/SwapEngine`, `/home/user/SwapEngine` in the cloud session, Mac Pro checkout on `main`) is the existing curve-calibration/streaming
-engine. Its parked branch `research/aad-graph-kernels` (one commit, `8a16781`, cut 2026-09-15 from `e2-conventions`, 33 commits behind `main`,
-DO NOT MERGE) recorded the engine's unmodified templated pricing into a scalar tape and showed:
-- CSE/DCE shrinks desk from 141.8k to 15.3k ops; the affine collapse **rediscovers the hand-built W-cache** (857 rows, exactly);
-- coarse lowering (level/op-type groups + fold-sum) cuts dispatch to 122–184 per eval, bit-identical under `-ffp-contract=off`;
-- a cashflow-table IR lowers 408/420 ladder rows (exception: the moment path, a quadratic form);
-- the scalar tape is **1.5–2.5× slower** than the hand W-cache on linear books; **7–11× faster** than the hybrid AAD path on value-dependent ones;
-- desk_mixed's per-tick refresh is a Newton 2-cycle across four Hyman predicates — kinks need an active set, like band edges.
-- **Never measured:** coarse-kernel timings vs the W-cache; select-vs-guard break-even; NaN-in-discarded-arm.
+## 3. Milestones, packages, gates
+Each milestone is one workflow. Packages run in parallel where their interfaces allow; a milestone's review pass
+runs last and its findings are fixed before the gate is judged. M(n+1) launches only when M(n) passes (D18).
 
-Since that branch, SwapEngine `main` landed the piecewise-linear W tier (per-Hyman-cell W + rank-k re-take, default routing), ONE row model
-(terms × transform × row map), and `NormalOp` (one pseudo-inverse). Current baselines (fingerprint `966685f93279`): desk_mixed residual (PWL) 4.7 µs,
-Jacobian ~181 µs, **stream tick 551 µs vs desk 22 µs** — the 25× gap is refresh scheduling / kink cycling, not kernel speed.
-
-Rebuild any research probe from the SwapEngine root:
-`xcrun -sdk macosx clang++ -std=c++20 -O3 -DNDEBUG -march=x86-64-v3 -fno-math-errno -w -I include -I third_party/eigen -I build/generated -I bench/fixtures <probe>.cpp -o <probe>`
-(add `-ffp-contract=off` for bit-identity runs).
-
-## 3. The design in one paragraph
-
-Stage computation by rate of change: **structure** (record once, fold), **state** (the compiled program's inputs), **batch** (innermost SIMD axis).
-Maths is written once, templated on `Scalar`; recorded with a `Rec` scalar whose **constants are leaves**; a **signature pass** (hash-cons modulo
-constants) infers **domains** (Knots → Times → Subs → Coupons → Legs → Rows), columns, gather indices, segments and scan recurrences; **fusion
-rewrites R1–R7** (each with an exactness class E0/E1) reproduce every hand fast path (`cpn_is_plain`, `sub_is_identity`, shared `INV`, block GEMV);
-execution is **catalogue (AOT C++) → tiled interpreter → batch mode**, **no JIT**; adjoints are reversed group-by-group with pull-transposes;
-value branches are `select` (mask + margin + arm gap exported), solvers are `implicit` nodes, active sets are `pin` with a solver-owned mask.
-Full text: `docs/DESIGN.md`. Milestones and kill gates: `docs/ROADMAP.md`.
-
-## 4. Open questions for the design review (resolve before M1 starts)
-
-1. **Op set completeness.** Is `scan` enough for compounding/survival/path evolution, or does MC time-stepping need an explicit `step` op with a
-   state vector? Does `quadform` earn its place or should the moment path stay a fallback?
-2. **`Rec` representation.** `{double v; int id}` plus an Eigen `NumTraits`? Do we record Eigen expressions elementwise (simple, large tapes) or
-   intercept `Matrix<Rec>` products as `linmap` directly (smaller tapes, more recorder code)?
-3. **Signature boundaries.** Fan-out > 1 as a boundary may over-fragment; confirm on the M1 book that Times/Coupons/Legs come out as expected.
-4. **Batch-axis layout.** SoA with batch innermost on every domain (row-major grids) — decide tile size (256?) and whether batch width is a
-   compile-time constant per kernel or runtime.
-5. **Catalogue mechanism.** Build-time tool: run reference workloads → hot group signatures → emitted C++ → compiled in. Where does the catalogue
-   live in the tree, and how is coverage reported?
-6. **M1 workload definition.** Flat/linear curve + compounded OIS par swaps, 1k-swap book, single state + batch 64. Fix the exact book so the
-   hand-fused reference and the generic path price the same thing.
-7. **Toolchain & deps.** Proposal (mirrors SwapEngine): C++20, CMake + Ninja, Eigen (header-only), GoogleTest, Google Benchmark, vendored under
-   `third_party/` (gitignored, fetched by a bootstrap script), ISA auto-detect, no Homebrew deps. Confirm.
-8. **License.** SwapEngine is proprietary; nothing added here yet. Decide before the first push if it matters.
-9. **Numerics policy.** Reference TUs built with `-ffp-contract=off` for E0 gates; production may contract. Confirm.
-10. **FMA/select NaN discipline.** `m/|m|` → `copysign`, etc. — list the safe-arm rewrites the maths must use.
-
-## 5. Suggested overnight plan (M1 kill test) — for when the design is settled
-
-Run as a Workflow (multi-agent) with an adversarial review pass; each package has an explicit interface so they can proceed in parallel and meet
-at the gates. Nothing lands on `main` without the gates.
-
-| package | deliverable | interface / gate |
+### M1 — kill test (`WORKLOADS.md` §M1)
+| pkg | deliverable | gate |
 |---|---|---|
-| P0 scaffold | CMake/Ninja skeleton, `third_party` bootstrap, gtest/benchmark wiring, fingerprint script | builds on macOS (Apple clang 21) and Linux/GCC |
-| P1 maths | templated `Scalar` kernel: linear curve, compounded OIS par swap, fixed/float legs; `double` instantiation = oracle | unit tests vs closed forms |
-| P2 recorder | `Rec`, `RecBool`, taint, constants-as-leaves, `select`/`structural_if`, tape + CSE/DCE + fold-sum | records P1 unmodified; tape replay E0 vs `double` under `-ffp-contract=off` |
-| P3 signature pass | hash-cons modulo constants → domain IR (domains, columns, gathers, segments); **round-trip identity** expander | identity on every test book |
-| P4 interpreter | tiled vector interpreter over domain IR groups (no catalogue) | E0 vs P2 replay |
-| P5 hand reference | hand-fused kernel for the same book (gather → fma → segment_sum, shared reciprocal, block GEMV) | E1 vs P4 (≤1e-12 rel) |
-| P6 benchmark | 1k-swap book, single state and batch 64; fingerprinted; load-checked | **go: P4 ≤ 1.3× P5 single-state, ≤ 1.1× batched** |
-| P7 review | adversarial reviewers on P2–P5 (missed branches, hidden allocations, non-determinism), completeness critic | findings fixed or filed |
+| P0 scaffold | CMake/Ninja, presets, bootstrap, fingerprint, gtest/benchmark wiring, CI workflow, layout above | builds + empty test passes on macOS; CI file lints |
+| P1 maths | templated `Scalar` kernel for the M1 book; book generator from seed; `double` instantiation = oracle; `dump` | unit tests vs closed forms; par rates reproduce K/(1+ε) |
+| P2 recorder | `Rec`, `RecBool`, taint, constants-as-leaves, `select`/`structural_if`, node table, CSE/DCE, fold-sum, affine collapse | records P1 unmodified; tape replay E0 vs `double` under reference preset |
+| P3 signature pass | hash-cons modulo constants → domain IR; columns, gathers, segments; expander | **round-trip identity** on the M1 book and on 3 smaller books; expected domain chain appears |
+| P4 interpreter | tiled vector interpreter over IR groups; runtime `B`; tile parameter | E0 vs P2 replay at `B=1`; `B=64` matches 64 single-state runs E0 |
+| P5 hand reference | hand-fused kernel for the same book (gather → fma → segment_sum, shared reciprocal, block GEMV), from `DESIGN.md` only | E1 vs P1 `double` (≤ 1e-12) |
+| P6 benchmark | `B=1` and `B=64`, tile sweep, fingerprint + load, JSON results | **go: P4 ≤ 1.3× P5 single-state, ≤ 1.1× batched** |
+| P7 review | adversarial review of P2–P5: missed branches, hidden allocations, non-determinism, D11 compliance | findings fixed or filed |
+Order: P0 → {P1, P2, P5} → P3 → P4 → P6 → P7. Kill path: > 2× ⇒ up to 3 tile/layout iterations; then M3 before M2.
 
-Order: P0 → {P1, P2, P5} → P3 → P4 → P6 → P7. P5 can start from P1's `double` path immediately.
+### M2 — verification and adjoints (`WORKLOADS.md` §M2)
+| pkg | deliverable | gate |
+|---|---|---|
+| Q1 differential | state-ball tester; E0 under reference preset, E1 under release | passes on M1 book |
+| Q2 forward mode | `Dual` scalar; same maths | tangent vs FD 1e-6 |
+| Q3 adjoint | per-group reverse rules; pull transposes (CSR "who reads me"); `linmapᵀ` | vs FD 1e-6, vs Dual 1e-12 |
+| Q4 mutation | mutation harness + mutants for fold-sum/CSE/affine/expander/adjoint | every mutant caught |
+| Q5 perf gate tooling | baselines per fingerprint, self-regression 1.25×, absolute targets, report | M1 numbers become the baseline |
+| Q6 review | adversarial review of Q3/Q4 | findings fixed or filed |
 
-## 6. Session pointers
+### M3 — rewrites and catalogue (`WORKLOADS.md` §M3)
+| pkg | deliverable | gate |
+|---|---|---|
+| R-a | R1, R2, R3 (uniform columns, buckets, trivial maps) with E0 diff + mutation tests | E0 |
+| R-b | R4a, R4b (push unary through gathers; recip), R5 (group formation) | E0 / E1 |
+| R-c | R6 (materialise at boundaries), R7 (block linmap) | E0 |
+| C1 catalogue generator | hot signatures → C++ → committed; regeneration no-op check in CI; coverage report | catalogued groups ≤ 1.05× hand-fused |
+| C2 review | rewrites reviewed for hidden exactness violations | fixed or filed |
 
-- Cloud session (this handoff): `https://claude.ai/code/session_01TMGoPNGUCq4KpWegJv1i4u` (SwapEngine branch `claude/generic-kernel-tape-3d8m1d`, no changes pushed there).
-- Earlier remote-control session on SwapEngine today ("Curve definition with boundaries", archived 16:52Z): artifacts "SwapsEngine Speed Ledger" and "SwapEngine Generality Review".
+### M4 — curves and calibration (`WORKLOADS.md` §M4)
+| pkg | deliverable | gate |
+|---|---|---|
+| S1 linear schemes | Flat, Linear, NaturalCubic, BSpline as templated maths; collapse to `linmap` | round-trip; linmap recovered |
+| S2 value-dependent | Hermite, MonotoneCubic (Hyman via `select`); mask/margin/arm-gap export | round-trip; select buckets |
+| I1 implicit | `implicit` node; least-squares calibration to the 12 quotes; IFT risk | `‖Jᵀr‖∞ < 1e-12`; IFT vs bump 1e-6 |
+| A1 active set | `pin`, `rank_update`, hysteresis; frozen-Newton streaming | kink 2-cycle fixture: failure shown, then converges ≤ 5 iters |
+| M4 review | | fixed or filed |
+
+### M5 — batch axis, scan, exposure (`WORKLOADS.md` §M5)
+| pkg | deliverable | gate |
+|---|---|---|
+| T1 scan | recurrence detection → `scan` domains; reverse scan adjoint | round-trip on a compounding fixture |
+| T2 parallel | thread pool; Philox RNG; AS241 inverse CDF; fixed-order reductions | bit-identical across threads/tiles |
+| T3 models | Hull–White 1F + LGM sharing the affine kernel; `A`, `B` from the M4 curve | LGM = HW to 1e-12 |
+| T4 grid | exposure grid tables (per-date vs mask measured); EE via `select` | per-path E0 vs scalar reference; EE 1e-12 |
+| T5 bench | 10k × 100 × 1k, 8 threads, fingerprinted | **< 1 s** |
+| M5 review | | fixed or filed |
+
+### MX — stretch: G4 bundle comparison (`WORKLOADS.md` §MX, `ROADMAP.md` §MX, D21) — only after M5 passes
+| pkg | deliverable | gate |
+|---|---|---|
+| X1 research | `docs/G4_BUNDLE.md`: per-currency build characteristics, instruments, conventions, calendars, with sources | reviewed for correctness by a second agent |
+| X2 conventions | calendars, rolls, day counts, lags, IMM as templated-free data + code | unit tests vs published examples |
+| X3 bundle | curves, instruments, joint calibration in EpykosEngine; portfolio + scenarios | calibrates; risk ladder vs bump 1e-6 |
+| X4 compare | SwapEngine built and run as a black box on the same bundle; report under `bench/compare/` | informational table with caveats |
+
+## 4. Environment
+Mac Pro, Xeon W-3223 (16 cores, x86-64-v3 + AVX-512), Apple clang 21, cmake 4.4, ninja 1.13, Docker available for
+Linux/GCC checks. No SwapEngine access for agents.
+
+## 5. Progress log
+(appended by packages as they merge: `date  milestone/pkg  result  commit`)
+
+## 6. Morning report
+Written to the PR description and to §7 below: per milestone, gate results with numbers and fingerprint; kill-path
+decisions taken; open findings; total agent runs.
+
+## 7. State at end of run
+(filled in when the run stops)

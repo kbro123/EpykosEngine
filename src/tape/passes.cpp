@@ -237,40 +237,51 @@ PassResult fold_sum(Tape& tape, FoldSumOptions options) {
   const auto& nodes = old.nodes();
   const std::size_t n_nodes = nodes.size();
 
-  // An Add is an inner chain node when its single use is the left operand of another Add.
-  auto is_inner = [&](node_id x) {
+  // Chain nodes are Add and Sum. The left slot of a chain node is `a` for Add and args[0] for
+  // Sum. An Add or Sum is an inner chain node when its single use is the left slot of another
+  // chain node: Sum(Sum(a, b), c) and (a + b) + c are both ((a + b) + c).
+  auto is_chain_op = [&](node_id x) {
+    const Op op = nodes[idx(x)].op;
+    return op == Op::Add || op == Op::Sum;
+  };
+  auto left_of = [&](node_id x) {
     const Node& n = nodes[idx(x)];
-    if (n.op != Op::Add || uses.count[idx(x)] != 1) return false;
+    return n.op == Op::Sum ? old.args(n)[0] : n.a;
+  };
+  auto is_inner = [&](node_id x) {
+    if (!is_chain_op(x) || uses.count[idx(x)] != 1) return false;
     const node_id u = uses.user[idx(x)];
-    return u != invalid_node && nodes[idx(u)].op == Op::Add && nodes[idx(u)].a == x;
+    return u != invalid_node && is_chain_op(u) && left_of(u) == x;
   };
 
   std::vector<char> absorbed(n_nodes, 0);
   std::vector<std::vector<node_id>> chain(n_nodes);  // head -> addends in fold order
   for (std::size_t i = 0; i < n_nodes; ++i) {
     const node_id o = static_cast<node_id>(i);
-    if (nodes[i].op != Op::Add || is_inner(o)) continue;
-    // o is a chain head: walk the left spine.
+    if (!is_chain_op(o) || is_inner(o)) continue;
+    // o is a chain head: walk the left spine, collecting right-hand addends bottom-up later.
+    std::vector<node_id> spine;
+    for (node_id cur = o;;) {
+      spine.push_back(cur);
+      const node_id left = left_of(cur);
+      if (!is_inner(left)) break;
+      cur = left;
+    }
+    if (nodes[i].op == Op::Sum && spine.size() == 1) continue;  // already a flat Sum
     std::vector<node_id> terms;
-    node_id cur = o;
-    for (;;) {
-      const Node& n = nodes[idx(cur)];
-      terms.push_back(n.b);
-      if (is_inner(n.a)) {
-        cur = n.a;
-        continue;
+    for (std::size_t s = spine.size(); s-- > 0;) {
+      const Node& n = nodes[idx(spine[s])];
+      if (n.op == Op::Sum) {
+        const auto a = old.args(n);
+        for (std::size_t k = (s + 1 == spine.size() ? 0 : 1); k < a.size(); ++k) terms.push_back(a[k]);
+      } else {
+        if (s + 1 == spine.size()) terms.push_back(n.a);
+        terms.push_back(n.b);
       }
-      terms.push_back(n.a);
-      break;
     }
     if (static_cast<int>(terms.size()) < min_terms) continue;
-    std::reverse(terms.begin(), terms.end());
     chain[i] = std::move(terms);
-    node_id inner = nodes[i].a;
-    while (is_inner(inner)) {
-      absorbed[idx(inner)] = 1;
-      inner = nodes[idx(inner)].a;
-    }
+    for (std::size_t s = 1; s < spine.size(); ++s) absorbed[idx(spine[s])] = 1;
   }
 
   Rebuilder rb(old);

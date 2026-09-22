@@ -276,6 +276,31 @@ TEST(FoldSum, MinTermsThreeKeepsLoneAdds) {
   EXPECT_EQ(t[t.outputs()[1]].nargs, 3);
 }
 
+TEST(FoldSum, SingleUseSumInTheLeftSlotIsSplicedAndThePassIsIdempotent) {
+  Tape t;
+  const node_id a = t.input(1.0);
+  const node_id b = t.input(2.0);
+  const node_id c = t.input(3.0);
+  const node_id d = t.input(4.0);
+  const node_id ab[] = {a, b};
+  const node_id inner = t.variadic(Op::Sum, ab);
+  const node_id abc = t.binary(Op::Add, inner, c);   // Sum(a,b) + c
+  const node_id abc_d[] = {abc, d};
+  const node_id outer = t.variadic(Op::Sum, abc_d);  // Sum(Sum(a,b) + c, d)
+  t.output(outer);
+  const PassResult r1 = epykos::fold_sum(t);
+  EXPECT_NO_THROW(t.validate());
+  EXPECT_EQ(r1.changed, 3u);
+  EXPECT_EQ(count_op(t, Op::Sum), 1u) << ops_string(t);
+  EXPECT_EQ(count_op(t, Op::Add), 0u);
+  EXPECT_EQ(args_vec(t, t.outputs()[0]), (std::vector<node_id>{0, 1, 2, 3}));
+  const std::string once = epykos::to_string(t);
+  const PassResult r2 = epykos::fold_sum(t);
+  EXPECT_EQ(r2.changed, 0u);
+  EXPECT_EQ(epykos::to_string(t), once);
+  EXPECT_EQ(epykos::replay(t, t.input_values())[0], 10.0);
+}
+
 TEST(FoldSum, SubIsNotFolded) {
   Tape t;
   {

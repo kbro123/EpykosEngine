@@ -13,8 +13,10 @@
 //                   input ordinals stay stable.
 //   fold_sum        a left-deep Add chain ((x_0 + x_1) + x_2) + ... whose inner Adds have a
 //                   single use becomes one Sum(x_0, x_1, x_2, ...) with the fold order kept.
-//                   By default every Add becomes a Sum (min_terms = 2) so that the signature
-//                   pass sees one op for every segment; set min_terms = 3 to keep lone Adds.
+//                   A single-use Sum in the left slot is spliced in the same way, so
+//                   Sum(Sum(a, b), c) flattens and the pass is idempotent. By default every
+//                   Add becomes a Sum (min_terms = 2) so that the signature pass sees one op
+//                   for every segment; set min_terms = 3 to keep lone Adds.
 //   affine_collapse maximal left-deep Add/Sub/Sum chains whose addends are Inputs, Affine
 //                   nodes, Const nodes or untainted nodes — each optionally scaled by a Const
 //                   (Mul) or negated (Neg) — become one Affine node

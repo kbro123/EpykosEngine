@@ -1,0 +1,241 @@
+# EpykosEngine — Design
+
+Status: **design only** (M0). Nothing here is built yet. Numbers quoted as *measured* come from the SwapEngine research
+branch `research/aad-graph-kernels` and SwapEngine's gated baselines (see `PRIOR_ART.md`); everything else is a target.
+
+---
+
+## 1. Thesis
+
+A financial calculation is a function of inputs that change at three different rates:
+
+| axis | examples | changes | role in the engine |
+|---|---|---|---|
+| **structure** | schedules, curve/vol topology, netting sets, payoff logic | daily / on booking | *compile time*: recorded once, folded away |
+| **state** | quotes, curve knots, model parameters | per tick | *run time*: the inputs of the compiled program |
+| **batch** | scenarios, MC paths, trades sharing a template | never within a run | *lanes*: the innermost, SIMD/GPU axis |
+
+Recording the pricing maths against a fixed structure yields a straight-line program over state. EpykosEngine turns that
+program into a **domain-typed array program** (a few array ops over index spaces such as *times*, *coupons*, *legs*), fuses it
+into a small number of pre-compiled kernels, and derives the adjoint mechanically. No JIT.
+
+What that buys, generically (no per-product code):
+- value, gradient (reverse), Hessian-vector (forward-over-reverse);
+- batching across scenarios/paths/trades;
+- composition: calibration → pricing → exposure → margin as one graph, with calibrations as **implicit nodes**;
+- incremental re-evaluation, lineage, structural diffing, bitwise reproducibility.
+
+The pricing maths is written **once**, as ordinary C++ templated on `Scalar`. It is simultaneously the reference
+implementation (instantiated on `double`) and the source the compiler records.
+
+---
+
+## 2. Pipeline
+
+```
+Blueprint (instruments, curves, models as DATA)
+   │
+   ▼
+Templated maths  ── instantiated on double ──►  reference values (the oracle)
+   │  instantiated on Rec
+   ▼
+Scalar tape      (ops over leaves; constants are leaves, not immediates)
+   │  CSE · DCE · fold-sum (left-deep add chains → variadic SUM) · affine collapse
+   ▼
+Signature pass   (hash-cons modulo constants → isomorphism classes)
+   │
+   ▼
+Domain IR        (domains = index spaces; columns = varying constants; gathers = cross-domain operands;
+   │              segments = SUM children; scan domains = loop-carried recurrences)
+   │  rewrites (§6)
+   ▼
+Fused groups     (one iteration domain each; gathers in, segment-sum epilogue out)
+   │
+   ├─► tier 1: catalogue kernel (AOT-generated C++, matched by group signature)
+   ├─► tier 2: tiled vector interpreter (per-op dispatch amortised over a tile; intermediates in L1)
+   └─► tier 3: batch mode (batch axis innermost: each element is a SIMD vector of scenarios)
+   │
+   ▼
+Adjoint          (each group reversed op-by-op; scatters turned into pulls via precomputed transposes;
+                  the same rewrites and tiers apply)
+   │
+   ▼
+Solver layer     (implicit / pin / rank_update: calibration, streaming, active sets)
+```
+
+---
+
+## 3. The op set
+
+An op earns primitive status only if it has at least one of: **(a)** an adjoint cheaper than differentiating its
+insides, **(b)** a dedicated vector kernel, **(c)** semantics the rest of the system needs (linearity, a mask, implicitness).
+Domain operations (`discount`, `par_rate`, `annuity`, `leg_pv`) are **not** ops: they are compositions the fusion pass
+recognises.
+
+### 3.1 Pricing graph (state → model quantities)
+
+| op | semantics | adjoint | why primitive |
+|---|---|---|---|
+| `linmap` | `y = W·x`, W block-sparse, structure-only | `Wᵀ` | every linear interpolation scheme, spread ancestry and turn window lowers to it; its Jacobian is W itself; batch turns GEMV into GEMM |
+| `ew` (elementwise) | `add sub mul div neg exp log sqrt recip fma …` within one domain | local rules | the arithmetic; fused, never dispatched per element |
+| `gather` | `y[i] = v[idx[i]]` across domains | scatter-add, executed as a pull (§7) | all instrument structure reduces to index arrays = data |
+| `segment_sum` | ragged reduce fine → coarse by offsets | broadcast | sub-period → coupon → leg → row → portfolio |
+| `scan` | cumulative `⊕` along a sequence (product, sum, affine step) | reverse scan | compounding, survival, path evolution |
+| `quot` | `a / b` with a fused quotient-rule adjoint | 2-line rule | par rate / par spread without per-kind partials |
+| `quadform` | `½·xᵀQx` | `Q·x` | moment-integrated averaging (the one non-DF shape) |
+| `select` | `c ? a : b`, c value-dependent; both arms computed | adjoint of the selected arm | value branches; exports mask + margin + arm gap |
+| `smooth_step` | smoothed indicator of width ε | analytic | digitals/barriers; ε is a graph parameter (bias reportable) |
+| `frozen(v, guard)` | value fixed at record time; guard checked each replay | zero (stop-gradient) | LSM exercise boundaries, adaptive grids |
+
+### 3.2 Solver layer (quotes → state)
+
+| op | semantics | why primitive |
+|---|---|---|
+| `implicit(F)` | forward: any solver, untaped; backward: `dx/dp = −F_x⁺ F_p` at the solution | calibrations, implied vols, yields, regressions; tape length independent of iterations |
+| `pin(v, edge, mask)` | clamp to an edge while an **externally owned** mask says so | band edges and interpolation kinks as one active-set mechanism, with hysteresis; the graph stays pure |
+| `rank_update` | rank-k update of a factored operator | a mask flip costs a rank-k update, not a refresh |
+| `row_map` | per-row transform after accumulation, depending on the live quote (`band`, `log`, …) | depends on q, which is not state |
+
+`select` vs `pin`: the **value** owns a `select`'s mask; the **solver** owns a `pin`'s mask. That distinction is what
+removes Newton 2-cycles at kinks (see `PRIOR_ART.md`, desk_mixed).
+
+---
+
+## 4. Recording
+
+- **`Rec`** is an operator-overloading scalar: `{double v; int id}`, plus an Eigen `NumTraits` specialisation.
+- **Constants are leaves.** `0.25*y` records `mul(const#17, y)`. Eager constant folding into op immediates is forbidden:
+  it makes every coupon unique and defeats domain inference. Folding of *uniform* columns happens later, in §6.
+- **No implicit conversion to `double`.** Comparisons return `RecBool`, which does not convert to `bool`, so
+  `if (a < b)` on active values fails to compile. The maths must write `select(c, a, b)` or
+  `structural_if(c)` (which throws at record time if `c` depends on an input).
+- **Taint.** Every value carries "depends on input". `.value()` on a tainted value throws in record mode.
+- **Overloads.** `max/min/abs` on `Rec` record `select`; a lint forbids `std::max` on a `Scalar`.
+- **Provenance side table** (optional): `(op → template call site, instrument, row)` for debugging.
+- **Scope markers** (optional hints): `EPY_DOMAIN(s, "coupon", i)` — no-ops for `double`; the signature pass verifies them.
+
+---
+
+## 5. Domain inference (the signature pass)
+
+1. Record with constants as leaves.
+2. Fold left-deep `add` chains whose inner nodes have a single use into a variadic `SUM` (left-fold order preserved →
+   bit-identical).
+3. Hash-cons modulo constants: `sig(n) = H(op, sig(operands), const_slot_pattern)`, commutative operands canonically
+   ordered. Boundaries: fan-out > 1, `SUM`, `linmap` outputs, inputs.
+4. Partition by signature: domain = class; rows = instances; constant slots = columns; operands in another domain =
+   gather indices; `SUM` children = segment offsets.
+5. Column classification: identical across instances → literal (folded); varying → data column.
+6. **Recurrence detection:** if instances of one class depend on each other, the domain is a `scan` (sequential along
+   the chain; parallel only across the batch axis).
+7. **Round-trip check:** expand the domain IR back to a scalar tape and compare node-for-node with the recording.
+   Identity, not tolerance.
+
+Expected outcome on a rates book: `Knots —linmap→ Times —exp→ DF —gather→ Subs —segment_sum→ Coupons —segment_sum→ Legs →
+Rows`, with buckets (e.g. coupons with a realised fixing) falling out as separate signatures.
+
+Across recordings the signature → domain map persists: a new trade of a known shape adds rows, not code.
+
+---
+
+## 6. Fusion rewrites
+
+Applied in order. Each has an **exactness class**: *E0* bit-identical, *E1* ≤ 1 ulp per op (tolerance-gated).
+
+| # | rule | class | recovers (in SwapEngine terms) |
+|---|---|---|---|
+| R1 | fold uniform columns (`k==1`, `konst==0`, `w==1`) | E0 | `cpn_is_plain` |
+| R2 | bucket rows by uniform-column signature | E0 | per-kind batches |
+| R3 | elide trivial maps (length-1 segments, identity gathers ⇒ merge domains) | E0 | `sub_is_identity` |
+| R4a | push pure unary ops through gathers toward the smaller domain, then CSE (`exp`) | E0 | `exp` once per time |
+| R4b | same for `recip` (`a/b → a·recip(b)`) | E1 | shared `INV` |
+| R5 | group formation: maximal elementwise region per domain; gathers in; segment-sum epilogue | E0 | fused coupon→leg loop |
+| R6 | materialise only at domain boundaries (before `linmap`, at reductions, on profitable fan-out) | E0 | "materialise before a sparse reduce" (a measured 1.28× trap becomes unrepresentable) |
+| R7 | block `linmap` by the column span its rows read | E0 | per-curve block GEMV |
+
+Flip classification (from measured degenerate-tie flips): a `select`/guard flip is significant only if the **arm gap**
+exceeds a threshold, never on the bit alone.
+
+---
+
+## 7. Execution tiers
+
+1. **Catalogue.** Each fused group has a canonical signature. A build-time tool runs the reference workloads, collects hot
+   signatures, emits C++, and compiles it into the engine. AOT code generation, not a JIT.
+2. **Tiled interpreter.** For uncatalogued groups: run the group's ops one at a time over a tile (~256 elements) with
+   intermediates in an L1 scratch — dispatch per op per tile, not per element (the X100/DuckDB model).
+3. **Batch mode.** Batch axis innermost on every domain; each element is a SIMD vector of scenarios, so the interpreter's
+   dispatch amortises over the batch as well as the tile.
+
+Adjoints (§3 rules applied group by group in reverse): scatter-add is replaced by a **pull** through the precomputed
+transpose of each index array (CSR "who reads me"), so adjoint groups are conflict-free gathers and vectorise. At the
+`Times` boundary `linmapᵀ` gives `−(G·diag(DF))·W` — the analytic calibration Jacobian, derived.
+
+---
+
+## 8. Value-dependent behaviour
+
+| class | example | treatment |
+|---|---|---|
+| A structural | region lookup, schedule shape, turn windows | folded at record time; a change is a re-record |
+| B limiter (min/max/abs/sign) | Hyman monotonicity filter | `select`; mask + margin + arm gap exported; kinks become an active set in the solver via `pin` |
+| C formula selection on a quote | Huber bid/offer band | outside the pricing graph: `row_map` + solver active set |
+| D iterative / implicit | yield, implied vol, calibration, regressions | `implicit`; never unrolled |
+| E discrete argmin | bond-future CTD | `select` over a small candidate set, or a `frozen` index with a guard |
+| F discontinuous payoff | digital, barrier | conditional one-step survival (Brownian bridge) where available, else `smooth_step`; vibrato MC when bias is unacceptable |
+| G early exercise | Bermudan (LSM) | regression β `frozen`, exercise as `select` on the frozen rule (envelope theorem ⇒ first-order Greeks exact); low-dim via a fixed-grid PDE |
+| H adaptive numerics | adaptive quadrature/ODE/PDE grids | freeze the grid as structure; a-posteriori error estimate as a guard; or fixed high-order rules |
+
+---
+
+## 9. Structure churn
+
+- Record per **template**, with trade data (notionals, rates, year fractions, gather indices) as table **inputs**.
+- New trade of a known template: append a row. Date roll: times are data; kernels unchanged; segment indices recomputed at
+  table build. Fixings: a coupon row moves between buckets in O(1).
+- New structure: re-record (ms) off-thread; diff signatures against the persistent map; swap atomically.
+- Cache layers: topology (daily) → trade tables (intraday) → state (tick).
+
+---
+
+## 10. Numerics and determinism
+
+- FMA contraction changes bits. Reference TUs used for bit-identity gates build with `-ffp-contract=off`; production builds
+  may contract, and gates then use E1 tolerances.
+- Every rewrite declares its exactness class; the verifier applies the matching tolerance.
+- `select` evaluates both arms: arms must be NaN-safe (safe-arm discipline; e.g. `m/|m|` → `copysign`).
+- No `-ffast-math`.
+
+---
+
+## 11. Verification
+
+Correctness gates:
+- **round-trip identity** of domain IR vs recording (§5.7);
+- **differential**: compiled vs templated-`double` at randomised state in a ball around the record point (E0 exact under
+  `-ffp-contract=off`, else E1 tolerance); this also catches missed branches;
+- **adjoint** vs central finite difference and vs forward mode;
+- **mutation testing** on rewrite rules (a mutated rule must fail a gate);
+- **external oracles** (QuantLib and others) added per product, test-only.
+
+Performance gates: per machine+toolchain fingerprint; fail on > 1.25× self-regression or an absolute target miss.
+Reference implementations (QuantLib, hand-fused kernels) are informational tables, never the gate.
+
+---
+
+## 12. Where this is expected to be weak
+
+- **Irregular code with a batch axis** (scripted exotics): low catalogue coverage → interpreter-bound; a JIT (AADC-style)
+  likely wins by 1.3–2× (estimate).
+- **Recurrences** need scan-domain detection, unprototyped.
+- **Brownfield**: requires `Scalar`-templated maths; cannot accelerate an existing OO library.
+- **Compiler risk**: bugs are wrong numbers, not crashes. The verification harness precedes the compiler.
+- **Linear-path parity**: the generic path must match a hand-fused kernel; the scalar tape measured 1.5–2.5× behind. M1
+  exists to settle this.
+- **Adjoint MC at scale** (checkpointing, per-thread accumulators) is unbuilt.
+
+## 13. Non-goals
+
+- A runtime JIT (revisit only if M1/M3 show the catalogue cannot close the gap).
+- Accelerating third-party OO libraries.
+- A GUI or web layer in this repository.

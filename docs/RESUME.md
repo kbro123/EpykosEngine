@@ -108,6 +108,7 @@ Linux/GCC checks. No SwapEngine access for agents.
 
 ## 5. Progress log
 (appended by packages as they merge: `date  milestone/pkg  result  commit`)
+2026-09-22  M1/P2 recorder  landed: Rec/RecBool, Tape, cse/dce/fold_sum/affine_collapse (E0), Replayer; 6/6 tests pass in release, reference and debug  498afc8
 
 ## 6. Morning report
 Written to the PR description and to §7 below: per milestone, gate results with numbers and fingerprint; kill-path

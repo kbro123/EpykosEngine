@@ -16,6 +16,7 @@
 // the count of ill-conditioned swap-states where the literal check cannot hold is reported.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -191,14 +192,35 @@ TEST(M1Hand, Structure) {
   // Unique times: {0} ∪ every coupon end; far fewer than rows (exp once per time).
   EXPECT_GT(k.n_times(), 30);
   EXPECT_LT(k.n_times(), book().n_rows / 4);
-  const std::vector<double>& t = k.times();
+  // Times are numbered in first-use order, so they are a permutation of the sorted unique times.
+  std::vector<double> t = k.times();
   ASSERT_EQ(static_cast<int>(t.size()), k.n_times());
+  std::sort(t.begin(), t.end());
   EXPECT_EQ(t.front(), 0.0);
-  for (std::size_t u = 1; u < t.size(); ++u) EXPECT_LT(t[u - 1], t[u]);
+  for (std::size_t u = 1; u < t.size(); ++u) EXPECT_LT(t[u - 1], t[u]);  // unique
   EXPECT_EQ(k.max_batch(), 64);
-  EXPECT_EQ(k.lane_tile(), 8);
+  EXPECT_EQ(k.lane_tile(), 32);
+  // The processing order is a permutation of the swaps, grouped by (tenor, seasoned): at most
+  // 30 tenors × 2, and the seasoned swaps (i < 200) never share a group with the others.
+  const std::vector<int>& order = k.swap_order();
+  ASSERT_EQ(order.size(), 1000u);
+  std::vector<int> seen(1000, 0);
+  for (int i : order) {
+    ASSERT_GE(i, 0);
+    ASSERT_LT(i, 1000);
+    ++seen[static_cast<std::size_t>(i)];
+  }
+  for (int c : seen) EXPECT_EQ(c, 1);
+  EXPECT_GT(k.n_groups(), 30);
+  EXPECT_LE(k.n_groups(), 60);
+  int groups = 1;
+  for (std::size_t pos = 1; pos < order.size(); ++pos) {
+    const std::size_t a = static_cast<std::size_t>(order[pos - 1]), b = static_cast<std::size_t>(order[pos]);
+    if (book().tenor[a] != book().tenor[b] || book().seasoned[a] != book().seasoned[b]) ++groups;
+  }
+  EXPECT_EQ(groups, k.n_groups());
   std::cout << "hand tables: " << k.n_times() << " unique times, " << k.n_plain_rows() << " plain rows, "
-            << k.n_float_rows() << " float rows\n";
+            << k.n_float_rows() << " float rows, " << k.n_groups() << " (tenor, seasoned) groups\n";
 }
 
 TEST(M1Hand, GateDefaultOptions) {

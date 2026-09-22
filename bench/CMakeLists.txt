@@ -9,6 +9,7 @@
 #   * The build-all target builds them; pass -DEPYKOS_BUILD_BENCH=OFF to skip.
 
 file(GLOB_RECURSE EPYKOS_BENCH_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*_bench.cpp")
+list(FILTER EPYKOS_BENCH_SOURCES EXCLUDE REGEX "/\\.[^/]*$")  # no dot-prefixed files
 
 foreach(_src IN LISTS EPYKOS_BENCH_SOURCES)
   file(RELATIVE_PATH _rel "${CMAKE_CURRENT_SOURCE_DIR}" "${_src}")

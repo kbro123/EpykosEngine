@@ -125,6 +125,9 @@ endif()
 # ---------------------------------------------------------------------------------------------
 file(GLOB_RECURSE EPYKOS_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.cpp")
 file(GLOB_RECURSE EPYKOS_HEADERS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/include/epykos/*.hpp")
+# Ignore dot-prefixed files (editor backups, macOS "._" AppleDouble sidecars on copied trees).
+list(FILTER EPYKOS_SOURCES EXCLUDE REGEX "/\\.[^/]*$")
+list(FILTER EPYKOS_HEADERS EXCLUDE REGEX "/\\.[^/]*$")
 
 add_library(epykos STATIC ${EPYKOS_SOURCES} ${EPYKOS_HEADERS})
 add_library(epykos::epykos ALIAS epykos)

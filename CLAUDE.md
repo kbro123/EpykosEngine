@@ -30,12 +30,22 @@ without the owner.
 
 ## Build
 ```
-scripts/bootstrap.sh            # fetch pinned third_party (Eigen, GoogleTest, Google Benchmark)
+scripts/bootstrap.sh            # fetch pinned third_party (Eigen 3.4.0, GoogleTest 1.18.0, Google Benchmark 1.9.5)
 cmake --preset release && cmake --build --preset release
 ctest --preset release
-cmake --preset reference        # -ffp-contract=off build for E0 gates
+cmake --preset reference        # -ffp-contract=off build for E0 gates (then build/ctest --preset reference)
+cmake --preset debug            # -O0 -g
 ```
-Flags per D13. Fingerprint: `scripts/fingerprint.sh`.
+Presets build into `build/<preset>/`. Flags per D13; the `-march=x86-64-v3` flag is dropped on non-x86-64 hosts (the
+arm64 CI runner) and `build/<preset>/epykos_flags.txt` / `epykos::build_flags()` state the flags actually used.
+Fingerprint: `scripts/fingerprint.sh`.
+
+Adding code needs no CMake edits (all globs are `CONFIGURE_DEPENDS`): headers under `include/epykos/**` and sources
+under `src/**/*.cpp` compile into the library `epykos`; `tests/**/<name>_test.cpp` becomes the gtest executable and
+ctest entry `<subdir>_<name>_test`; `bench/**/<name>_bench.cpp` becomes a Google Benchmark executable (built, never
+run by ctest or CI). **Tests named `*_e0_test.cpp` are compiled with `-ffp-contract=off` in every preset** (label
+`e0`, `ctest -L e0`): that is how E0 gates get the reference flags. Only that TU is contraction-free; an E0 gate that
+also crosses into code compiled in `src/` runs under the reference preset.
 
 ## Commits
 `type(scope): summary`, type ∈ `feat|perf|fix|test|bench|refactor|build|docs|chore`. `perf` commits include measured

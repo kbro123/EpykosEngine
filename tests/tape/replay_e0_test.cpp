@@ -16,6 +16,7 @@
 #include "epykos/tape/passes.hpp"
 #include "epykos/tape/replay.hpp"
 #include "epykos/tape/tape.hpp"
+#include "tape/mini_book.hpp"
 #include "tape/tape_test_helpers.hpp"
 
 #ifndef EPYKOS_FP_CONTRACT_OFF
@@ -29,6 +30,12 @@ using epykos::Replayer;
 using epykos::Tape;
 using epykos::test::bits;
 using epykos::test::count_op;
+using epykos::test::eval_mini_book_double;
+using epykos::test::kMiniKnots;
+using epykos::test::mini_book;
+using epykos::test::mini_states;
+using epykos::test::MiniSwap;
+using epykos::test::record_mini_book;
 using epykos::test::ops_string;
 using epykos::test::SplitMix64;
 
@@ -76,132 +83,6 @@ Scalar hand_function(Scalar x, Scalar y, Scalar z) {
   Scalar t = select(x >= y, s, s - 1.0);
   Scalar u = select(x == y, t, t * 0.5);
   return (((u + a) + b) + c) + d;    // a left-deep add chain
-}
-
-// ---- a small Scalar-templated book (this package's own, not the P1 maths) -------------------------
-
-constexpr int kKnots = 12;
-constexpr std::array<double, kKnots> kKnotTimes = {7.0 / 365.0, 1.0 / 12.0, 0.25, 0.5, 1.0, 2.0,
-                                                   3.0, 5.0, 7.0, 10.0, 20.0, 30.0};
-
-template <class Scalar>
-struct MiniCurve {
-  std::array<Scalar, kKnots> z;
-
-  // Linear in t between knots, flat beyond both ends. The bracket search is structural: t is data.
-  Scalar zero(double t) const {
-    if (t <= kKnotTimes[0]) return z[0];
-    if (t >= kKnotTimes[kKnots - 1]) return z[kKnots - 1];
-    int k = 0;
-    while (kKnotTimes[k + 1] < t) ++k;
-    const double w = (t - kKnotTimes[k]) / (kKnotTimes[k + 1] - kKnotTimes[k]);
-    return z[k] * (1.0 - w) + z[k + 1] * w;
-  }
-  Scalar df(double t) const {
-    if (t == 0.0) return Scalar(1.0);
-    return exp(-zero(t) * t);
-  }
-};
-
-struct MiniSwap {
-  int tenor;         // years
-  double notional;
-  double side;       // +1 receive fixed, -1 pay fixed
-  double fixed_rate;
-  int start_day;     // <= 0
-  double realised;   // first-period compounded rate when seasoned (start_day < 0)
-};
-
-template <class Scalar>
-Scalar mini_swap_pv(const MiniCurve<Scalar>& curve, const MiniSwap& s) {
-  using epykos::select;
-  Scalar fixed = 0.0;
-  Scalar floating = 0.0;
-  int prev = s.start_day;
-  for (int j = 1; j <= s.tenor; ++j) {
-    const int end = s.start_day + static_cast<int>(std::lround(365.25 * j));
-    const double tau = (end - prev) / 360.0;
-    const double ts = prev / 365.0;
-    const double te = end / 365.0;
-    const Scalar dfe = curve.df(te);
-    fixed = fixed + s.notional * tau * s.fixed_rate * dfe;
-    Scalar fwd;
-    if (prev < 0) {
-      fwd = Scalar(s.realised);  // structural: the seasoned first coupon carries a fixing
-    } else {
-      const Scalar dfs = curve.df(ts);
-      fwd = (dfs / dfe - 1.0) / tau;
-    }
-    floating = floating + s.notional * tau * fwd * dfe;
-    prev = end;
-  }
-  const Scalar pv = s.side * (fixed - floating);
-  // A value branch: floor the pv of pay-fixed swaps at -1e9 (nonsense, but exercises select).
-  return select(pv < -1e9, Scalar(-1e9), pv);
-}
-
-std::vector<MiniSwap> mini_book(int n) {
-  SplitMix64 rng(20260922);
-  std::vector<MiniSwap> book;
-  for (int i = 0; i < n; ++i) {
-    MiniSwap s;
-    s.tenor = 1 + static_cast<int>(rng.next() % 30);
-    s.notional = std::exp(rng.uniform(std::log(1e6), std::log(1e8)));
-    s.side = (rng.next() & 1) ? 1.0 : -1.0;
-    s.fixed_rate = rng.uniform(0.03, 0.05);
-    s.start_day = (i % 5 == 0) ? -static_cast<int>(30 + rng.next() % 271) : 0;
-    s.realised = rng.uniform(0.035, 0.045);
-    book.push_back(s);
-  }
-  return book;
-}
-
-// Evaluates the book: n swap pvs then the book pv.
-template <class Scalar>
-std::vector<Scalar> mini_book_pv(const MiniCurve<Scalar>& curve, const std::vector<MiniSwap>& book) {
-  std::vector<Scalar> out;
-  Scalar total = 0.0;
-  for (const MiniSwap& s : book) {
-    const Scalar pv = mini_swap_pv(curve, s);
-    out.push_back(pv);
-    total = total + pv;
-  }
-  out.push_back(total);
-  return out;
-}
-
-const std::array<double, kKnots> kRecordState = {0.0400, 0.0405, 0.0410, 0.0415, 0.0420, 0.0410,
-                                                 0.0400, 0.0395, 0.0400, 0.0410, 0.0430, 0.0440};
-
-std::vector<std::array<double, kKnots>> mini_states(int n) {
-  std::vector<std::array<double, kKnots>> states;
-  SplitMix64 rng(100000);
-  for (int b = 0; b < n; ++b) {
-    std::array<double, kKnots> s = kRecordState;
-    if (b > 0) {
-      for (double& z : s) z += rng.uniform(-0.003, 0.003);
-    }
-    states.push_back(s);
-  }
-  return states;
-}
-
-// Records the book: inputs are the 12 knots, outputs the swap pvs and the book pv.
-Tape record_mini_book(const std::vector<MiniSwap>& book) {
-  Tape t;
-  Tape::Scope scope(t);
-  MiniCurve<Rec> curve;
-  for (int k = 0; k < kKnots; ++k) curve.z[k] = epykos::make_input(kRecordState[k]);
-  const std::vector<Rec> out = mini_book_pv(curve, book);
-  for (const Rec& r : out) epykos::register_output(r);
-  return t;
-}
-
-std::vector<double> eval_mini_book_double(const std::array<double, kKnots>& state,
-                                          const std::vector<MiniSwap>& book) {
-  MiniCurve<double> curve;
-  curve.z = state;
-  return mini_book_pv(curve, book);
 }
 
 void expect_bits_equal(const std::vector<double>& a, const std::vector<double>& b, const char* what) {
@@ -450,12 +331,12 @@ TEST(MiniBookE0, RecordingReplaysBitIdenticalToDoubleAndSurvivesAllPasses) {
   const std::vector<MiniSwap> book = mini_book(50);
   Tape t = record_mini_book(book);
   EXPECT_NO_THROW(t.validate());
-  ASSERT_EQ(t.num_inputs(), static_cast<std::size_t>(kKnots));
+  ASSERT_EQ(t.num_inputs(), static_cast<std::size_t>(kMiniKnots));
   ASSERT_EQ(t.num_outputs(), book.size() + 1);
   EXPECT_GE(count_op(t, Op::Select), book.size());
   EXPECT_GE(count_op(t, Op::Exp), 1u);
 
-  const std::vector<std::array<double, kKnots>> states = mini_states(64);
+  const std::vector<std::array<double, kMiniKnots>> states = mini_states(64);
   std::vector<std::vector<double>> oracle;
   for (const auto& s : states) oracle.push_back(eval_mini_book_double(s, book));
 

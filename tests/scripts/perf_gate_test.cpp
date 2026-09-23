@@ -5,6 +5,12 @@
 // evaluated, and the summariser computes min / median / p90 as documented. The scripts are Python 3
 // standard library (D29); the test skips when no python3 is on the PATH.
 //
+// M2/m2-fix (D34): a baseline entry is keyed by the run name, and bench/run.sh derives that name from
+// the binary unless --name overrides it, so an entry seeded under an ad hoc name gates nothing a
+// default invocation produces. The committed results are checked for that (every baseline run keyed
+// by its derived name, its <run>.json present and gated), the refusal names the entry holding the
+// same binary, and --accept records the run's arguments so a filtered baseline states its filter.
+//
 // The repository root is derived from this file's compile-time path (CMake passes absolute source
 // paths), or from EPYKOS_SOURCE_DIR when set.
 #include <gtest/gtest.h>
@@ -72,6 +78,7 @@ using Medians = std::vector<std::pair<std::string, double>>;
 
 struct RunSpec {
   std::string name = "run";
+  std::string binary;  // default build/release/bench/<name>_bench: the binary run.sh derives <name> from
   std::string fp = "aaaaaaaaaaaa";
   int cores = 16;
   double load_before = 2.0;
@@ -85,8 +92,9 @@ struct RunSpec {
 std::string run_json(const RunSpec& r) {
   std::ostringstream s;
   s.precision(17);
-  s << "{\"format\": \"epykos-bench 1\", \"name\": \"" << r.name << "\", \"binary\": \"build/release/bench/" << r.name
-    << "_bench\", \"args\": [\"--benchmark_repetitions=5\", \"--benchmark_min_time=0.01s\"], \"preset\": \"release\",\n"
+  const std::string binary = r.binary.empty() ? "build/release/bench/" + r.name + "_bench" : r.binary;
+  s << "{\"format\": \"epykos-bench 1\", \"name\": \"" << r.name << "\", \"binary\": \"" << binary
+    << "\", \"args\": [\"--benchmark_repetitions=5\", \"--benchmark_min_time=0.01s\"], \"preset\": \"release\",\n"
     << " \"date\": \"2026-09-23T10:00:00+01:00\", \"git\": {\"commit\": \"" << r.commit << "0000000000000000000000000000000000\", \"commit_short\": \""
     << r.commit << "\", \"branch\": \"test\", \"dirty\": false},\n"
     << " \"fingerprint\": {\"id\": \"" << r.fp << "\", \"cpu\": \"synthetic\", \"cores_physical\": " << r.cores / 2 << ", \"cores_logical\": " << r.cores
@@ -284,6 +292,8 @@ TEST_F(PerfGateTest, NoBaselineRefusedUntilAccepted) {
   EXPECT_TRUE(has(b, "\"epykos-baseline 1\"")) << b;
   EXPECT_TRUE(has(b, "\"aaaaaaaaaaaa\"")) << b;
   EXPECT_TRUE(has(b, "\"BM_A\"")) << b;
+  EXPECT_TRUE(has(b, "\"binary\": \"build/release/bench/run_bench\"")) << b;
+  EXPECT_TRUE(has(b, "\"--benchmark_repetitions=5\"")) << b;  // the run's arguments: a filtered baseline states its filter (D34)
   EXPECT_TRUE(has(c.out, "baseline updated")) << c.out;
   EXPECT_TRUE(has(c.out, "(new @abc1234)")) << c.out;
 
@@ -299,6 +309,94 @@ TEST_F(PerfGateTest, NoBaselineRefusedUntilAccepted) {
   EXPECT_TRUE(has(c.out, "1 regression(s) accepted")) << c.out;
   EXPECT_EQ(gate({p2}).exit, 0);  // the new baseline
   EXPECT_EQ(gate({p}).exit, 0);   // and the old run is now "faster", not a failure
+}
+
+// A baseline seeded under an ad hoc `bench/run.sh --name` does not gate the default invocation of the
+// same binary: the run under the derived name is refused, and the refusal names the entry (D34; the
+// M2 gate round had seeded adjoint_m1_adjoint_bench's rows as run "m2").
+TEST_F(PerfGateTest, NoBaselineRefusalNamesTheEntryOfTheSameBinary) {
+  RunSpec adhoc;
+  adhoc.name = "m2";
+  adhoc.binary = "build/release/bench/adjoint_bench";
+  adhoc.medians = {{"BM_A", 100.0}};
+  ASSERT_EQ(gate({write_run(adhoc)}, "--accept").exit, 0);
+
+  RunSpec derived;  // what `bench/run.sh build/release/bench/adjoint_bench` writes
+  derived.name = "adjoint";
+  derived.binary = adhoc.binary;
+  derived.medians = {{"BM_A", 100.0}};
+  const fs::path p = write_run(derived);
+  Cmd c = gate({p});
+  EXPECT_EQ(c.exit, 2) << c.out;
+  EXPECT_TRUE(has(c.out, "no baseline for run(s) adjoint")) << c.out;
+  EXPECT_TRUE(has(c.out, "the baseline holds this binary under the run name(s) m2")) << c.out;
+  EXPECT_TRUE(has(c.out, "re-seed under adjoint")) << c.out;
+
+  // A different binary under another name is not confused with it.
+  RunSpec other;
+  other.name = "other";
+  other.medians = {{"BM_A", 100.0}};
+  c = gate({write_run(other)});
+  EXPECT_EQ(c.exit, 2) << c.out;
+  EXPECT_FALSE(has(c.out, "holds this binary")) << c.out;
+
+  // Re-seeded under the derived name, the default invocation is gated.
+  ASSERT_EQ(gate({p}, "--accept").exit, 0);
+  c = gate({p});
+  EXPECT_EQ(c.exit, 0) << c.out;
+  EXPECT_FALSE(has(c.out, "no baseline entry")) << c.out;
+  EXPECT_TRUE(has(c.out, "1 compared: 1 ok")) << c.out;
+}
+
+// The committed results (bench/results/<id>/): every run in a baseline.json is keyed by the name
+// bench/run.sh derives from its binary (basename without _bench), so the default invocation is what
+// the baseline gates; its <run>.json is committed under that name, carries it, and is gated against
+// the entry (a PASS or a FAIL, never a refusal). Regression test for the M2/m2-fix finding: the
+// adjoint rows had been seeded as run "m2" while run.sh names the run adjoint_m1_adjoint (D34).
+TEST_F(PerfGateTest, CommittedBaselinesAreKeyedByTheDerivedRunName) {
+  const fs::path committed = root / "bench" / "results";
+  ASSERT_TRUE(fs::is_directory(committed)) << committed;
+  int baselines = 0, runs_checked = 0;
+  for (const auto& e : fs::directory_iterator(committed)) {
+    if (!e.is_directory() || !fs::exists(e.path() / "baseline.json")) continue;
+    const std::string id = e.path().filename().string();
+    ASSERT_EQ(id.size(), 12u) << e.path();  // a fingerprint directory
+    ++baselines;
+    // One line per run: "<key> <baseline binary> <source>", after the baseline's fingerprint id.
+    Cmd c = run("python3 -c " + q(std::string("import json, sys\nb = json.load(open(sys.argv[1]))\nprint(b['fingerprint']['id'])\n"
+                                              "for k, v in b['runs'].items(): print(k, v.get('binary'), v.get('source'))\n")) +
+                " " + q(e.path() / "baseline.json"));
+    ASSERT_EQ(c.exit, 0) << c.out;
+    std::istringstream lines(c.out);
+    std::string line;
+    ASSERT_TRUE(std::getline(lines, line));
+    EXPECT_EQ(line, id) << "baseline.json under " << e.path() << " carries fingerprint " << line;
+    while (std::getline(lines, line)) {
+      std::istringstream f(line);
+      std::string key, binary, source;
+      f >> key >> binary >> source;
+      SCOPED_TRACE(e.path().string() + " run " + key);
+      std::string derived = fs::path(binary).filename().string();
+      if (derived.size() > 6 && derived.substr(derived.size() - 6) == "_bench") derived.resize(derived.size() - 6);
+      EXPECT_EQ(key, derived) << "baseline run '" << key << "' is not the name bench/run.sh derives from " << binary
+                              << ": a default `bench/run.sh " << binary << "` would be refused, not gated (D34)";
+      EXPECT_EQ(source, key + ".json");
+      const fs::path file = e.path() / (key + ".json");
+      ASSERT_TRUE(fs::exists(file)) << "the committed results file of baseline run " << key << " is missing";
+      c = run("python3 -c " + q(std::string("import json, sys\nd = json.load(open(sys.argv[1]))\nprint(d['name'], d['binary'])\n")) + " " + q(file));
+      ASSERT_EQ(c.exit, 0) << c.out;
+      EXPECT_EQ(c.out, key + " " + binary + "\n") << file;
+      // Gated, never refused: no baseline / load / fingerprint refusal on the committed pair.
+      c = run("python3 " + q(scripts / "perf_gate.py") + " --results-root " + q(committed) + " --fingerprint " + id + " --no-targets " + q(file));
+      EXPECT_TRUE(c.exit == 0 || c.exit == 1) << c.out;
+      EXPECT_FALSE(has(c.out, "REFUSED")) << c.out;
+      EXPECT_FALSE(has(c.out, "no baseline entry for this run")) << c.out;
+      EXPECT_TRUE(has(c.out, "verdict: PASS") || has(c.out, "verdict: FAIL")) << c.out;
+      ++runs_checked;
+    }
+  }
+  EXPECT_GE(baselines, 1) << "no committed baseline under " << committed;  // d448afd70180 is committed
+  EXPECT_GE(runs_checked, 1);
 }
 
 // ---------------------------------------------------------------------------------------------

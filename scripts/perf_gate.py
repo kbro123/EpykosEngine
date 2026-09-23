@@ -31,6 +31,12 @@ Rules:
     baseline median > threshold fails. Benchmarks without a baseline entry are "new"; baseline
     entries not measured this time are "not measured"; neither fails. A ratio below 1/threshold
     is reported as "faster" (accept it in a perf commit so the baseline follows).
+  * Baseline entries are keyed by the run name, which bench/run.sh derives from the binary
+    (<target>_bench -> <target>) unless --name overrides it (D34): a baseline seeded under an ad
+    hoc name gates only a run made under that same name. The refusal for a run without a
+    baseline names any entry that holds the same binary under another name. --accept records
+    the run's Google Benchmark arguments in the entry, so a baseline seeded from a filtered run
+    states its filter; the rows outside it are "new" in a full sweep.
   * Absolute targets: each target names the runs and benchmarks it needs; a side is taken from
     the runs given on the command line, else from the committed <results-root>/<id>/<run>.json
     (it must pass the load rule too). A target is evaluated when every side is available and at
@@ -153,7 +159,18 @@ def load_targets(path: str) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------------------------
 # Self-regression against the baseline
 # ---------------------------------------------------------------------------------------------
-def compare_run(run: Dict[str, Any], base_run: Optional[Dict[str, Any]], threshold: float) -> Dict[str, Any]:
+def same_binary_entries(baseline: Optional[Dict[str, Any]], run: Dict[str, Any]) -> List[str]:
+    """Baseline run names, other than the run's own, whose entry holds the run's binary: a baseline
+    seeded under an ad hoc `bench/run.sh --name` that the default invocation does not reach (D34)."""
+    base = os.path.basename(run.get("binary") or "")
+    if not base or baseline is None:
+        return []
+    return [name for name, e in baseline.get("runs", {}).items()
+            if name != run["name"] and os.path.basename((e or {}).get("binary") or "") == base]
+
+
+def compare_run(run: Dict[str, Any], base_run: Optional[Dict[str, Any]], threshold: float,
+                same_binary: Optional[List[str]] = None) -> Dict[str, Any]:
     rows = []
     base_b = (base_run or {}).get("benchmarks", {})
     counts = {"ok": 0, "regression": 0, "faster": 0, "new": 0, "error": 0, "not_measured": 0}
@@ -184,7 +201,7 @@ def compare_run(run: Dict[str, Any], base_run: Optional[Dict[str, Any]], thresho
                          "unit": base_b[name].get("unit"), "baseline_commit": base_b[name].get("commit")})
             counts["not_measured"] += 1
     return {"run": run["name"], "path": run["_path"], "has_baseline": base_run is not None,
-            "rows": rows, "counts": counts, "threshold": threshold}
+            "same_binary_as": list(same_binary or []), "rows": rows, "counts": counts, "threshold": threshold}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -303,7 +320,11 @@ def accept(baseline: Optional[Dict[str, Any]], runs: List[Dict[str, Any]], fid: 
         entry = baseline["runs"].setdefault(run["name"], {"benchmarks": {}})
         entry.update({"source": os.path.basename(run["_path"]), "binary": run.get("binary"), "preset": run.get("preset"),
                       "commit": git.get("commit_short"), "commit_full": git.get("commit"), "date": run.get("date"),
-                      "accepted": now})
+                      "accepted": now, "args": list(run.get("args") or [])})
+        if run.get("note"):
+            entry["note"] = run["note"]
+        else:
+            entry.pop("note", None)
         for name, b in run["benchmarks"].items():
             if "error" in b:
                 continue
@@ -346,6 +367,9 @@ def render(report: Dict[str, Any]) -> str:
             "ok" if ld.get("within_threshold") else "EXCEEDED", run.get("repetitions"), run.get("min_time")))
         if not c["has_baseline"]:
             L.append("  no baseline entry for this run: self-regression not checked (seed with --accept)")
+            if c.get("same_binary_as"):
+                L.append("  the baseline holds this binary under the run name(s) %s (seeded with bench/run.sh --name): "
+                         "re-run under that name, or re-seed under this one (D34)" % ", ".join(c["same_binary_as"]))
         names = [r["benchmark"] for r in c["rows"]]
         w = max([len(n) for n in names] + [10])
         L.append("  %-*s %12s %12s %7s  %s" % (w, "benchmark", "baseline", "fresh", "ratio", "status"))
@@ -434,7 +458,7 @@ def gate(a: argparse.Namespace) -> Dict[str, Any]:
     # Self-regression.
     for r in runs:
         base_run = (baseline or {}).get("runs", {}).get(r["name"])
-        c = compare_run(r, base_run, a.threshold)
+        c = compare_run(r, base_run, a.threshold, same_binary_entries(baseline, r))
         c["run_info"] = run_info(r)
         report["comparisons"].append(c)
     unbaselined = [c["run"] for c in report["comparisons"] if not c["has_baseline"]]
@@ -457,8 +481,12 @@ def gate(a: argparse.Namespace) -> Dict[str, Any]:
     # Verdict.
     reasons = []
     if unbaselined and not a.accept:
-        report.update({"verdict": "REFUSED", "exit": EXIT_REFUSED,
-                       "reason": "no baseline for run(s) %s on fingerprint %s: seed with --accept in a perf commit" % (", ".join(unbaselined), fid)})
+        reason = "no baseline for run(s) %s on fingerprint %s: seed with --accept in a perf commit" % (", ".join(unbaselined), fid)
+        for c in report["comparisons"]:
+            if not c["has_baseline"] and c.get("same_binary_as"):
+                reason += "; the baseline holds the binary of run %s under the name(s) %s (bench/run.sh --name): re-run under that name or re-seed under %s (D34)" % (
+                    c["run"], ", ".join(c["same_binary_as"]), c["run"])
+        report.update({"verdict": "REFUSED", "exit": EXIT_REFUSED, "reason": reason})
         return report
     if regressions and not a.accept:
         reasons.append("%d self-regression(s) above %.2fx: %s" % (

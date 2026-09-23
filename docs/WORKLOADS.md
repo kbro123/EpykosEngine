@@ -181,6 +181,25 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   passes; the interpreter bitwise the double maths and the replay at 17 states at B = 1 and lane for lane at B = 17
   over tiles {1, 256, 4096} × lane tiles {1, 8, 17}; the adjoint's Jacobian vs `Dual<44>` at 1e-12 of the row scale
   (measured 2.2e-15) and vs central FD at 1e-6 (3.7e-8).
+- **Stage A desk problem** (M3/G5, D44; `include/epykos/fixtures/stage_a.hpp`, `src/fixtures/stage_a_e0.cpp`;
+  the definitions in `blueprints/problems/stage_a.json`, every number from the seed 20260923, synthetic, no data
+  files): valuation 2026-09-23; the four curves of `blueprints/curves/` in slots USD-SOFR, EUR-ESTR, EUR-EURIBOR-3M,
+  EUR-EURIBOR-6M (slot 0 optionally on its log-DF / monotone cubic / composite variant); generating zero curves
+  z(t) = long + (short − long)(1 − e^{−t/3})/(t/3) at 3.80 → 4.30 %, 1.95 → 2.65 %, 2.05 → 2.75 %, 2.13 → 2.83 %,
+  quotes = their par quotes ± U(1 bp) (a futures price ± 0.01; sub-stream 810000 + k), fixings from 2024-01-01
+  (`synthetic_fixings`, levels 3.85 / 1.95 / 2.05 / 2.13 %, 1 bp daily vol); 2,000 trades (sub-stream 800000 + i,
+  draws in order: blueprint by the mix weights, tenor from {1Y..30Y} by weight, notional log-uniform [1e6, 2e8], side,
+  seasoned with probability 0.2 with an age U{30..min(1500, tenor − 30)} days, netting set U{0..39}, moneyness
+  U(± 0.15) on the par rate / spread at the generating curves); 1,000 scenario lanes (sub-stream 820000 + l): parallel
+  (lane 0 unshocked), twist about 5Y, butterfly (wings up, belly 5Y down), per-curve parallel, sizes U(± 100 / 100 /
+  50 / 100 bp), a rate quote shifted by s(t), a futures price by −100 s(t). Measured: 378 seasoned trades, 7,537
+  compounded / 1,397 averaged / 15,297 term coupons, 752 current coupons, 2,208,068 projected observation days;
+  after the passes 517,036 nodes, 67 domains, 423,235 values, 5 scan domains of 1,107 chains over 255,959 rows.
+  Gates (`tests/stage_a/`): records, every block converges (`‖Jᵀr‖∞` 6.8e-14 / 2.9e-14 / 6.2e-16 / 7.7e-15), round-trip
+  identity after the passes (raw on 120 trades), the sharing gate (two DF domains read by both groups, 0 duplicates),
+  the replay bitwise the double book at the record point, the program bitwise the double maths at each lane's solved
+  knots, 8 scenario lanes bitwise the single runs and across tile configurations, the per-trade IFT ladder vs
+  `Dual<70>` 5.8e-15 (gate 1e-12) and vs Richardson bump-and-recalibrate 5.1e-8 (gate 1e-6), the three USD variants.
 
 ---
 

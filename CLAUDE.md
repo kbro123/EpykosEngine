@@ -48,8 +48,9 @@ scripts/mutation_test.sh        # mutation gate: builds the `mutation` preset (r
 Presets build into `build/<preset>/`. Flags per D13; the `-march=x86-64-v3` flag is dropped on non-x86-64 hosts (the
 arm64 CI runner) and `build/<preset>/epykos_flags.txt` / `epykos::build_flags()` state the flags actually used.
 Fingerprint: `scripts/fingerprint.sh`.
-Definitions are data (D36, D42, D43): `blueprints/conventions/*.json` is the conventions registry, `blueprints/instruments/*.json`
-the instrument blueprints and `blueprints/curves/*.json` the curve definitions, located at build time (`EPYKOS_BLUEPRINTS_DIR`
+Definitions are data (D36, D42, D43, D44): `blueprints/conventions/*.json` is the conventions registry, `blueprints/instruments/*.json`
+the instrument blueprints, `blueprints/curves/*.json` the curve definitions and `blueprints/problems/*.json` the problem
+definitions (the Stage A desk problem: `fixtures/stage_a.hpp` fills one from the seed), located at build time (`EPYKOS_BLUEPRINTS_DIR`
 = the source tree's `blueprints/`) or by `$EPYKOS_BLUEPRINTS`; the citations are in `docs/G4_BUNDLE.md`.
 Benchmarks and the perf gate (D29): `bench/run.sh build/release/bench/<name>_bench [gbench args]` runs one binary (refuses
 at 1-minute load > cores/2) and writes `bench/results/<fingerprint-id>/<name>.json` (fingerprint, loads before/after, commit,

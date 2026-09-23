@@ -720,3 +720,76 @@ Implements `PROBLEM.md` §3 "real instruments" and D36 for Stage A (M3/G2, `incl
 8. **What is not here**: the CurveSet still interpolates linearly in the zero rate (D40); a definition on another
    scheme keeps its regions for G5's Composite-aware solve. Cross-currency legs, MtM notionals and FX are Stage B.
    No SwapEngine file was opened for this package: the conventions came from G0's registry (D37 was exercised by G0).
+
+## D44 — The Stage A tape: the problem definition as data, one recording with its output layout, the AD mode of the ladder, the scheme sweep as recorded variants, a scan branch is straight-line code (2026-09-23)
+Implements `PROBLEM.md` §4 Stage A and §5 for M3/G5 (`blueprints/problems/stage_a.json`,
+`include/epykos/fixtures/stage_a.hpp`, `src/fixtures/stage_a_e0.cpp`, `tests/stage_a/`, `bench/stage_a/`). Nine choices:
+1. **The problem definition is data, its numbers are seeded.** `blueprints/problems/stage_a.json` holds definitions
+   only (D36): the curves in slot order (their definitions in `blueprints/curves/`) and the SOFR scheme variants, the
+   plausible levels the synthetic quotes and fixings are generated around (stated: USD SOFR 3.80 % → 4.30 %, €STR
+   1.95 % → 2.65 %, EURIBOR 3M / 6M above €STR by 10 / 18 bp, a Nelson–Siegel level + slope shape with τ = 3 y), the
+   quote noise (± 1 bp, ± 0.01 on a futures price), the book's mix (SOFR OIS plain 25 %, observation shift 10 %, shift +
+   lockout 10 %, SOFR averaging 10 %, €STR OIS 15 %, EURIBOR 6M IRS 12 %, 3M IRS 8 %, 3s6s 10 %), tenor and notional
+   distributions, the seasoned fraction (20 %, ages 30–1,500 days), 40 netting sets, and the scenario families
+   (parallel / twist / butterfly / per-curve, 250 lanes each, ± 100 / 100 / 50 / 100 bp). Every quote, fixing, trade and
+   lane is generated in code from the seed (Philox sub-streams 800000 + trade, 810000 + quote, 820000 + lane) and is
+   labelled synthetic; the schema is strict (an unknown key fails with `file:line:column`). Quotes are the generating
+   curves' par quotes plus noise, so O1 is a fit; noise 0 gives the par quotes exactly (the recovery gate).
+2. **One tape, one output order.** The 70 quotes are the free inputs (slot order, each set in maturity order:
+   22 USD-SOFR, 18 EUR-ESTR, 18 EUR-EURIBOR-3M, 12 EUR-EURIBOR-6M); `solver::CurveSet::calibrate` records one implicit
+   block per curve in the order it discovers from the maths (SOFR alone; €STR → 6M → 3M) with the residual outputs and
+   the two O1 diagnostics per block registered by `implicit()`; then O1, the knot values of every curve (the unknown
+   Inputs registered as outputs, in each region's variable); then O2 in four contiguous vectors of n_trades — pv (trade
+   currency), pv in the reporting currency, legs[0], legs[1] — the per-currency totals, the per-netting-set totals and
+   the book; then O6, three exports per Select when the tape has any (`StageALayout` names every ordinal; 8,191
+   outputs on the base problem). Accrued interest is structure (a double per leg in the tables, dumped, not an
+   output). O3 and O4 are runs of `solver::ImplicitProgram` over that tape (`ladder`, `run_lanes`).
+3. **The CurveSet calibrates any curve of the family.** A `CurveSpec` with regions is a `curve::Composite` whose state
+   is prepared once per curve and state (`CurveStates::set`), so a Hyman limiter's Selects are recorded once per block
+   and shared with the book through cse; a spec with no regions is the M1 linear zero-rate path, statement for
+   statement (the G4 fixtures and their pinned node counts are unchanged), and a one-region {linear, zero} definition
+   is bitwise that path (D38). `add_calibration_set` passes the definition's regions; `start_values` gives a flat start
+   in each knot's variable. The unknowns of a log-DF curve are log DFs.
+4. **The scheme sweep is a set of recordings, not one tape.** The base problem calibrates SOFR on the linear zero
+   definition; the log-DF, monotone cubic and composite variants are the same problem recorded again with slot 0 on
+   that definition (`StageAOptions::usd_curve`), each its own tape. A variant curve inside the base tape would be
+   calibrated and never read by the book, so the sharing gate ("every DF domain feeds both the residuals and the
+   book") would fail by construction. Measured on 300 trades: every variant converges, round-trips and holds the
+   sharing gate; the monotone variant exports 126 Selects (18 within 1e-6 of a flip at the record point), the composite
+   36, log-DF none.
+5. **A record-time discount-factor memo, stated.** The book's `df(slot, t)` memoises the Rec of each (slot, t) it has
+   recorded; the tape after cse is the same either way (the merged nodes are the ones the memo returns), the raw
+   recording is smaller by the duplicates (27.5 M raw nodes → 517,036 after the passes on the 2,000-trade book; the
+   calibration instruments' discount factors are not memoised and are merged by cse). Nothing of the maths is folded.
+6. **Solve tolerance 1e-13.** The compounded residuals of a 30-year daily product carry a rounding floor of 3–5e-14
+   in rate units, above G4's default 1e-14 (the record-time Levenberg–Marquardt then rejects twelve steps and reports
+   "not converged" at the floor). The O1 gate `‖Jᵀr‖∞ < 1e-12` holds on zero-rate unknowns (6.8e-14 / 2.9e-14 /
+   6.2e-16 / 7.7e-15 per block); on log-DF unknowns the overnight deposit's Jacobian entry is 1/τ = 360, so the
+   diagnostic sits at 2e-11 at the same floor and the variant gate is scaled by that 1/τ (stated).
+7. **The AD mode of O3, measured both ways.** The book and aggregate ladders (43 outputs) are the IFT adjoint, one lane
+   per output (0.22 s). The per-trade ladder — 2,000 outputs × 70 quotes — is recorded the same way (2,000 adjoint
+   lanes, 8.8 s, 4.4 ms per lane, identical lanes sharing one solve) and, as the AD-mode comparison, in forward mode:
+   the whole problem instantiated once on `Dual<70>` (quote k the direction k; `solver::implicit_dual` per block with
+   the earlier curves' tangents flowing through the block's parameters; the book on Dual) in 1.4 s — 6.2× cheaper for
+   this shape on d448afd70180 (release, load 5–9 of 16: informational). The two agree to 5.8e-15 of the row scale over
+   140,000 entries, and the adjoint agrees with Richardson bump-and-recalibrate (10 / 5 bp) to 5.1e-8. Forward mode
+   here is M2's `Dual` on the templated maths, not a tangent interpreter over the IR; choosing the mode per Jacobian
+   block is M4's rule (`PROBLEM.md` §7), and the reverse ladder stays the engine-native path G6 gates.
+8. **No FX in Stage A.** pv in the reporting currency is the trade's pv node for USD and pv × the blueprint's
+   placeholder 1.0 for EUR, a recorded product that Stage B replaces with an FX spot input (stated).
+9. **A scan branch is straight-line code.** Two compounded coupons over the same start whose ends differ by a business
+   day (a seasoned lockout trade whose anniversary adjusts onto another's, common in a real book) share their steps up
+   to the divergence, and the later coupon's remaining steps form a chain whose initial value is an interior row of the
+   trunk's chain. The scan layout of D41 refused the whole class for it (255,705 rows banned and split into some 330
+   level domains on the 2,000-trade book). `src/ir/signature.cpp` now bans only the offending chain's nodes and infers
+   again: the branch's steps become ordinary elementwise rows reading the trunk's row, the trunk and every other chain
+   stay a scan (6 chains of 18 rows on the base problem). The G3 fixtures are unchanged (one round, no retry).
+Measured on the base problem (Apple clang 21, d448afd70180, release; `tests/stage_a/`): 2,000 trades (378 seasoned,
+7,537 compounded, 1,397 averaged and 15,297 term coupons, 2.2 M projected observation days), 70 quotes, 148 tape
+inputs, 8,191 outputs; record 12.3 s (dependency discovery 0.2, the four record-time solves 0.9, the book 3.2, the
+passes 7.6), 27,459,283 raw nodes → 517,036; the IR 67 domains, 423,235 values, 5 scan domains of 1,107 chains over
+255,959 rows (3 scan classes), two DF domains (177 knot-time rows `exp(mul(@0,$0))`, 16,917 interpolated rows
+`exp(mul(neg(@0),$0))`) both read by the residuals and the book, no DF computed twice; round-trip identity after the
+passes (and raw on a 120-trade book: 2.6 M nodes, 1,377 chains); the program's run at the quotes 19 ms per lane at
+B = 1 and 17 ms per lane at B = 8 (four recalibrations per lane, chord policy), bitwise the double maths at each lane's
+solved knots, the first eight scenario lanes bitwise their single runs.

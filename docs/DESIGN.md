@@ -168,7 +168,10 @@ asserts the cross-stage sharing: every DF domain feeds both the residuals and th
    compounded product to `DF(s)/DF(e)` is the engine's business, M4), never an `if` on the Scalar (it does not
    compile). Realised fixings as plain doubles in the same loop form a chain of their own (a constant per step)
    whose last value starts the projected chain; two step shapes in one loop are two chains; every partial value
-   may be an output (each step a boundary) and it is still one scan.
+   may be an output (each step a boundary) and it is still one scan. A chain that starts inside another chain
+   (a branch: two lockout coupons over the same start whose ends differ by a day share their steps up to the
+   divergence) is not a chain of the scan: its steps are retried as straight-line rows reading the trunk's row, and
+   the trunk and every other chain of the class stay a scan (M3/G5, D44).
 7. **Round-trip check:** expand the domain IR back to a scalar tape and compare node-for-node with the recording.
    Identity, not tolerance.
 
@@ -181,7 +184,10 @@ by the uniform-column bucketing of §6 R2, not by the signature; D22).
 Across recordings the signature → domain map persists: a new trade of a known shape adds rows, not code.
 Measured on the instrument sample (M3/G2, D43: 75 trades of every Stage A type on four curves): 33 domains, one
 scan domain `mul(^,@0)@scan` holding every compounded coupon's projected days (52 chains of 47–259 steps after CSE),
-the averaged coupons as Sum reductions, the term coupons and deposits as elementwise rows.
+the averaged coupons as Sum reductions, the term coupons and deposits as elementwise rows. On the Stage A tape (M3/G5,
+D44: the four calibrations and the 2,000-trade book on one tape, 517,036 nodes after the passes): 67 domains, 423,235
+values, 5 scan domains of 1,107 chains over 255,959 rows, two DF domains (knot-time and interpolated, D22) read by both
+the calibration residuals and the book, no discount factor computed twice.
 
 ---
 

@@ -1,0 +1,363 @@
+{
+ "format": "epykos-bench 1",
+ "name": "stage_a_stage_a",
+ "binary": "build/release/bench/stage_a_stage_a_bench",
+ "args": [
+  "--benchmark_repetitions=20",
+  "--benchmark_min_time=0.2s",
+  "--benchmark_report_aggregates_only=false",
+  "--benchmark_out_format=json",
+  "--benchmark_min_time=1x",
+  "--benchmark_repetitions=3"
+ ],
+ "preset": "release",
+ "date": "2026-09-23T16:35:59+01:00",
+ "git": {
+  "commit": "62272cf2ecb756bc190d0382e0874b9d6c83b09f",
+  "commit_short": "62272cf",
+  "branch": "m3/g5-stage-a",
+  "dirty": true
+ },
+ "fingerprint": {
+  "id": "d448afd70180",
+  "cpu": "Intel(R) Xeon(R) W-3223 CPU @ 3.50GHz",
+  "cores_physical": 8,
+  "cores_logical": 16,
+  "compiler": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+  "flags": "-O3 -march=x86-64-v3 -fno-math-errno",
+  "os": "Darwin",
+  "arch": "x86_64",
+  "flags_source": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/g5-stage-a/build/release/epykos_flags.txt"
+ },
+ "load": {
+  "before": 3.59,
+  "after": 3.99,
+  "cores_logical": 16,
+  "threshold": 8.0,
+  "within_threshold": true,
+  "check_enforced": true,
+  "rule": "docs/WORKLOADS.md M1 Measurement: 1-minute load average <= cores/2 before and after, cores = logical CPUs"
+ },
+ "env": {},
+ "google_benchmark": {
+  "version": "v1.9.5",
+  "repetitions": 3,
+  "min_time": "1x",
+  "context": {
+   "date": "2026-09-23T16:35:59+01:00",
+   "host_name": "Kevins-Mac-Pro-3.local",
+   "executable": "build/release/bench/stage_a_stage_a_bench",
+   "num_cpus": 16,
+   "mhz_per_cpu": 3500,
+   "cpu_scaling_enabled": false,
+   "caches": [
+    {
+     "type": "Data",
+     "level": 1,
+     "size": 32768,
+     "num_sharing": 0
+    },
+    {
+     "type": "Instruction",
+     "level": 1,
+     "size": 32768,
+     "num_sharing": 0
+    },
+    {
+     "type": "Unified",
+     "level": 2,
+     "size": 1048576,
+     "num_sharing": 2
+    },
+    {
+     "type": "Unified",
+     "level": 3,
+     "size": 17301504,
+     "num_sharing": 0
+    }
+   ],
+   "load_avg": [
+    3.62256,
+    5.4458,
+    4.46094
+   ],
+   "library_version": "v1.9.5",
+   "library_build_type": "release",
+   "json_schema_version": 1
+  }
+ },
+ "statistics": "min / median / p90 (nearest rank) / max / mean over the n Google Benchmark repetitions of real_time; each repetition's real_time is the mean of its iterations (>= min_time of evaluations), so these are statistics of repetition means, not of single evaluations (docs/WORKLOADS.md M1 Terms)",
+ "raw_output": "tmp/stage_a_stage_a.gbench.json",
+ "benchmarks": {
+  "BM_Record/iterations:1": {
+   "n": 3,
+   "min": 7746.383354999125,
+   "median": 7776.545910863206,
+   "p90": 8231.17344500497,
+   "max": 8231.17344500497,
+   "mean": 7918.034236955767,
+   "unit": "ms",
+   "function": "BM_Record",
+   "label": "",
+   "params": {},
+   "counters": {
+    "nodes": 517036,
+    "nodes_raw": 27459283
+   },
+   "iterations": [
+    1,
+    1,
+    1
+   ],
+   "evaluations": 3,
+   "real_time": [
+    8231.17344500497,
+    7776.545910863206,
+    7746.383354999125
+   ],
+   "cpu_time_median": 7766.649999999999
+  },
+  "BM_Build/iterations:2": {
+   "n": 3,
+   "min": 1002.4266925174743,
+   "median": 1008.7178359972313,
+   "p90": 1015.1519239880145,
+   "max": 1015.1519239880145,
+   "mean": 1008.7654841675734,
+   "unit": "ms",
+   "function": "BM_Build",
+   "label": "",
+   "params": {},
+   "counters": {
+    "domains": 67,
+    "values": 423235
+   },
+   "iterations": [
+    2,
+    2,
+    2
+   ],
+   "evaluations": 6,
+   "real_time": [
+    1008.7178359972313,
+    1002.4266925174743,
+    1015.1519239880145
+   ],
+   "cpu_time_median": 1007.1399999999961
+  },
+  "BM_Run/1": {
+   "n": 3,
+   "min": 17.88181299343705,
+   "median": 18.65157810971141,
+   "p90": 18.73637898825109,
+   "max": 18.73637898825109,
+   "mean": 18.423256697133183,
+   "unit": "ms",
+   "function": "BM_Run",
+   "label": "",
+   "params": {
+    "arg0": 1
+   },
+   "counters": {
+    "B": 1,
+    "jacobians": 4,
+    "residual_evals": 16,
+    "solves": 4
+   },
+   "iterations": [
+    1,
+    1,
+    1
+   ],
+   "evaluations": 3,
+   "real_time": [
+    17.88181299343705,
+    18.73637898825109,
+    18.65157810971141
+   ],
+   "cpu_time_median": 18.599999999999284
+  },
+  "BM_Run/8": {
+   "n": 3,
+   "min": 129.06678696163,
+   "median": 129.72768396139145,
+   "p90": 131.79284194484353,
+   "max": 131.79284194484353,
+   "mean": 130.195770955955,
+   "unit": "ms",
+   "function": "BM_Run",
+   "label": "",
+   "params": {
+    "arg0": 8
+   },
+   "counters": {
+    "B": 8,
+    "jacobians": 32,
+    "residual_evals": 249,
+    "solves": 32
+   },
+   "iterations": [
+    1,
+    1,
+    1
+   ],
+   "evaluations": 3,
+   "real_time": [
+    129.06678696163,
+    129.72768396139145,
+    131.79284194484353
+   ],
+   "cpu_time_median": 129.50099999999765
+  },
+  "BM_Run/64": {
+   "n": 3,
+   "min": 1030.9634159784764,
+   "median": 1033.0337509512901,
+   "p90": 1033.6917389649898,
+   "max": 1033.6917389649898,
+   "mean": 1032.5629686315854,
+   "unit": "ms",
+   "function": "BM_Run",
+   "label": "",
+   "params": {
+    "arg0": 64
+   },
+   "counters": {
+    "B": 64,
+    "jacobians": 256,
+    "residual_evals": 2152,
+    "solves": 256
+   },
+   "iterations": [
+    1,
+    1,
+    1
+   ],
+   "evaluations": 3,
+   "real_time": [
+    1033.0337509512901,
+    1033.6917389649898,
+    1030.9634159784764
+   ],
+   "cpu_time_median": 1031.7209999999975
+  },
+  "BM_Adjoint/1": {
+   "n": 3,
+   "min": 32.28304604999721,
+   "median": 32.34275011345744,
+   "p90": 33.860730938613415,
+   "max": 33.860730938613415,
+   "mean": 32.828842367356025,
+   "unit": "ms",
+   "function": "BM_Adjoint",
+   "label": "",
+   "params": {
+    "arg0": 1
+   },
+   "counters": {
+    "B": 1,
+    "solves": 4
+   },
+   "iterations": [
+    1,
+    1,
+    1
+   ],
+   "evaluations": 3,
+   "real_time": [
+    32.34275011345744,
+    33.860730938613415,
+    32.28304604999721
+   ],
+   "cpu_time_median": 32.330000000001746
+  },
+  "BM_Adjoint/8": {
+   "n": 3,
+   "min": 47.69065300934017,
+   "median": 47.88325191475451,
+   "p90": 49.27882389165461,
+   "max": 49.27882389165461,
+   "mean": 48.2842429385831,
+   "unit": "ms",
+   "function": "BM_Adjoint",
+   "label": "",
+   "params": {
+    "arg0": 8
+   },
+   "counters": {
+    "B": 8,
+    "solves": 4
+   },
+   "iterations": [
+    1,
+    1,
+    1
+   ],
+   "evaluations": 3,
+   "real_time": [
+    47.88325191475451,
+    47.69065300934017,
+    49.27882389165461
+   ],
+   "cpu_time_median": 47.72799999999933
+  },
+  "BM_Adjoint/64": {
+   "n": 3,
+   "min": 279.0586519986391,
+   "median": 280.31821199692786,
+   "p90": 280.6814620271325,
+   "max": 280.6814620271325,
+   "mean": 280.0194420075665,
+   "unit": "ms",
+   "function": "BM_Adjoint",
+   "label": "",
+   "params": {
+    "arg0": 64
+   },
+   "counters": {
+    "B": 64,
+    "solves": 4
+   },
+   "iterations": [
+    1,
+    1,
+    1
+   ],
+   "evaluations": 3,
+   "real_time": [
+    280.31821199692786,
+    280.6814620271325,
+    279.0586519986391
+   ],
+   "cpu_time_median": 279.93399999999724
+  },
+  "BM_ForwardLadder": {
+   "n": 3,
+   "min": 1408.4296198561788,
+   "median": 1411.431835964322,
+   "p90": 1415.8125270623714,
+   "max": 1415.8125270623714,
+   "mean": 1411.8913276276242,
+   "unit": "ms",
+   "function": "BM_ForwardLadder",
+   "label": "",
+   "params": {},
+   "counters": {
+    "quotes": 70,
+    "trades": 2000
+   },
+   "iterations": [
+    1,
+    1,
+    1
+   ],
+   "evaluations": 3,
+   "real_time": [
+    1411.431835964322,
+    1408.4296198561788,
+    1415.8125270623714
+   ],
+   "cpu_time_median": 1409.639999999996
+  }
+ }
+}

@@ -54,7 +54,10 @@ into M4–M6 below, applied to the desk problem.
 - `implicit` node with multi-curve dependencies inside the tape; residual sub-program sharing the DF domains with
   the book (`PROBLEM.md` §5).
 - The Stage A fixture from the seed (synthetic quotes, ~2,000 trades, 1,000 scenarios) recorded as **one tape**
-  producing O1–O4 and O6.
+  producing O1–O4 and O6. (G5 landed 2026-09-23, D44: `blueprints/problems/stage_a.json` + `fixtures/stage_a`; the recording
+  round-trips, the IR shows the two DF domains read by both the residuals and the book, the ladder agrees with forward
+  mode to 5.8e-15 and with bump-and-recalibrate to 5.1e-8, the scenario lanes are bitwise their single runs; G6 runs
+  the remaining §6 gates and states the M4 baseline.)
 
 **Exit gate:** every `PROBLEM.md` §6 gate on the Stage A tape; the IR shows one DF domain read by both the residual
 and the book; conventions match published examples. Timings recorded as the M4 baseline (informational).

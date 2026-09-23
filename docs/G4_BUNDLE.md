@@ -295,3 +295,20 @@ SR1: USD 250,000 = USD 2,500 per point [13]; FEU3: EUR 250,000 = EUR 2,500 per p
 
 No SwapEngine file was opened for G2: every convention came from the registry G0 imported and cross-checked (D37).
 
+## 7. The Stage A problem definition (M3/G5, D44)
+
+`blueprints/problems/stage_a.json` adds no market convention: every calendar, day count, lag, observation window,
+tenor set and instrument mechanism it relies on is one of the entries above (USD.1–USD.5, EUR.1–EUR.7, section 6),
+and the file names only which curve definitions, blueprints and conventions the problem uses. What it does state, and
+what has no source because it is synthetic (`PROBLEM.md` §4: "quotes are synthetic from the seed, stated as
+synthetic"):
+
+| item | value in the file | status |
+|---|---|---|
+| quote levels | generating zero curves 3.80 → 4.30 % (SOFR), 1.95 → 2.65 % (€STR), €STR + 10 bp (EURIBOR 3M), €STR + 18 bp (EURIBOR 6M), a Nelson–Siegel level + slope shape with τ = 3 years; quotes = par ± 1 bp, futures ± 0.01 | SYNTHETIC — plausible only: an upward-sloping USD curve near 4 %, EUR OIS near 2 %, a positive 3s6s basis of about 8 bp; not observed market data of any date |
+| fixings histories | one rate per fixing business day from 2024-01-01, mean-reverting around 3.85 / 1.95 / 2.05 / 2.13 % with 1 bp daily steps | SYNTHETIC (`conventions/fixings.hpp` `synthetic_fixings`, G0) |
+| trade mix | SOFR OIS plain 25 %, observation shift 2 d 10 %, shift + lockout 2 d 10 %, SOFR averaging 10 %, €STR OIS 15 %, EURIBOR 6M IRS 12 %, 3M IRS 8 %, 3s6s 10 %; tenors 1Y–30Y weighted to the belly; notionals log-uniform 1 m–200 m; 20 % seasoned; 40 netting sets | own construction from `PROBLEM.md` §4 Stage A's list of mechanisms and §9 (~2,000 trades); the proportions are a choice, not a survey |
+| scenario families | parallel / twist (pivot 5Y) / butterfly (belly 5Y) / per-curve, 250 lanes each, ± 100 / 100 / 50 / 100 bp | own construction from `PROBLEM.md` O4 ("parallel, twist, butterfly and per-curve shocks"; 1,000 lanes, §9) |
+| reporting currency | USD; the EUR conversion a placeholder 1.0 | `PROBLEM.md` §4: Stage A has no FX; Stage B adds the spot |
+
+The G5 package opened no SwapEngine file and researched no new convention; the UNVERIFIED items of section 4 stand.

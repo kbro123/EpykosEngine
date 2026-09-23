@@ -142,7 +142,10 @@ inline value_id value_of(const Program& p, domain_id d, row_id r) noexcept {
 
 // The group's op sequence as one line, e.g. "exp(mul(neg(@0),$0))": @k gather k of the group,
 // $k column k, #k literal k, %k segment k (in order of first use in the group), "in" an Input.
+// A group of more than 24 steps is named "<last op>[<steps>]", e.g. "sqrt[30]". Names never
+// contain whitespace (serialize writes them as one token).
 std::string shape_string(const Program& p, domain_id d);
+
 
 // Structural checks: slot ranges, topological steps, segment offsets, value ids in range and
 // earlier in evaluation order (no forward reads), inputs / outputs in range. Throws

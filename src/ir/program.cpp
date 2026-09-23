@@ -171,7 +171,9 @@ std::string shape_string(const Program& p, domain_id d) {
   if (g.steps.empty()) return "<empty>";
   const SlotNames names = slot_names(g);
   if (g.steps.size() > 24) {
-    return std::string(to_string(g.steps.back().op)) + "[" + std::to_string(g.steps.size()) + " steps]";
+    // Long groups are named by their last op and step count. No whitespace: serialize() writes
+    // the name as one token.
+    return std::string(to_string(g.steps.back().op)) + "[" + std::to_string(g.steps.size()) + "]";
   }
   std::string out;
   render(g, names, static_cast<std::int32_t>(g.steps.size()) - 1, out);
@@ -436,8 +438,13 @@ std::string serialize(const Program& p) {
     os << "domain " << d.rows << ' ' << d.value_base << ' ' << d.level << ' ' << (d.recurrent ? 1 : 0) << ' '
        << d.reads.size();
     for (domain_id r : d.reads) os << ' ' << r;
+    // The name is one whitespace-delimited token (deserialize reads it with >>).
+    for (char c : d.name) {
+      if (c == ' ' || c == '\t' || c == '\n' || c == '\r') fail("serialize: domain name '" + d.name + "' contains whitespace");
+    }
     os << ' ' << (d.name.empty() ? "-" : d.name) << '\n';
   }
+
   os << "groups " << p.groups.size() << '\n';
   for (const Group& g : p.groups) {
     os << "group " << g.domain << ' ' << g.steps.size() << '\n';

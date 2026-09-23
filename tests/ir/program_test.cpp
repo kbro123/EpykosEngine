@@ -320,7 +320,32 @@ TEST(IrProgram, SerialisationIsExactOnTheM1Book) {
   EXPECT_EQ(p.num_values(), static_cast<std::size_t>(p.domains.back().value_base + p.domains.back().rows));
 }
 
+// A group of more than 24 steps is named "<op>[<steps>]" with no whitespace, so that serialize
+// (one token per name) round-trips: y = sqrt(y * 1.5) fifteen times is one 30-step group.
+TEST(IrProgram, LongGroupNamesSerialiseAndRoundTrip) {
+  Tape t;
+  {
+    Tape::Scope scope(t);
+    for (int row = 0; row < 3; ++row) {
+      Rec y = make_input(t, 1.0 + row);
+      for (int k = 0; k < 15; ++k) y = sqrt(y * 1.5);
+      register_output(t, y);
+    }
+  }
+  const ir::Program p = check(t, "long group");  // includes deserialize(serialize(p)) == p
+  const ir::domain_id d = find_domain(p, "sqrt[30]");
+  ASSERT_GE(d, 0) << ir::to_string(p);
+  EXPECT_EQ(p.groups[static_cast<std::size_t>(d)].steps.size(), 30u);
+  EXPECT_EQ(p.domains[static_cast<std::size_t>(d)].rows, 3);
+  EXPECT_EQ(p.domains[static_cast<std::size_t>(d)].name, "sqrt[30]");
+  // A name with whitespace is refused by serialize rather than written as two tokens.
+  ir::Program q = p;
+  q.domains[static_cast<std::size_t>(d)].name = "sqrt[30 steps]";
+  EXPECT_THROW((void)ir::serialize(q), std::runtime_error);
+}
+
 TEST(IrProgram, ShapeStringsAndSlotKindNames) {
+
   EXPECT_STREQ(ir::to_string(ir::SlotKind::Gather), "gather");
   EXPECT_STREQ(ir::to_string(ir::SlotKind::Segment), "segment");
   Tape t;

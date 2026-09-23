@@ -10,7 +10,7 @@
   "os": "Darwin",
   "arch": "x86_64"
  },
- "updated": "2026-09-23T10:40:47+01:00",
+ "updated": "2026-09-23T12:22:26+01:00",
  "note": "accepted baseline per benchmark (medians); updated only by scripts/perf_gate.py --accept in perf commits",
  "runs": {
   "hand_m1_hand": {
@@ -530,6 +530,223 @@
     "--benchmark_filter=^BM_AdjointEval/|^BM_AdjointEvalBatch/tile:(128|256)/lane_tile:8$|^BM_AdjointBuild$"
    ],
    "note": "M2 gate: value+adjoint (out_bar = e_book) on the M1 book; B=1 at the D15 tiles, B=64 at lane tile 8 (informational, D9); compare with exec_m1_interp BM_InterpEval exp:0 for the adjoint cost ratio; written by bench/run.sh --name m2 at the M2 gate (raw output tmp/m2.gbench.json, gitignored) and re-keyed by M2/m2-fix to adjoint_m1_adjoint, the name run.sh derives from the binary, so the default invocation is gated (D34); the measurement itself is unchanged"
+  },
+  "solver_m1_implicit": {
+   "benchmarks": {
+    "BM_Run/1/0/0": {
+     "median": 154.44560626486833,
+     "unit": "us",
+     "n": 20,
+     "min": 152.21997692417926,
+     "p90": 155.62743390602623,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/8/0/0": {
+     "median": 909.7209383201387,
+     "unit": "us",
+     "n": 20,
+     "min": 900.5536920959493,
+     "p90": 914.2518082827136,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/64/0/0": {
+     "median": 6986.789987422526,
+     "unit": "us",
+     "n": 20,
+     "min": 6917.760980020209,
+     "p90": 7029.029608863156,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/1/1/0": {
+     "median": 96.14440492666273,
+     "unit": "us",
+     "n": 20,
+     "min": 94.98843636007793,
+     "p90": 96.50745150890482,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/8/1/0": {
+     "median": 476.612541658554,
+     "unit": "us",
+     "n": 20,
+     "min": 472.4139847329395,
+     "p90": 478.6056488537323,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/64/1/0": {
+     "median": 3594.2013715752046,
+     "unit": "us",
+     "n": 20,
+     "min": 3564.1750511832724,
+     "p90": 3601.494689997381,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/1/0/1": {
+     "median": 137.57945570367198,
+     "unit": "us",
+     "n": 20,
+     "min": 136.73741313912853,
+     "p90": 138.22454485515286,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/8/0/1": {
+     "median": 792.8780327016615,
+     "unit": "us",
+     "n": 20,
+     "min": 789.2912584462796,
+     "p90": 798.3613746050237,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/64/0/1": {
+     "median": 6200.4990901591045,
+     "unit": "us",
+     "n": 20,
+     "min": 6147.148025532563,
+     "p90": 6238.66591292123,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/1/1/1": {
+     "median": 94.66917289272476,
+     "unit": "us",
+     "n": 20,
+     "min": 93.65661854154327,
+     "p90": 95.43163439693112,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/8/1/1": {
+     "median": 468.6440209237238,
+     "unit": "us",
+     "n": 20,
+     "min": 464.3394732071708,
+     "p90": 472.0682247231404,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/64/1/1": {
+     "median": 3514.658975049476,
+     "unit": "us",
+     "n": 20,
+     "min": 3501.0903920459596,
+     "p90": 3534.797570208394,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_RunSameState/64": {
+     "median": 1674.1005175406794,
+     "unit": "us",
+     "n": 20,
+     "min": 1664.6331795184556,
+     "p90": 1681.0225453896971,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Adjoint/1/0/1": {
+     "median": 505.7942265533718,
+     "unit": "us",
+     "n": 20,
+     "min": 501.03736811045167,
+     "p90": 509.7230614771535,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Adjoint/8/0/1": {
+     "median": 2485.710602611237,
+     "unit": "us",
+     "n": 20,
+     "min": 2464.496499409766,
+     "p90": 2500.795233312861,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Adjoint/1/1/1": {
+     "median": 461.8208504006739,
+     "unit": "us",
+     "n": 20,
+     "min": 457.21196469995436,
+     "p90": 465.0284423460198,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Adjoint/8/1/1": {
+     "median": 2153.9795230357695,
+     "unit": "us",
+     "n": 20,
+     "min": 2138.283639214933,
+     "p90": 2207.193661552782,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_TwoCurves/0/0": {
+     "median": 123.74411614319868,
+     "unit": "us",
+     "n": 20,
+     "min": 123.0410606909701,
+     "p90": 124.39330072284056,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_TwoCurves/1/0": {
+     "median": 198.98114252035538,
+     "unit": "us",
+     "n": 20,
+     "min": 197.43114750776874,
+     "p90": 200.10815949847856,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_TwoCurves/0/1": {
+     "median": 62.148776159745324,
+     "unit": "us",
+     "n": 20,
+     "min": 61.77339198248442,
+     "p90": 62.70924034874176,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_TwoCurves/1/1": {
+     "median": 119.3517699302661,
+     "unit": "us",
+     "n": 20,
+     "min": 118.07404648523732,
+     "p90": 120.0692578307518,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Build": {
+     "median": 24.35707771413339,
+     "unit": "ms",
+     "n": 20,
+     "min": 23.66925508249551,
+     "p90": 24.683675515310217,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    }
+   },
+   "source": "solver_m1_implicit.json",
+   "binary": "build/release/bench/solver_m1_implicit_bench",
+   "preset": "release",
+   "commit": "75a8d6b",
+   "commit_full": "75a8d6bdf5f83c148428aaa47f12218ade861447",
+   "date": "2026-09-23T12:19:09+01:00",
+   "accepted": "2026-09-23T12:22:26+01:00",
+   "args": [
+    "--benchmark_repetitions=20",
+    "--benchmark_min_time=0.2s",
+    "--benchmark_report_aggregates_only=false",
+    "--benchmark_out_format=json",
+    "--benchmark_repetitions=20",
+    "--benchmark_min_time=0.2s"
+   ]
   }
  }
 }

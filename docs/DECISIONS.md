@@ -107,3 +107,31 @@ own checkout as a black box, and may read its public interface and documentation
 same bundle. Nothing derived from SwapEngine source enters this repository; no agent developing engine code opens the
 checkout; the comparison lives under `bench/compare/` with a README stating exactly what was and was not like-for-like.
 Its numbers are informational (D9).
+
+## D22 — Signature-pass rules as implemented on M1 (2026-09-23)
+Refines DESIGN.md §5 steps 3–6 (M1/P3, `include/epykos/ir/`). Five rules, the first two adjustments to the text:
+1. **References carry no class.** A boundary's signature is its local op tree with "constant slot" and "reference"
+   tokens; a reference does not record which domain it reads, and a gather may read several domains (value ids are
+   global: domain base + row). Upstream buckets — the three knot-time DFs vs the interpolated ones today, `select`
+   and R2 buckets later — therefore never fragment downstream domains.
+2. **Sharing is decided per computation, not per node.** Besides Inputs, Sums, Affines, fan-out > 1 and
+   member/output uses, every node whose deep expression (the op tree seen through shared nodes, modulo constants,
+   stopping at Inputs / Sum / Affine / Const) equals that of a boundary is materialised too. Otherwise a shared
+   forward and an unshared one give the float coupon two signatures (forward inlined vs referenced).
+3. **Sum and Affine are order- and arity-insensitive**: operands are segment members (CSR, fold order kept), Affine
+   with one coefficient per member and c_0 as a constant slot. A Const that is a member or an output is a row of the
+   const domain.
+4. **Recurrence.** A class whose rows read rows of the same class directly is flagged `recurrent` (a scan candidate;
+   unsupported until M5, M1 asserts none). Classes that reach themselves only through other classes
+   (legs → swaps → book) are split by dependency level inside their strongly connected component, so every domain is
+   evaluated in one pass.
+5. **Round-trip identity** compares canonical forms: Inputs by ordinal, then a post-order walk from the outputs;
+   commutative operand pairs compared unordered (IEEE add / mul commute bitwise), everything else exactly.
+Observed on the M1 book (75,698 nodes → 10 domains, 42,314 values): Inputs(12) → affine(2,561) → DF
+`exp(mul(neg(@),$))`(2,564; three rows read a knot directly: t = 0, t = 1 on knot 4, t = 10958/365 beyond the last
+knot) → constant-rate coupons `mul($,@)`(16,103 = 15,903 fixed + 200 seasoned-first) and forwards(2,432) → float
+coupons(15,703) → legs `sum`(1,938)@L0 → swaps `mul($,sub(@,@))` 969@L1 plus the 31 T = 1 swaps @L0 (no leg Sum) →
+book `sum`(1)@L2. The seasoned-first coupon N·τ·R·DF(e) and the fixed coupon N·τ·K·DF(e) are the same op tree with
+one constant slot and share a class: hash-consing modulo constants cannot separate them (the WORKLOADS.md
+expectation holds against the float class, not the fixed class). Not changed: P2's affine pass; a single-term
+absorption of `Neg(Input)` would fold the three knot-time DFs into the affine domain and is left to M3 (R1/R3).

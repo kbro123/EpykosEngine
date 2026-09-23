@@ -1,7 +1,7 @@
-// EpykosEngine — `Rec`, the recording scalar, and `RecBool` (D14).
+// EpykosEngine — `Rec`, the recording scalar, and `RecBool` (D14, D24).
 //
-// Rec = {double v; node_id id}. Arithmetic on Rec computes the value as `double` would and, when a
-// Tape::Scope is active on this thread, appends the op to that tape. Constants are leaves: a
+// Rec = {double v; node_id id; tape_serial tape}. Arithmetic on Rec computes the value as `double`
+// would and, when a Tape::Scope is active on this thread, appends the op to that tape. Constants are leaves: a
 // `double` mixed into an expression (or a Rec constructed from a double) becomes a Const node
 // the first time it is used in a recorded op. There is no implicit conversion Rec -> double and
 // no conversion RecBool -> bool, so `if (a < b)` on Rec does not compile: write
@@ -10,12 +10,18 @@
 //
 // Outside a recording scope, Rec values that were never recorded (id == invalid_node) behave as
 // plain doubles; using a value that carries a tape node outside its scope throws RecordError.
+// A recorded value also carries the serial of the tape it was recorded on: using it while another
+// tape is current (scopes nest) throws RecordError instead of reinterpreting its node id on that
+// tape (D24).
 //
-// Node ids held by Rec values are valid until a pass (tape/passes.hpp) rewrites the tape.
+// Node ids held by Rec values are valid until a pass (tape/passes.hpp) rewrites the tape; the
+// pass gives the tape a new serial, so stale values throw rather than alias the rebuilt table.
 #pragma once
 
 #include <cmath>
+#include <string>
 #include <type_traits>
+
 
 #include "epykos/tape/tape.hpp"
 
@@ -36,21 +42,32 @@ inline Tape* recording_tape(bool recorded) {
   return t;
 }
 
+// A recorded value may only be used on the tape it was recorded on (D24).
+inline void require_recorded_on(const Tape& t, tape_serial tape, const char* what) {
+  if (tape != t.serial()) {
+    throw RecordError(std::string(what) + ": the value was recorded on another tape (serial " +
+                      std::to_string(tape) + ", current tape " + std::to_string(t.serial()) + ")");
+  }
+}
+
 }  // namespace detail
 
 struct Rec {
   double v = 0.0;
   node_id id = invalid_node;
+  tape_serial tape = no_tape;  // the tape `id` belongs to (Tape::serial()); no_tape when detached
 
   constexpr Rec() noexcept = default;
-  constexpr Rec(double value) noexcept : v(value), id(invalid_node) {}  // NOLINT: implicit by design
-  constexpr Rec(double value, node_id node) noexcept : v(value), id(node) {}
+  constexpr Rec(double value) noexcept : v(value) {}  // NOLINT: implicit by design
+  constexpr Rec(double value, node_id node, tape_serial on) noexcept : v(value), id(node), tape(on) {}
 
   // The value. Throws RecordError in record mode if the node depends on an input: the maths
-  // must not look at active values (use select / structural_if).
+  // must not look at active values (use select / structural_if); also if the value was recorded
+  // on a tape other than the current one (its taint cannot be looked up there).
   double value() const {
-    if (Tape* t = Tape::current(); t != nullptr && id != invalid_node && t->tainted(id)) {
-      throw RecordError("Rec::value() on a tainted value in record mode");
+    if (Tape* t = Tape::current(); t != nullptr && id != invalid_node) {
+      detail::require_recorded_on(*t, tape, "Rec::value()");
+      if (t->tainted(id)) throw RecordError("Rec::value() on a tainted value in record mode");
     }
     return v;
   }
@@ -59,8 +76,13 @@ struct Rec {
   constexpr node_id node() const noexcept { return id; }
   constexpr bool recorded() const noexcept { return id != invalid_node; }
 
-  // The node on `t`, materialising a detached constant as a Const leaf.
-  node_id node_on(Tape& t) const { return id != invalid_node ? id : t.constant(v); }
+  // The node on `t`, materialising a detached constant as a Const leaf. Throws RecordError if the
+  // value was recorded on another tape.
+  node_id node_on(Tape& t) const {
+    if (id == invalid_node) return t.constant(v);
+    detail::require_recorded_on(t, tape, "Rec");
+    return id;
+  }
 
   Rec& operator+=(const Rec& o);
   Rec& operator-=(const Rec& o);
@@ -78,16 +100,21 @@ static_assert(!std::is_convertible_v<Rec, double>, "no implicit Rec -> double");
 struct RecBool {
   bool v = false;
   node_id id = invalid_node;
+  tape_serial tape = no_tape;
 
   constexpr RecBool() noexcept = default;
-  constexpr RecBool(bool value, node_id node) noexcept : v(value), id(node) {}
+  constexpr RecBool(bool value, node_id node, tape_serial on) noexcept : v(value), id(node), tape(on) {}
 
   constexpr node_id node() const noexcept { return id; }
   constexpr bool recorded() const noexcept { return id != invalid_node; }
   // The bit with no check. Debugging and tests only.
   constexpr bool unchecked_value() const noexcept { return v; }
 
-  node_id node_on(Tape& t) const { return id != invalid_node ? id : t.constant(v ? 1.0 : 0.0); }
+  node_id node_on(Tape& t) const {
+    if (id == invalid_node) return t.constant(v ? 1.0 : 0.0);
+    detail::require_recorded_on(t, tape, "RecBool");
+    return id;
+  }
 };
 
 static_assert(!std::is_convertible_v<RecBool, bool>, "no implicit RecBool -> bool");
@@ -96,7 +123,7 @@ static_assert(!std::is_constructible_v<bool, RecBool>, "no explicit RecBool -> b
 // ---- inputs and outputs -----------------------------------------------------------------
 
 // A new Input node on `t` (ordinal = t.num_inputs() before the call) holding `value`.
-inline Rec make_input(Tape& t, double value) { return Rec(value, t.input(value)); }
+inline Rec make_input(Tape& t, double value) { return Rec(value, t.input(value), t.serial()); }
 // Same on the current tape; throws RecordError when no scope is active.
 inline Rec make_input(double value) {
   Tape* t = Tape::current();
@@ -118,7 +145,7 @@ namespace detail {
 inline Rec rec_unary(Op op, const Rec& a, double v) {
   Tape* t = recording_tape(a.recorded());
   if (t == nullptr) return Rec(v);
-  return Rec(v, t->unary(op, a.node_on(*t)));
+  return Rec(v, t->unary(op, a.node_on(*t)), t->serial());
 }
 
 inline Rec rec_binary(Op op, const Rec& a, const Rec& b, double v) {
@@ -126,15 +153,15 @@ inline Rec rec_binary(Op op, const Rec& a, const Rec& b, double v) {
   if (t == nullptr) return Rec(v);
   const node_id na = a.node_on(*t);
   const node_id nb = b.node_on(*t);
-  return Rec(v, t->binary(op, na, nb));
+  return Rec(v, t->binary(op, na, nb), t->serial());
 }
 
 inline RecBool rec_compare(Op op, const Rec& a, const Rec& b, bool v) {
   Tape* t = recording_tape(a.recorded() || b.recorded());
-  if (t == nullptr) return RecBool(v, invalid_node);
+  if (t == nullptr) return RecBool(v, invalid_node, no_tape);
   const node_id na = a.node_on(*t);
   const node_id nb = b.node_on(*t);
-  return RecBool(v, t->binary(op, na, nb));
+  return RecBool(v, t->binary(op, na, nb), t->serial());
 }
 
 }  // namespace detail
@@ -178,7 +205,7 @@ inline Rec fma(const Rec& a, const Rec& b, const Rec& c) {
   const node_id na = a.node_on(*t);
   const node_id nb = b.node_on(*t);
   const node_id nc = c.node_on(*t);
-  return Rec(v, t->ternary(Op::Fma, na, nb, nc));
+  return Rec(v, t->ternary(Op::Fma, na, nb, nc), t->serial());
 }
 
 // ---- comparisons -> RecBool ---------------------------------------------------------------
@@ -210,7 +237,7 @@ inline Rec select(const RecBool& c, const Rec& a, const Rec& b) {
   const node_id nc = c.node_on(*t);
   const node_id na = a.node_on(*t);
   const node_id nb = b.node_on(*t);
-  return Rec(v, t->ternary(Op::Select, nc, na, nb));
+  return Rec(v, t->ternary(Op::Select, nc, na, nb), t->serial());
 }
 inline Rec select(const RecBool& c, const Rec& a, double b) { return select(c, a, Rec(b)); }
 inline Rec select(const RecBool& c, double a, const Rec& b) { return select(c, Rec(a), b); }
@@ -219,11 +246,13 @@ inline Rec select(const RecBool& c, double a, double b) { return select(c, Rec(a
 // A structural branch: returns the bit, but throws RecordError in record mode if the predicate
 // depends on an input (that branch would be folded into the recording).
 inline bool structural_if(const RecBool& c) {
-  if (Tape* t = Tape::current(); t != nullptr && c.id != invalid_node && t->tainted(c.id)) {
-    throw RecordError("structural_if on a predicate that depends on an input");
+  if (Tape* t = Tape::current(); t != nullptr && c.id != invalid_node) {
+    detail::require_recorded_on(*t, c.tape, "structural_if");
+    if (t->tainted(c.id)) throw RecordError("structural_if on a predicate that depends on an input");
   }
   return c.v;
 }
+
 
 // max/min/abs via select (both arms recorded). Value semantics match scalar/select.hpp:
 // max(a,b) = a < b ? b : a; min(a,b) = b < a ? b : a; abs(a) = a < 0 ? -a : a.

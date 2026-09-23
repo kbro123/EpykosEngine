@@ -147,3 +147,13 @@ Before this entry the class flag was copied into `recurrent`, so the interpreter
 such as exp(exp(x)) with the inner exp registered as an output (both level-domains of the exp class were marked
 recurrent although neither reads itself) while `ir::Evaluator` evaluated them correctly. The IR text format becomes
 `epykos-ir 2` (one more domain field); nothing persisted uses the old one.
+
+## D24 — A recorded value carries its tape's serial (2026-09-23)
+Refines D14 (M1/P7 review). `Rec = {double v; node_id id; tape_serial tape}` and `RecBool` likewise (16 bytes; the
+32-bit serial sits next to the 32-bit id). Every `Tape` has a process-unique serial: a copy is a new table with a new
+serial, a move keeps it, `clear()` and the passes (which swap in a rebuilt table) renew it. Using a recorded value on
+a tape other than the one it was recorded on — under a nested `Tape::Scope`, or after a pass or a clear — throws
+`RecordError` from `node_on` / `value()` / `structural_if`, and `Tape::node` / `tainted` throw `RecordError` (not
+`std::out_of_range`) for an id the tape does not hold. Before this entry a value from tape B used under tape A's
+scope was silently recorded as A's node with the same id (wrong graph, wrong taint, no exception); M2+ nests
+recordings (implicit nodes), which is where that would have bitten. Taint still lives in the node table.

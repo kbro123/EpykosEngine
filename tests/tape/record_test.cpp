@@ -5,10 +5,12 @@
 
 #include <cmath>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "epykos/scalar/rec.hpp"
 #include "epykos/scalar/select.hpp"
+#include "epykos/tape/passes.hpp"
 #include "epykos/tape/tape.hpp"
 #include "tape/tape_test_helpers.hpp"
 
@@ -31,6 +33,8 @@ static_assert(!std::is_convertible_v<RecBool, bool>, "no implicit RecBool -> boo
 static_assert(!std::is_constructible_v<bool, RecBool>, "no explicit RecBool -> bool");
 static_assert(std::is_convertible_v<double, Rec>, "double -> Rec is allowed (Scalar x = 0.0)");
 static_assert(std::is_trivially_copyable_v<Rec> && std::is_trivially_copyable_v<RecBool>);
+static_assert(sizeof(Rec) == 16, "D24: {double v; node_id id; tape_serial tape} is 16 bytes");
+
 
 // A predicate that is only well-formed when `if (RecBool)` would compile.
 template <class T, class = void>
@@ -468,7 +472,153 @@ TEST(Record, DumpIsReadable) {
   EXPECT_NE(s.find("outputs: #2"), std::string::npos) << s;
 }
 
+// ---- tape identity (D24) ----------------------------------------------------------------------
+
+// A value recorded on tape b used under tape a's scope must throw, not be recorded as a's node
+// with the same id (before D24: on_b * 2.0 recorded Mul(#0, Const 2) on a, i.e. 5 * 2 = 10 with
+// the wrong taint bit and no exception).
+TEST(Record, ValueFromAnotherTapeThrowsInsteadOfBeingReinterpreted) {
+  Tape a;
+  Tape b;
+  Rec on_b;
+  {
+    Tape::Scope sb(b);
+    on_b = epykos::make_input(b, 100.0);  // b's node 0
+  }
+  EXPECT_EQ(on_b.tape, b.serial());
+  EXPECT_NE(a.serial(), b.serial());
+  Tape::Scope sa(a);
+  EXPECT_EQ(a.constant(5.0), 0) << "a's node 0 is Const 5: the id on_b holds";
+  EXPECT_THROW((void)(on_b * 2.0), RecordError);
+  EXPECT_THROW((void)exp(on_b), RecordError);
+  EXPECT_THROW((void)(on_b < 1.0), RecordError);
+  EXPECT_THROW((void)fma(on_b, on_b, 1.0), RecordError);
+  EXPECT_THROW((void)epykos::select(Rec(1.0) < 2.0, on_b, 0.0), RecordError);
+  EXPECT_THROW((void)epykos::register_output(on_b), RecordError);
+  EXPECT_THROW((void)on_b.value(), RecordError);
+  EXPECT_EQ(on_b.unchecked_value(), 100.0);
+  // On a: Const 5 and the select's predicate (Const 1, Const 2, CmpLt); the binary ops check
+  // their first operand before materialising the second, so no Const 2 from on_b * 2.0.
+  EXPECT_EQ(a.size(), 4u) << epykos::to_string(a);
+  for (const Node& n : a.nodes()) EXPECT_NE(n.op, Op::Mul) << "no op on on_b was recorded";
+
+  // A value recorded on a is fine in a's scope while b still exists.
+  const Rec x = epykos::make_input(a, 1.0);
+  EXPECT_NO_THROW((void)(x * 2.0));
+}
+
+TEST(Record, NestedScopesKeepValuesOnTheirOwnTape) {
+  Tape outer;
+  Tape inner;
+  Tape::Scope so(outer);
+  const Rec x = epykos::make_input(outer, 1.0);
+  const Rec k = x * 3.0;
+  {
+    Tape::Scope si(inner);
+    EXPECT_THROW((void)(k + 1.0), RecordError);
+    EXPECT_THROW((void)k.value(), RecordError);
+    EXPECT_THROW((void)epykos::structural_if(k < 5.0), RecordError);
+    const Rec y = epykos::make_input(inner, 2.0);
+    const Rec z = y * 2.0;
+    EXPECT_EQ(z.tape, inner.serial());
+    EXPECT_EQ(inner.size(), 3u);
+    // A predicate recorded on the outer tape cannot be examined on the inner one either.
+    RecBool c;
+    {
+      Tape::Scope back(outer);
+      c = k < 5.0;
+    }
+    EXPECT_THROW((void)epykos::structural_if(c), RecordError);
+  }
+  EXPECT_NO_THROW((void)(k + 1.0));
+  EXPECT_EQ(outer.size(), 7u);  // input, 3.0, mul, 5.0, cmp, 1.0, add
+}
+
+TEST(Record, ForeignNodeIdsThrowRecordErrorNotOutOfRange) {
+  Tape a;  // empty
+  Tape b;
+  Rec on_b;
+  {
+    Tape::Scope sb(b);
+    on_b = epykos::make_input(b, 1.0) * 2.0;  // b's node 2
+  }
+  Tape::Scope sa(a);
+  EXPECT_THROW((void)on_b.value(), RecordError);
+  EXPECT_THROW((void)a.tainted(on_b.id), RecordError);
+  EXPECT_THROW((void)a.node(7), RecordError);
+  EXPECT_THROW((void)a.node(-1), RecordError);
+  EXPECT_THROW((void)a.args(3), RecordError);
+  EXPECT_THROW((void)a.coefs(3), RecordError);
+}
+
+TEST(Record, SerialsFollowTheNodeTable) {
+  Tape t;
+  const epykos::tape_serial s0 = t.serial();
+  EXPECT_NE(s0, epykos::no_tape);
+  Rec x;
+  {
+    Tape::Scope scope(t);
+    x = epykos::make_input(t, 1.0) * 2.0;
+    epykos::register_output(t, x);
+  }
+  EXPECT_EQ(x.tape, s0);
+  // A copy is a new table: the values of t are not values of the copy.
+  Tape copy = t;
+  EXPECT_NE(copy.serial(), s0);
+  EXPECT_EQ(t.serial(), s0);
+  EXPECT_EQ(copy.size(), t.size());
+  {
+    Tape::Scope sc(copy);
+    EXPECT_THROW((void)(x + 1.0), RecordError);
+  }
+  {
+    Tape::Scope st(t);
+    EXPECT_NO_THROW((void)(x + 1.0));
+  }
+  // A move keeps the serial with the nodes; the moved-from tape is empty with a new serial.
+  Tape moved = std::move(t);
+  EXPECT_EQ(moved.serial(), s0);
+  EXPECT_NE(t.serial(), s0);
+  EXPECT_EQ(t.size(), 0u);
+  {
+    Tape::Scope sm(moved);
+    EXPECT_NO_THROW((void)(x + 1.0));
+  }
+  // A pass swaps in a rebuilt table: new serial, stale values throw instead of aliasing.
+  epykos::standard_passes(moved);
+  EXPECT_NE(moved.serial(), s0);
+  {
+    Tape::Scope sm(moved);
+    EXPECT_THROW((void)(x + 1.0), RecordError);
+  }
+  // clear() likewise.
+  Tape u;
+  Rec y;
+  {
+    Tape::Scope su(u);
+    y = epykos::make_input(u, 1.0);
+  }
+  const epykos::tape_serial su0 = u.serial();
+  u.clear();
+  EXPECT_NE(u.serial(), su0);
+  {
+    Tape::Scope su(u);
+    EXPECT_THROW((void)(y * 2.0), RecordError);
+  }
+  // Copy assignment: the target takes a new serial; move assignment: the source's.
+  Tape v;
+  v = copy;
+  EXPECT_NE(v.serial(), copy.serial());
+  EXPECT_EQ(v.size(), copy.size());
+  Tape w;
+  const epykos::tape_serial sv = v.serial();
+  w = std::move(v);
+  EXPECT_EQ(w.serial(), sv);
+  EXPECT_NE(v.serial(), sv);
+}
+
 TEST(Record, DestroyingTheCurrentTapeClearsTheScope) {
+
   auto* t = new Tape;
   Tape::Scope* scope = new Tape::Scope(*t);
   EXPECT_EQ(Tape::current(), t);

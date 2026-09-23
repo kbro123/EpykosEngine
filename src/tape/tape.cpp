@@ -1,15 +1,19 @@
 #include "epykos/tape/tape.hpp"
 
+#include <atomic>
 #include <cstring>
 #include <ostream>
 #include <sstream>
 #include <string>
+#include <utility>
+
 
 namespace epykos {
 
 namespace {
 
 thread_local Tape* g_current_tape = nullptr;
+std::atomic<tape_serial> g_next_serial{1};
 
 std::uint64_t bits_of(double v) noexcept {
   std::uint64_t u;
@@ -32,13 +36,68 @@ Tape* Tape::current() noexcept { return g_current_tape; }
 
 // ---- construction ------------------------------------------------------------------------
 
-Tape::Tape() = default;
+tape_serial Tape::next_serial() noexcept {
+  // Serials never repeat within a process (2^32 tapes); 0 is reserved for "no tape".
+  const tape_serial s = g_next_serial.fetch_add(1, std::memory_order_relaxed);
+  return s == no_tape ? g_next_serial.fetch_add(1, std::memory_order_relaxed) : s;
+}
+
+Tape::Tape() : serial_(next_serial()) {}
+
+Tape::Tape(const Tape& other)
+    : serial_(next_serial()),
+      nodes_(other.nodes_),
+      args_(other.args_),
+      coefs_(other.coefs_),
+      inputs_(other.inputs_),
+      outputs_(other.outputs_),
+      const_index_(other.const_index_) {}
+
+Tape::Tape(Tape&& other) noexcept
+    : serial_(other.serial_),
+      nodes_(std::move(other.nodes_)),
+      args_(std::move(other.args_)),
+      coefs_(std::move(other.coefs_)),
+      inputs_(std::move(other.inputs_)),
+      outputs_(std::move(other.outputs_)),
+      const_index_(std::move(other.const_index_)) {
+  other.serial_ = next_serial();
+  other.nodes_.clear();
+  other.args_.clear();
+  other.coefs_.clear();
+  other.inputs_.clear();
+  other.outputs_.clear();
+  other.const_index_.clear();
+}
+
+Tape& Tape::operator=(const Tape& other) {
+  if (this != &other) {
+    Tape copy(other);
+    swap(copy);  // this takes the copy's new serial; the old table (and serial) dies with `copy`
+  }
+  return *this;
+}
+
+Tape& Tape::operator=(Tape&& other) noexcept {
+  if (this != &other) {
+    Tape moved(std::move(other));
+    swap(moved);
+  }
+  return *this;
+}
+
 Tape::~Tape() {
   // A tape destroyed while it is the current tape leaves a dangling pointer: clear it.
   if (g_current_tape == this) g_current_tape = nullptr;
 }
 
+void Tape::bad_node_id(node_id id) const {
+  throw RecordError("tape: node id " + std::to_string(id) + " is not on this tape (" +
+                    std::to_string(nodes_.size()) + " nodes)");
+}
+
 void Tape::clear() {
+  serial_ = next_serial();  // values recorded before the clear must not alias the new table
   nodes_.clear();
   args_.clear();
   coefs_.clear();
@@ -48,7 +107,9 @@ void Tape::clear() {
 }
 
 void Tape::swap(Tape& other) noexcept {
+  std::swap(serial_, other.serial_);
   nodes_.swap(other.nodes_);
+
   args_.swap(other.args_);
   coefs_.swap(other.coefs_);
   inputs_.swap(other.inputs_);

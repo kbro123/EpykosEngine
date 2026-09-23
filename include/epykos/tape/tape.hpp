@@ -13,6 +13,12 @@
 // is restored). The current tape is thread-local; recording the same tape from two threads is
 // not supported.
 //
+// Every node table has a serial (Tape::serial(), unique for the life of the process) that the
+// values recorded on it carry (Rec::tape, D24): using a value on a tape other than the one it was
+// recorded on throws RecordError instead of reinterpreting its node id. A copy of a tape is a new
+// table with a new serial; a move keeps the serial; clear() and the passes (which swap in a
+// rebuilt table) give the object a new serial, so stale values throw rather than alias.
+//
 // The passes in tape/passes.hpp rewrite and renumber the node table. Node ids held in `Rec`
 // values are valid only until the first pass runs; input and output ordinals are stable forever.
 #pragma once
@@ -21,6 +27,7 @@
 #include <cstdint>
 #include <iosfwd>
 #include <span>
+
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -32,6 +39,9 @@ namespace epykos {
 
 using node_id = std::int32_t;
 inline constexpr node_id invalid_node = -1;
+// The identity of a node table as seen by the values recorded on it (Rec::tape); 0 is "no tape".
+using tape_serial = std::uint32_t;
+inline constexpr tape_serial no_tape = 0;
 
 // Thrown by the recording discipline: structural_if on a tainted predicate, .value() on a
 // tainted value in record mode, a Rec node used outside its recording scope, bad node ids.
@@ -54,11 +64,14 @@ struct Node {
 class Tape {
  public:
   Tape();
-  Tape(const Tape&) = default;
-  Tape(Tape&&) noexcept = default;
-  Tape& operator=(const Tape&) = default;
-  Tape& operator=(Tape&&) noexcept = default;
+  Tape(const Tape& other);            // a new table with a new serial
+  Tape(Tape&& other) noexcept;        // takes the serial; `other` gets a new one
+  Tape& operator=(const Tape& other);
+  Tape& operator=(Tape&& other) noexcept;
   ~Tape();
+
+  // This node table's serial: what Rec::tape must equal for a value to be used on this tape.
+  tape_serial serial() const noexcept { return serial_; }
 
   // ---- recording scope -------------------------------------------------------------------
   class Scope {
@@ -97,7 +110,11 @@ class Tape {
   // ---- inspection ------------------------------------------------------------------------
   std::size_t size() const noexcept { return nodes_.size(); }
   const std::vector<Node>& nodes() const noexcept { return nodes_; }
-  const Node& node(node_id id) const { return nodes_.at(static_cast<std::size_t>(id)); }
+  // Throws RecordError (not std::out_of_range) for an id this tape does not hold.
+  const Node& node(node_id id) const {
+    if (id < 0 || static_cast<std::size_t>(id) >= nodes_.size()) bad_node_id(id);
+    return nodes_[static_cast<std::size_t>(id)];
+  }
   const Node& operator[](node_id id) const noexcept {
     return nodes_[static_cast<std::size_t>(id)];
   }
@@ -143,8 +160,12 @@ class Tape {
  private:
   node_id push(Node n);
   void taint_from(Node& n) const noexcept;
+  [[noreturn]] void bad_node_id(node_id id) const;
+  static tape_serial next_serial() noexcept;
 
+  tape_serial serial_ = no_tape;
   std::vector<Node> nodes_;
+
   std::vector<node_id> args_;
   std::vector<double> coefs_;
   std::vector<node_id> inputs_;

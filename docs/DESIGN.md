@@ -92,6 +92,14 @@ recognises.
 | `gather` | `y[i] = v[idx[i]]` across domains | scatter-add, executed as a pull (§7) | all instrument structure reduces to index arrays = data |
 | `segment_sum` | ragged reduce fine → coarse by offsets | broadcast | sub-period → coupon → leg → row → portfolio |
 | `scan` | cumulative `⊕` along a sequence (product, sum, affine step); as built (M3/G3, D41) a recurrent domain whose rows are the steps of every chain, chain-major, with a carry gather reading the previous step — not a step op | reverse scan (the same pull, rows backwards) | compounding, survival, path evolution |
+
+**As built, Stage A scale (M3/G5, D44):** the 2,000-trade book's compounding is **5 scan domains** of 1,107 chains
+over 255,959 rows — not investigated why 5 domains arise from 3 scan classes rather than one, flagged for M4. A
+chain that starts inside another chain (a branch: two lockout coupons over the same start whose ends differ by a
+business day) is not folded into the scan; its own steps up to the divergence are retried as ordinary elementwise
+rows (§5 point 6), and without that retry the whole book has no scan domain at all (it splits into ~330 level
+domains). The scan is never fused or inlined by the planner (§7) and is 67–77% of every Stage A evaluation
+regardless of lane tile — the standing hot spot named for M4's cost model.
 | `quot` | `a / b` with a fused quotient-rule adjoint | 2-line rule | par rate / par spread without per-kind partials |
 | `quadform` | `½·xᵀQx` | `Q·x` | moment-integrated averaging (the one non-DF shape) |
 | `select` | `c ? a : b`, c value-dependent; both arms computed | adjoint of the selected arm | value branches; exports mask + margin + arm gap |
@@ -124,6 +132,16 @@ Batch lanes recalibrate independently (bitwise the single-lane runs), identical 
 record-point factorisation may drive every lane's steps (`chord`) with a per-lane refresh on a stall. `ir/sharing.hpp`
 asserts the cross-stage sharing: every DF domain feeds both the residuals and the book, and no DF is computed twice.
 
+**As built, Stage A scale (M3/G5, D44):** `CurveSet` is Composite-aware (`CurveSpec::regions`; a spec without
+regions keeps the exact M1 linear path unchanged, bitwise) — four curves (SOFR, ESTR, EURIBOR 3M/6M) solved in
+dependency order inside one tape, 4 blocks, 70 free knots, optimality `‖Jᵀr‖∞` worst 1.235e-13 (gate 1e-12) at the
+record point, at the O2 run and on 32 sampled lanes; the whole 1,000-lane grid recalibrates with 0 not converged.
+The solve tolerance is 1e-13, not this section's 1e-14, on the 2,000-trade book: the compounded residuals of
+30-year daily products carry a 3–5e-14 rounding floor in rate units, stated in the test. Forward mode for the O3
+comparison is `Dual<70>` on the templated maths (not a tangent interpreter over the IR) — 6.2× cheaper than the
+reverse IFT ladder for the per-trade shape, 40× more expensive for the book alone; the choice is reported per
+Jacobian block, not automated (M4's rule).
+
 ---
 
 ## 4. Recording
@@ -140,6 +158,14 @@ asserts the cross-stage sharing: every DF domain feeds both the residuals and th
 - **Overloads.** `max/min/abs` on `Rec` record `select`; a lint forbids `std::max` on a `Scalar`.
 - **Provenance side table** (optional): `(op → template call site, instrument, row)` for debugging.
 - **Scope markers** (optional hints): `EPY_DOMAIN(s, "coupon", i)` — no-ops for `double`; the signature pass verifies them.
+
+**As built, Stage A scale (M3/G5, D44):** recording the 2,000-trade book raw is 27,459,283 nodes (→ 517,036 after
+the E0 passes of §6) and takes 7–13 s / peaks ~1.5 GB depending on load — a record-time memo of the book's
+`df(slot, t)` callable (one `Rec` per distinct `(slot, t)`) keeps the *raw* recording from repeating a discount
+factor already looked up for an earlier coupon; the calibration instruments' own DFs are not memoised, they are
+merged by `cse` regardless. The post-`cse` tape is identical either way — the memo shrinks recording time and raw
+node count only, it folds none of the maths, and every compounding loop, average and forward is still recorded
+per coupon exactly as `maths/instrument/coupon.hpp` writes it (no telescoping, no pre-folding by hand, D44).
 
 ---
 
@@ -257,6 +283,11 @@ independent of B, tile and lane tile as for every other domain (the scan fixture
 | G early exercise | Bermudan (LSM) | regression β `frozen`, exercise as `select` on the frozen rule (envelope theorem ⇒ first-order Greeks exact); low-dim via a fixed-grid PDE |
 | H adaptive numerics | adaptive quadrature/ODE/PDE grids | freeze the grid as structure; a-posteriori error estimate as a guard; or fixed high-order rules |
 
+**As built, Stage A scale (M3/G5, D44):** the base Stage A tape (linear-zero curves) records **no class-B `select`
+at all** — every discount factor, coupon and leg PV is a plain elementwise or scan row — so it produces no O6
+select exports; class B is exercised by the SOFR curve's monotone-cubic and composite recordings, gated separately
+on the 300-trade scheme-sweep sample (126 / 36 selects exported respectively, D44), not by the 2,000-trade book.
+
 ---
 
 ## 9. Structure churn
@@ -296,6 +327,12 @@ independent of B, tile and lane tile as for every other domain (the scan fixture
   selects are ties (`min`, `max`, `abs`, the sign), so their gap vanishes with the margin and a flip is degenerate; a
   select whose arms differ by a finite amount at the boundary is a jump (measured: `classify_flip`).
 - No `-ffast-math`.
+
+**As built, Stage A scale (M3/G6, D45):** the differential ball (64 draws, ρ 0.005 over the 70 quotes) is bitwise
+E0 under both the release and reference presets on all 8,191 outputs — 0 mismatches, max ulps 0 — confirming §11's
+E0 discipline holds through an implicit block, a scan and the full instrument set, not only on the M1/M2 fixtures.
+Every other §6 gate agrees release vs reference to within the last few digits of its worst number, as expected from
+`-ffp-contract=off` (D45; e.g. the adjoint-vs-Dual worst is 2.79e-15 release / 2.25e-15 reference).
 
 ---
 

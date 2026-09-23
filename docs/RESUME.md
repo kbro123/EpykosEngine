@@ -20,26 +20,27 @@ This is the launch brief for the M1–M5 run and the handoff for the morning. Ag
 - **Layout is by library structure, never by milestone.** Engine code under `include/epykos/<component>/` and
   `src/<component>/`; seeded fixture books, record helpers and oracles under `include/epykos/fixtures/` and
   `src/fixtures/` (test-only, not engine API); hand-written reference kernels under `bench/hand/`. Milestone names
-  appear only as fixture names (`fixtures/m1_book.hpp`) and in test/bench file names. M2/Q0 consolidates what M1
-  left under `maths/m1/`, `tape/record_m1.hpp` and `hand/`.
+  appear only as fixture names (`fixtures/m1_book.hpp`) and in test/bench file names. M2/Q0 consolidated what M1
+  left under `maths/m1/`, `tape/record_m1.hpp` and `hand/` (D28; §2 below is the layout as it stands).
 
-## 2. Repository layout (fixed by M1/P0)
+## 2. Repository layout (fixed by M1/P0; consolidated by M2/Q0, D28)
 ```
 CMakeLists.txt  CMakePresets.json        presets: release (D13 flags), reference (+ -ffp-contract=off), debug
 scripts/bootstrap.sh                     fetch pinned third_party with checksums
 scripts/fingerprint.sh                   CPU brand, cores, compiler, flags → id; prints 1-min load
 include/epykos/                          public headers, namespace epykos, macros EPY_*
   scalar/     Rec, RecBool, Dual, scalar traits, select/structural_if
-  maths/      templated pricing maths: calendar, schedules; curve/ (schemes, variables, composite); swap/ (legs, swaps); model/ (M5)
-  fixtures/   seeded test books (m1_book), record helpers, oracles - test-only, not engine API
-  tape/       node table, opcode enum (one for every pass), CSE/DCE, fold-sum, affine collapse
-  ir/         domain IR (plain data, serialisable), signature pass, expander (round-trip)
+  maths/      templated pricing maths: calendar; exp_poly (vectorisable exp, E1); curve/ (linear.hpp = the linear-in-zero-rate scheme; M4 adds schemes, variables, composite); swap/ (ois.hpp = OIS coupon formulas; M4 adds legs, swaps); model/ (M5)
+  fixtures/   test-only, not engine API (namespace epykos::fixtures): m1_book (seeded book + batch), m1_price (leg/swap/book folds over the book), m1_reference (double oracle table), record_m1 (record helper)
+  rng/        Philox-4x32-10, AS241 inverse normal
+  tape/       node table, opcode enum (one for every pass), CSE/DCE, fold-sum, affine collapse, replay
+  ir/         domain IR (plain data, serialisable), signature pass, expander (round-trip), reference evaluator
   exec/       tiled interpreter, tile/batch layout, thread pool (M5)
   adjoint/    M2      rewrite/  M3      catalogue/  M3      solver/  M4      mc/  M5
-src/                                     non-template implementation
+src/                                     non-template implementation; src/fixtures/ = the seeded book generator (E0 TU, test-only)
 src/catalogue/generated/                 committed generated kernels (M3)
-tests/                                   gtest: unit, roundtrip, differential, adjoint, mutation
-bench/                                   Google Benchmark; results in bench/results/<fingerprint>/; bench/hand/ = hand-fused reference kernels (D9)
+tests/                                   gtest: unit, roundtrip, differential, adjoint, mutation; tests/hand/ links epykos_hand
+bench/                                   Google Benchmark; results in bench/results/<fingerprint>/; bench/hand/ = the hand-fused reference kernel (D9), static library epykos_hand, not engine API
 tools/catalogue/                         M3 generator
 third_party/                             gitignored
 .github/workflows/ci.yml                 tests only: ubuntu-latest GCC 13, macos-latest Apple clang
@@ -155,6 +156,8 @@ available for Linux/GCC checks (used by M1/P7 to reproduce the GCC 13 CI jobs). 
 2026-09-23  M1/P7-fix  landed: the ten actionable findings - D23 recurrent flag per domain, D24 tape serial in Rec/RecBool, D25 src/**/*_e0.cpp reference TUs pinned on both compilers, D26 E1 leg-scale tolerance, serialize round-trip of long group names, replay_e0_test argument order, the pairing table leading the P6 README, WORKLOADS measurement terms, cores = logical, seasoned-first wording; first green CI since P0 (24/24 on all 3 jobs)  b32182a64f3d1653b1e435bae300955b6a305f3a
 2026-09-23  M1/P6 benchmark attempt 5  landed: re-measured at b32182a, the first measured commit with green CI: b1 1.044 (met), b64 1.079 (met); summariser fix 53ddd13; results 0a3a336  097d54bc1c5e2e9cf0fe4802583a7ffa372948c2
 2026-09-23  M1/m1-close  landed: this log, the M1 result below, D27 (gate pairing and verdict), the status lines of CLAUDE.md / README.md, the ROADMAP M1 result line, DESIGN.md reflecting D22-D27  (this commit, branch m1/m1-close)
+
+2026-09-23  M2/Q0 consolidate  landed: the tree is organised by library structure, no behaviour change (D28): the M1 fixtures (m1_book, m1_price = the leg/swap/book folds over the Book, m1_reference, record_m1) under include/epykos/fixtures + src/fixtures (namespace epykos::fixtures, test-only); the linear-in-zero-rate scheme at maths/curve/linear.hpp (epykos::curve::linear, bodies unchanged); the OIS coupon formulas at maths/swap/ois.hpp (epykos::ois); exp_poly at maths/exp_poly.hpp (epykos::maths; kept in the engine because exec::Interpreter's ExpMode::poly uses it, its test now tests/maths/exp_poly_test.cpp); the hand-fused kernel at bench/hand/ as the static library epykos_hand (bench/hand/CMakeLists.txt pins its *_e0.cpp like src/**/*_e0.cpp), linked by tests/hand and bench/hand. Evidence (Apple clang 21, d448afd70180): 24/24 ctest under release and reference before and after (hand_exp_poly_test -> maths_exp_poly_test, every other name unchanged), the E0 digests printed by the oracle, fixture, record_m1, interpreter and hand tests byte-identical to the pre-move build under both presets, zero build warnings, all 4 benchmarks build and run (not re-measured), bench/results untouched  code 1df6179
 
 ### M1 result (2026-09-23)
 **Verdict: go** (orchestrator, at M1 close; the gate pairing is D27). Engine measured: b32182a64f3d1653b1e435bae300955b6a305f3a (integrate/m1-m5 tip after the P7 review fixes; no run()-path change since c4fc0d7 / P4-opt-3). Results: commit 097d54bc1c5e2e9cf0fe4802583a7ffa372948c2, bench/results/d448afd70180/{m1.json, README.md, m1_p6_fingerprint.json, m1_p6_hand.json, m1_p6_interp.json, m1_p6_gates.json, m1_p6_notes.json, m1_p6_plan.txt} (raw n = 20 repetitions in the hand/interp JSON). CI: green on all 3 jobs at b32182a (run 35829425538; ubuntu GCC 13 release + reference, macOS clang release, 24/24 each); the run at 097d54b (results and a summariser Python fix, no engine code) is also green on all 3 jobs (run 35831717098, completed 2026-09-23 before this close).

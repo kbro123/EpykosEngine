@@ -43,13 +43,16 @@ arm64 CI runner) and `build/<preset>/epykos_flags.txt` / `epykos::build_flags()`
 Fingerprint: `scripts/fingerprint.sh`.
 
 Adding code needs no CMake edits (all globs are `CONFIGURE_DEPENDS`): headers under `include/epykos/**` and sources
-under `src/**/*.cpp` compile into the library `epykos`; `tests/**/<name>_test.cpp` becomes the gtest executable and
-ctest entry `<subdir>_<name>_test`; `bench/**/<name>_bench.cpp` becomes a Google Benchmark executable (built, never
-run by ctest or CI). **Tests named `*_e0_test.cpp` are compiled with `-ffp-contract=off` in every preset** (label
-`e0`, `ctest -L e0`): that is how E0 gates get the reference flags. **Library sources named `src/**/*_e0.cpp` are
-pinned the same way in every preset** (fixture generators, the hand-fused reference, the interpreter kernels; D25) —
-a clang pragma is not enough, GCC contracts in C++ even in ISO mode. An E0 gate that crosses into any other code
-compiled in `src/` runs under the reference preset.
+under `src/**/*.cpp` compile into the library `epykos` (`include/epykos/fixtures/` and `src/fixtures/` are test-only
+fixtures, not engine API; engine headers never include them; D28); `tests/**/<name>_test.cpp` becomes the gtest
+executable and ctest entry `<subdir>_<name>_test`; `bench/**/<name>_bench.cpp` becomes a Google Benchmark executable
+(built, never run by ctest or CI); `bench/hand/` is the hand-fused reference kernel, the static library `epykos_hand`
+that `tests/hand/` and the hand benches link (D9, D28). **Tests named `*_e0_test.cpp` are compiled with
+`-ffp-contract=off` in every preset** (label `e0`, `ctest -L e0`): that is how E0 gates get the reference flags.
+**Library sources named `src/**/*_e0.cpp` are pinned the same way in every preset** (fixture generators, the
+interpreter kernels; D25), and so is `bench/hand/*_e0.cpp` (the hand-fused reference; D28) — a clang pragma is not
+enough, GCC contracts in C++ even in ISO mode. An E0 gate that crosses into any other code compiled in `src/` runs
+under the reference preset.
 
 
 ## Commits

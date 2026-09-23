@@ -178,3 +178,18 @@ fixture that diverges across compilers is caught rather than reported as "bit-id
 machine. libm-dependent bits (exp/log: notionals, par rates, fixed rates, the oracle) are printed as digests, never
 asserted against a literal. CI status is now part of the M1 evidence (P6 README, RESUME progress lines).
 
+## D26 — E1 tolerance for a difference of legs (2026-09-23)
+Refines D8 (M1/P7 review; the definition M1/P5 implemented in `tests/hand/m1_hand_test.cpp` without recording it).
+A swap PV is `side·(fixed − float)`, a difference of two legs that at the record point cancel to `|ε_i|·par·annuity`
+and at the batch states to as little as 1e-6 of the leg size; rounding-level (E1, ~1e-15) agreement of the legs is
+therefore up to 1e-9 *relative to such a PV* for any kernel that does not reproduce the oracle's operations bit for
+bit. The E1 tolerance for a value that is a difference of terms is relative to the scale of the terms:
+`|Δpv_i| ≤ 1e-12·(|fixed_i| + |float_i|)` per swap and `|Δbook| ≤ 1e-12·Σ_i |pv_i|` for the book; the literal
+`|Δ| ≤ 1e-12·|value|` is asserted in addition wherever `|value| ≥ 1e-2 × scale`. P5 measured on d448afd70180
+(reference preset, default variant fused/shared-recip/exp_poly): worst `|Δpv|/(|fixed|+|float|)` 2.75e-15, worst
+`|Δbook|/Σ|pv|` 1.35e-15, worst literal `|Δpv|/|pv|` 2.4e-13 on the 39,729 well-conditioned swap-states (581 of the
+25,271 ill-conditioned ones exceed the literal bound), worst literal `|Δbook|/|book|` 1.02e-13 on the 58
+well-conditioned states and 1.46e-12 over all 65 (7 states have `|book| < 1e-2·Σ|pv|`); std::exp variant 1.54e-13 /
+6.15e-13, per-row-division variant 2.4e-13 / 8.1e-13. Read literally, "E1 vs P1 double (≤ 1e-12)" is therefore
+violated at those states; the RESUME M1 table now states the scaled gate. If the owner wants the literal bound, P5
+is failed at those states and the hand kernel's fused arithmetic would need the oracle's operation order there.

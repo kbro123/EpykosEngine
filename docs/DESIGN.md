@@ -86,7 +86,7 @@ recognises.
 | `ew` (elementwise) | `add sub mul div neg exp log sqrt recip fma …` within one domain | local rules | the arithmetic; fused, never dispatched per element |
 | `gather` | `y[i] = v[idx[i]]` across domains | scatter-add, executed as a pull (§7) | all instrument structure reduces to index arrays = data |
 | `segment_sum` | ragged reduce fine → coarse by offsets | broadcast | sub-period → coupon → leg → row → portfolio |
-| `scan` | cumulative `⊕` along a sequence (product, sum, affine step) | reverse scan | compounding, survival, path evolution |
+| `scan` | cumulative `⊕` along a sequence (product, sum, affine step); as built (M3/G3, D41) a recurrent domain whose rows are the steps of every chain, chain-major, with a carry gather reading the previous step — not a step op | reverse scan (the same pull, rows backwards) | compounding, survival, path evolution |
 | `quot` | `a / b` with a fused quotient-rule adjoint | 2-line rule | par rate / par spread without per-kind partials |
 | `quadform` | `½·xᵀQx` | `Q·x` | moment-integrated averaging (the one non-DF shape) |
 | `select` | `c ? a : b`, c value-dependent; both arms computed | adjoint of the selected arm | value branches; exports mask + margin + arm gap |
@@ -148,11 +148,22 @@ asserts the cross-stage sharing: every DF domain feeds both the residuals and th
 4. Partition by signature: domain = class; rows = instances; constant slots = columns; operands in another domain =
    gather indices; `SUM` children = segment offsets.
 5. Column classification: identical across instances → literal (folded); varying → data column.
-6. **Recurrence detection:** if instances of one class depend on each other, the class is a `scan` candidate (sequential
-   along the chain; parallel only across the batch axis). As implemented (D23): the class is flagged `scan_class`, its
-   instances are split by dependency level so every domain reads only earlier domains, and `recurrent` (a domain whose
-   rows read that same domain, which the interpreter refuses) is never produced by inference; M1 asserts no scan class
-   on its book.
+6. **Recurrence detection:** chains `x_{k+1} = f(x_k, …)` are found without hints before the partition (M3/G3, D41):
+   a node's tree with one node cut out and replaced by a carry token hashes like the cut node's own tree with its
+   own cut, at the same operand path, three or more steps in a row. The steps become one *scan domain* — recurrent,
+   rows chain-major, `Program::scans` naming the carry gather and the chains — whose group is the step (a Sum on
+   the carry's path is a fixed-arity Sum step: fold_sum's `+` of `a·x + b`). Sequential along a chain, parallel
+   across chains and batch lanes. An inner running sum is fold_sum's reduction, never a scan; a chain the builder
+   cannot lay out (the carry inside an Affine, a step reading its own earlier steps through another class, fewer
+   than three steps) is flagged `scan_class` and split by dependency level as before (D23), so every domain still
+   reads only earlier domains. The M1 book has no chain and its program is unchanged.
+   **How to write a recurrence so it records as a scan:** as the definition states it, one Scalar carried through
+   the loop — `Scalar acc = 1.0; for (i) acc = acc * (1.0 + r[i] * tau[i]);` (`maths/swap/compounding.hpp`),
+   `x = a * x + drift + noise` for a path — never telescoped, unrolled or pre-folded by hand (the collapse of the
+   compounded product to `DF(s)/DF(e)` is the engine's business, M4), never an `if` on the Scalar (it does not
+   compile). Realised fixings as plain doubles in the same loop form a chain of their own (a constant per step)
+   whose last value starts the projected chain; two step shapes in one loop are two chains; every partial value
+   may be an output (each step a boundary) and it is still one scan.
 7. **Round-trip check:** expand the domain IR back to a scalar tape and compare node-for-node with the recording.
    Identity, not tolerance.
 
@@ -209,6 +220,13 @@ lane bitwise the single-state run) hold under every preset. Measured on the M1 b
 value + adjoint of the book PV 418.5 µs at B = 1, 7.38× the value-only interpreter, and 229.7 µs per state at B = 64,
 9.31× — every row value is materialised and none of the interpreter's fusions apply in the reverse; the reverse of a
 fused group is rewrite / catalogue work (M4).
+
+Scan domains (M3/G3, D41): the interpreter evaluates a scan wave by wave — wave w is the rows whose carry chain has
+depth w — in tiles of the indirect row mode (the carry is a gather like any other), so a wave of forty coupons' step
+k runs as one tile and the batch lanes are the innermost axis; a scan is never fused into a reduction nor inlined.
+The adjoint runs a scan's forward one row per tile in row order and its reverse one row at a time backwards: the
+carry's edge slot (carry, r + 1) is one of row r's readers, so the reverse scan is the ordinary pull. Bits are
+independent of B, tile and lane tile as for every other domain (the scan fixtures' E0 gates).
 
 ---
 
@@ -279,6 +297,11 @@ Correctness gates:
   and on the near-miss shapes fixture, whose `select` / `recip` / `fma` / `log` / `sqrt` rules the book cannot
   exercise (`adjoint::Adjoint` and `scalar/dual.hpp`, the same templated maths on `Dual<N>`; M2/Q2, Q3, Q3b, Q4b:
   FD within 2.9e-9, forward mode within 2.1e-13 on the M1 book);
+- **scan gates** (M3/G3, D41): the RFR compounding book and the affine scan (`fixtures/rfr_book.hpp`,
+  `fixtures/affine_scan.hpp`; WORKLOADS §M2) — detection without hints on the raw recording and after the passes,
+  round-trip identity, the interpreter bitwise the double maths at B = 1 and B = 64 over tiles and lane tiles, the
+  adjoint vs forward mode at 1e-12 and vs FD at 1e-6, the batched adjoint lane for lane; the M1 book asserted free
+  of scans and unchanged;
 - **mutation testing** on rewrite rules (a mutated rule must fail a gate): every pass carries its mutants as one-line
   defects behind `epykos::mutant("<pass>.<defect>")` (`include/epykos/mutation/`), compiled in only by the `mutation`
   preset and selected one per process by `EPYKOS_MUTANT`; `scripts/mutation_test.sh` runs the gates above once per
@@ -299,7 +322,10 @@ Reference implementations (QuantLib, hand-fused kernels) are informational table
 
 - **Irregular code with a batch axis** (scripted exotics): low catalogue coverage → interpreter-bound; a JIT (AADC-style)
   likely wins by 1.3–2× (estimate).
-- **Recurrences** need scan-domain detection, unprototyped.
+- **Recurrences**: scan-domain detection exists (M3/G3, D41) for chains of identical steps with the carry at most
+  four operands deep; a recurrence through an Affine, or a step that reads its own earlier steps through another
+  class, falls back to level splitting (correct, one domain per step); the scan's step is not yet fused with its
+  neighbours and the adjoint reverses it one row at a time (M4).
 - **Brownfield**: requires `Scalar`-templated maths; cannot accelerate an existing OO library.
 - **Compiler risk**: bugs are wrong numbers, not crashes. The verification harness precedes the compiler.
 - **Linear-path parity**: the generic path must match a hand-fused kernel; the scalar tape measured 1.5–2.5× behind. M1

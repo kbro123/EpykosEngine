@@ -586,3 +586,55 @@ Implements DESIGN.md §3.2 `implicit(F)` and D7 for M3/G4 (`include/epykos/solve
    `solver_curve_set_adjoint_test` and `solver_m1_implicit_vs_dual_test` (17/17 registered mutants caught against
    29 gates on the tree rebased onto G1, `scripts/mutation_test.sh`); the forward-mode gate at 1e-12 is the one that sees a stale Jacobian
    whatever the start point.
+## D41 — Scan domains: a recurrence is a domain, detected as a chain of identical steps (2026-09-23)
+Implements DESIGN.md §3.1 `scan` and §5.6 (M3/G3, `include/epykos/ir/`, `src/ir/signature.cpp`, the interpreter and
+the adjoint); refines D22 rule 4 and D23. Four choices:
+1. **Representation.** A scan is a *domain kind*, not a step op: a recurrent domain (`Domain::recurrent`, rows
+   reading earlier rows of the same domain, which `ir::validate` always permitted) whose recurrence
+   `Program::scans[domain.scan]` describes — rows chain-major (chain c is rows `[off[c], off[c+1])`), one *carry*
+   gather reading `value_base + r − 1` for every row but a chain's first, whose carry reads the chain's initial
+   value in an earlier domain (a Const initial value is a row of the const domain, like a Const Sum member). The
+   step is the group; the carry is a gather like any other, so the expander, the evaluator, the adjoint's edge
+   slots and pulls and the serialisation (`epykos-ir 3`) need no new op. `Op::Scan` stays reserved. A Sum on the
+   carry's path (fold_sum's `+` of `a·x + b`) becomes a *fixed-arity Sum step* (`Step{Sum, a, b[, c]}`, no
+   segment): the same left fold, emitted back as a variadic Sum node, executed as Add kernels — the only extension
+   to the step vocabulary.
+2. **Detection, without hints.** Before the partition, a node's expression tree (walked as the extraction walks it:
+   through single-use fixed-arity nodes, stopping at boundaries and constants, and additionally through a
+   two-or-three-member Sum used once and a single-use member *when they lie on the path to the carry*) is hashed
+   with one node cut out and replaced by a carry token; a node whose cut of a node m hashes like m's own cut, at
+   the same operand path, extends m's chain or starts one (m's cut is the initial value). Three or more steps make
+   a chain (two identical steps are straight-line code: `x·a·b`). A cut directly under an Add or a Sum whose
+   target is a single-use value is not a link: an inner running sum is a reduction and fold_sum's, never a scan
+   (the raw M1 leg sums). The carry is searched at most four operands deep; a tree beyond 256 entries is not a
+   step. The steps become boundaries, the initial value a boundary, the on-path nodes inner steps of the group,
+   and a scan step's class carries a scan token, so it never shares a class with a non-scan node of the same shape.
+   The sharing rule (D22 rule 2) runs again with the steps as stops of the deep hash, never promoting a step's
+   inner nodes. What the author must do: write the loop as the definition states it, one Scalar carried through
+   (`acc = acc * (1 + r_i * tau_i)`); realised fixings as plain doubles form a chain of their own feeding the
+   projected one; a chain whose steps differ in shape is two chains (`maths/swap/compounding.hpp`).
+3. **Layout.** Every Sum of a program is one class, so a scan class normally sits in the level-splitting SCC of
+   D22 rule 4 (the compounding steps read the `1 + r·τ` sums, the leg sums read the coupons that read the steps).
+   It takes part in the split as a unit: its carry reads are not edges, and every step of a chain gets the chain's
+   level — one more than the deepest read of any of its steps — by a fixed-point over the SCC's rows (levels only
+   rise). A class whose rows read a later row after the chain-major reordering, or whose chains never settle (a
+   step reading a value that depends on an earlier step of its own chain through another class), is retried with
+   its steps banned from any chain and is split by level as before (D23); `InferStats::scan_retries` says why.
+   The M1 book has no chain of any kind and its program is unchanged (8 classes, 10 domains, 42,314 rows).
+4. **Execution.** `exec::Interpreter`: wave by wave — wave w is the rows whose carry chain has depth w, evaluated in
+   tiles of the indirect row mode into the member buffer and copied to their slots, so a row reads rows of earlier
+   waves only (sequential along a chain, parallel across chains and lanes); never fused, never inlined.
+   `adjoint::Adjoint`: forward one row per tile in row order (each load sees the previous row), reverse one row at a
+   time backwards — the reverse scan is the same pull, since the edge slot (carry, r + 1) is one of row r's readers
+   (D31). Bits are independent of B, tile and lane tile as before. Mutants (D32): `expander.scan_carry_from_init`,
+   `interpreter.scan_drop_last_wave`, `adjoint.scan_forward_order`, exercised by the scan fixtures' gates (WORKLOADS
+   §M2), since the M1 book has no scan.
+Measured on the fixtures (Apple clang 21, release and reference presets): the RFR compounding book (D16-style seed;
+`fixtures/rfr_book.hpp`) after the passes is 2 scan domains — 48 projected chains of 73–92 daily steps (CSE shares the
+unseasoned swaps' identical coupon periods) and 3 chains of 10–18 fixings — and 156 chains on the raw recording; the
+affine scan (`fixtures/affine_scan.hpp`, 4 paths recorded time-outer) is one domain of 4 chains of 100 steps with the
+step `sum(mul(@0,^),@1,@2)`; round-trip identity holds raw and after the passes; the interpreter is bitwise the double
+maths and the replay at 65 states, B = 64 lane for lane the 64 B = 1 runs over tiles {1, 7, 256, 4096} × lane tiles
+{1, 3, 8, 32, 64}; the adjoint's Jacobian is within 3.1e-15 of forward mode (gate 1e-12, relative to the row's scale)
+and 2.1e-9 of central FD (gate 1e-6); the batched adjoint is lane for lane the single runs. The reverse of a fused
+scan step and the per-row adjoint of a scan are M4's, like every other fusion.

@@ -47,7 +47,8 @@ into M4–M6 below, applied to the desk problem.
 - Instruments as templated maths over convention tables: RFR compounded (natural product recurrence → `scan`),
   RFR averaging, term-rate legs with fixing in advance, fixed legs, OIS / IBOR / tenor-basis swaps, deposits,
   futures (convexity 0, stated); par rates and residuals.
-- `scan` domains: recurrence detection, interpreter and reverse-scan adjoint.
+- `scan` domains: recurrence detection, interpreter and reverse-scan adjoint (G3 landed 2026-09-23, D41: chains of
+  identical steps detected without hints, wave-by-wave interpreter, row-by-row reverse scan, three mutants caught).
 - `implicit` node with multi-curve dependencies inside the tape; residual sub-program sharing the DF domains with
   the book (`PROBLEM.md` §5).
 - The Stage A fixture from the seed (synthetic quotes, ~2,000 trades, 1,000 scenarios) recorded as **one tape**
@@ -104,7 +105,7 @@ kernel serialisation; GPU backend for the batch axis.
 | risk | milestone that tests it | mitigation |
 |---|---|---|
 | generic path slower than hand-fused on linear books | M1, M3 | tile/layout tuning; catalogue; keep a hand path only if gates force it |
-| scan domains mis-detected | M5 | explicit scope markers as hints; round-trip check |
+| scan domains mis-detected | M3 (G3) | round-trip identity on every recording; a chain the builder cannot lay out falls back to level splitting (D41); explicit scope markers as hints remain available |
 | silent compiler bugs | M2 onward | round-trip identity, differential tests, mutation testing before feature work |
 | kink flip storms | M4 | `select` + arm-gap classification + `pin` active set |
 | adjoint memory at MC scale | M6 | batch-lane adjoints, per-thread accumulators, binomial checkpointing |

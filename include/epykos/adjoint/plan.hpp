@@ -21,7 +21,7 @@
 // order then rows ascending; segments in Program order then rows then members) — the "who reads
 // me" CSR lists below, built once. An Affine's reader list is the transpose of its coefficient
 // table: on a curve that is the calibration Jacobian shape Wᵀ (DESIGN.md §7). The Input domain's
-// v̄ is the state adjoint. A scan domain (ir::Program::scans, D37) needs no extra table: the
+// v̄ is the state adjoint. A scan domain (ir::Program::scans, D41) needs no extra table: the
 // carry is a gather whose edge slot (carry, row r + 1) is one of row r's readers, so the reverse
 // scan is the same pull applied to the rows backwards, one row at a time (adjoint.hpp). A
 // recurrent domain that is not a scan is refused.
@@ -83,7 +83,7 @@ struct AdjointPlan {
     std::vector<std::int32_t> ordinal;   // Input domain: input ordinal per row; empty otherwise
     bool is_input = false;               // the group is one Input step
     bool is_const = false;               // the group is one Const step (nothing to reverse)
-    bool is_scan = false;                // a scan domain: forward row by row, reverse rows backwards (D37)
+    bool is_scan = false;                // a scan domain: forward row by row, reverse rows backwards (D41)
     std::int32_t readers = 0;            // total "who reads me" entries over the domain's rows (all kinds)
   };
   std::vector<DomainPlan> domains;  // per Program domain

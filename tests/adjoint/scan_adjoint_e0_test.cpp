@@ -1,4 +1,4 @@
-// M3/G3 E0 gate: the adjoint on the scan fixtures (D37) — the RFR compounding book and the
+// M3/G3 E0 gate: the adjoint on the scan fixtures (D41) — the RFR compounding book and the
 // affine scan — its forward pass bitwise the tape replay and the interpreter at the record
 // point and 64 states; a batched run (B = 64) lane for lane bitwise the 64 single-state runs
 // (forward outputs and state adjoints); every tile in {1, 7, 256} × lane tile in {1, 3, 8, 64}

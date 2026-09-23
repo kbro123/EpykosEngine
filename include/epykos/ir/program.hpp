@@ -18,7 +18,7 @@
 //   inputs    value id of every Input ordinal (they are rows of the Input domain).
 //   outputs   value id of every output ordinal.
 //
-// Scan domains (DESIGN.md §3.1 `scan`, §5.6; M3/G3, D37). A class whose instances form chains
+// Scan domains (DESIGN.md §3.1 `scan`, §5.6; M3/G3, D41). A class whose instances form chains
 // x_{k+1} = f(x_k, ...) — the natural product loop of a compounded coupon, a short-rate path — is
 // one domain whose rows read earlier rows of the same domain: `recurrent` is set, and
 // `Program::scans[domain.scan]` describes the recurrence: the rows are the steps of every chain,
@@ -134,7 +134,7 @@ struct Segment {
   bool operator==(const Segment&) const = default;
 };
 
-// A scan domain's recurrence (D37): its rows are the steps of `chain_offsets.size() - 1` chains,
+// A scan domain's recurrence (D41): its rows are the steps of `chain_offsets.size() - 1` chains,
 // chain-major; `carry_gather` (a gather of the domain) reads value_base + r - 1 for every row r
 // that is not a chain's first, and a value of an earlier domain (the chain's initial value) for
 // a chain's first row. The group's step reads the carry like any gather.

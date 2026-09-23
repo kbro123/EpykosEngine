@@ -1,4 +1,4 @@
-// M3/G3 gate: scan detection and the round-trip identity on the two scan fixtures (D37) — the
+// M3/G3 gate: scan detection and the round-trip identity on the two scan fixtures (D41) — the
 // RFR compounding book (fixtures/rfr_book.hpp: ten quarterly swaps whose float coupons compound
 // daily as the natural product loop, three of them seasoned with realised fixings) and the
 // affine scan (fixtures/affine_scan.hpp: x_{k+1} = a_k·x_k + b_k over 100 steps on 4 interleaved

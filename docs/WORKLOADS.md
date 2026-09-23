@@ -113,6 +113,16 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   | `implicit.ift_not_transposed` | the IFT multiplier solves `F_z λ = z̄` instead of `F_zᵀ λ = z̄` | the calibrated M1 book (F_z is not symmetric) |
   | `implicit.ift_drop_fp` | the parameter pull `p̄ −= F_pᵀ λ` is skipped: the quotes receive no adjoint | the calibrated M1 book (every quote adjoint arrives through it) |
   | `implicit.stale_jacobian` | the IFT uses the last iterate's Jacobian, not the solution's | the forward-mode gate at 1e-12 (which sees it whatever the start); from the fixture's flat 3 % start the last iterate is far enough from the solution for the 1e-6 bump gates to see it too (measured: caught by all three, and by the lanes E0 gate through a NaN diagnostic under the chord policy) |
+
+  then the scan mutants (M3/G3, D41), caught by the scan fixtures' gates below — `tests/ir/scan_roundtrip_test.cpp`,
+  `tests/exec/scan_interp_e0_test.cpp`, `tests/adjoint/scan_adjoint_vs_dual_test.cpp` — **not exercisable on the M1
+  book** (no scan):
+
+  | mutant | defect (one line) | exercised by |
+  |---|---|---|
+  | `expander.scan_carry_from_init` | `expand`: every step of a chain reads the chain's initial value instead of the previous step (the scan unrolled without its recurrence) | the round-trip identity on both scan fixtures |
+  | `interpreter.scan_drop_last_wave` | `Interpreter::run`: the last wave of every scan (the last step of its longest chains) is not evaluated | the E0 interpreter gate on both scan fixtures |
+  | `adjoint.scan_forward_order` | `Adjoint::run`: the reverse scan visits the rows forwards, so the carried adjoint arrives after it was pulled | the adjoint vs forward mode / FD gate on both scan fixtures |
 - **Near-miss shapes** (`include/epykos/fixtures/nearmiss_shapes.hpp`, the gate fixture the mutation harness showed
   was missing, D32): 42 templated shapes over six positive inputs, each an op tree that differs from a neighbour in
   exactly one respect a signature may overlook — a constant on the left or the right of `−` and `/`, a constant in
@@ -129,6 +139,30 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   adjoint (M2/Q4b) vs the `Dual<6>` Jacobian at 1e-12 and vs central FD (`h = 1e-6`, 1e-6, where the difference does
   not straddle a kink) on the raw recording and after the passes at the record point and 15 draws, and linearity in
   the seed with the seeded adjoint checked against `Jᵀ·seed` from the Dual Jacobian.
+
+- **Scan fixtures** (M3/G3, D41; `include/epykos/fixtures/rfr_book.hpp`, `rfr_price.hpp`, `affine_scan.hpp`;
+  synthetic, from the seed, no data files):
+  - the **RFR compounding book**: ten quarterly OIS swaps on the M1 12-knot curve at the M1 record point, tenor
+    U{1..5} years, notional log-uniform [1e6, 1e8], side ±1, ε ~ U(−0.05, 0.05), K = par·(1 + ε) (sub-stream
+    500000 + i, draws 0..4); swaps 0..2 seasoned with start offset U{10..60} days and a realised fixing per day before
+    the valuation date, R_d = z(1/365)·(1 + U(−0.1, 0.1)) (sub-stream 510000 + i, draw d − d0). The synthetic M1
+    calendar (day 0 = valuation, no holidays, ACT/360, t = d/365), quarterly period ends d0 + round(365.25·j/4). The
+    float coupon compounds daily as the natural product loop over its accrual days (τ_d = 1/360, the daily forward
+    from the discount factors, or the fixing): `pv = N·τ·((Π(1 + r_d·τ_d) − 1)/τ)·DF(e)`; the fixed coupon
+    `N·τ·K·DF(e)`; swap `side·(fixed − float)`; book the sum. Outputs: the 10 swap PVs then the book PV; states: the
+    64 M1 batch states. After the passes: 2 scan domains, 48 projected chains of 73–92 steps (CSE shares the
+    unseasoned swaps' identical coupon periods), 3 fixing chains of 10–18 steps; raw: 156 chains;
+  - the **affine scan**: `x_{k+1} = a_k·x_k + b_k` over 100 steps on 4 paths, recorded time-outer (interleaved
+    chains): `a_k = exp(−κ·Δt_k)`, `drift_k = θ·(1 − a_k)`, `b_kp = drift_k + σ·sqrt(Δt_k)·ε_kp`; inputs x_0 of each
+    path (0.02 + 0.005p), κ = 0.5, θ = 0.04, σ = 0.01; Δt_k ~ U(0.5, 1.5)/52 (sub-stream 520000), ε ~ N(0, 1)
+    (sub-stream 520001); outputs every x_kp (time-major) or only the finals, then the mean of the finals; a ball of
+    states scaling every input by U(0.8, 1.2) (sub-stream 520100 + r). One scan domain of 4 chains of 100 steps,
+    the step `sum(mul(@0,^),@1,@2)` after the passes.
+  Gates: round-trip identity raw and after the passes with the scan counts above and the M1 book asserted scan-free
+  and unchanged; the interpreter bitwise the double instantiation and the replay at 65 states at B = 1, B = 64 lane
+  for lane the single runs, tiles {1, 7, 256, 4096} × lane tiles {1, 3, 8, 32, 64}, odd B; the adjoint's Jacobian vs
+  Dual at 1e-12 (relative to the row's scale, the leg scale for a swap PV) and vs central FD at 1e-6, linearity;
+  the batched adjoint lane for lane the single runs, tiles, no allocation.
 
 ---
 

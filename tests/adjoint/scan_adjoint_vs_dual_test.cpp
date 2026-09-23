@@ -1,4 +1,4 @@
-// M3/G3 gate: the reverse-scan adjoint (D37) against forward mode and finite differences on the
+// M3/G3 gate: the reverse-scan adjoint (D41) against forward mode and finite differences on the
 // scan fixtures — the RFR compounding book (fixtures/rfr_book.hpp) and the affine scan
 // (fixtures/affine_scan.hpp, with and without the path as outputs). The full Jacobian from
 // adjoint::Adjoint (one lane per output, out_bar = e_o) is compared with one pass of the same

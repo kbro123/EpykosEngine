@@ -20,7 +20,7 @@
 // id per row); Sum / Affine operands become segments. Const nodes that are themselves Sum
 // members or outputs form the "const" domain (one Const step, one column).
 //
-// Recurrences (DESIGN.md §5.6, D37): before the partition, chains x_{k+1} = f(x_k, ...) are
+// Recurrences (DESIGN.md §5.6, D41): before the partition, chains x_{k+1} = f(x_k, ...) are
 // detected without hints — a node whose expression tree, with one node cut out and replaced by
 // a carry token, hashes like the cut node's own tree with its own cut, for three or more steps
 // in a row (the natural product loop acc = acc·(1 + r·τ), a path x_{k+1} = a_k·x_k + b_k). The
@@ -63,7 +63,7 @@ struct InferStats {
   std::size_t domains = 0;           // after level splitting
   std::size_t boundary_rounds = 0;   // passes of the sharing rule (1; 2 when chains were found)
   std::size_t class_promoted = 0;    // nodes made boundaries by the sharing rule
-  std::size_t chains = 0;            // chains accepted by the scan detection (D37)
+  std::size_t chains = 0;            // chains accepted by the scan detection (D41)
   std::size_t chain_nodes = 0;       // their steps (rows of scan domains)
   std::size_t scan_classes = 0;      // classes laid out as scan domains
   std::size_t scan_rounds = 0;       // inference rounds (1 + retries after a scan class could not be laid out)

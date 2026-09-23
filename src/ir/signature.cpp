@@ -40,7 +40,7 @@ uint64_t mix(uint64_t h, uint64_t v) noexcept {
 
 constexpr uint64_t k_seed = 0x243F6A8885A308D3ull;
 
-// ---- scan detection parameters (D37) ------------------------------------------------------
+// ---- scan detection parameters (D41) ------------------------------------------------------
 
 // A chain needs at least this many steps: two identical steps in a row are straight-line code
 // (x·a·b with a, b references would otherwise be a two-step scan).
@@ -156,7 +156,7 @@ class Inference {
   Program assemble();
 
   // Operands of node i as the extraction sees them: a fixed-arity op's a, b, c or a fixed-arity
-  // Sum's members (a scan step's Sum, D37).
+  // Sum's members (a scan step's Sum, D41).
   int arity_of(node_id i) const noexcept {
     return fixed_sum_[idx(i)] ? nodes_[idx(i)].nargs : op_arity(nodes_[idx(i)].op);
   }
@@ -202,7 +202,7 @@ class Inference {
   // second shape is emitted with the first's operand order.
   const bool merge_classes_ = mutant("signature.merge_classes");
 
-  // Scan detection (D37): per node its chain and position; per node whether it is an inner step
+  // Scan detection (D41): per node its chain and position; per node whether it is an inner step
   // of a scan group although a Sum or a Sum member (scan_inner_), whether it is a Sum evaluated
   // as a fixed-arity step (fixed_sum_), and the operand slot holding a Const initial value.
   std::vector<Chain> chains_;
@@ -305,7 +305,7 @@ void Inference::hash_all() {
       if (arity >= 2) h = mix(h, tb);
       if (arity >= 3) h = mix(h, tc);
     }
-    // A scan step is never in a class with a non-scan node of the same shape (D37).
+    // A scan step is never in a class with a non-scan node of the same shape (D41).
     if (chain_of_[i] >= 0) h = mix(h, tok_scan_);
     h_[i] = h;
   }
@@ -346,7 +346,7 @@ void Inference::compute_deep() {
 // class is a boundary (shared, a member, an output), every instance is materialised, so that
 // the consumers of shared and unshared instances alike see a reference. One pass suffices: the
 // deep hashes do not depend on the boundary set. An inner step of a scan group (scan_inner_) is
-// never promoted: the scan step's tree wins (D37).
+// never promoted: the scan step's tree wins (D41).
 void Inference::promote_shared() {
   ++stats_.boundary_rounds;
   std::unordered_set<uint64_t> shared;
@@ -363,7 +363,7 @@ void Inference::promote_shared() {
   }
 }
 
-// ---- scan detection (DESIGN.md §5.6, D37) ---------------------------------------------------
+// ---- scan detection (DESIGN.md §5.6, D41) ---------------------------------------------------
 //
 // A chain is a run of nodes n_1, ..., n_K where n_{k+1} = f(n_k, ...) with the same step f for
 // every k: the natural product loop acc = acc·(1 + r·τ), the path x_{k+1} = a_k·x_k + b_k. The

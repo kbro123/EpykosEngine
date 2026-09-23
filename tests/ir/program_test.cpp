@@ -203,7 +203,7 @@ TEST(IrProgram, ConstantMembersAndConstantOutputsAreRowsOfTheConstDomain) {
 
 TEST(IrProgram, DirectRecurrenceIsAScanDomain) {
   // x_j = x_{j-1} * c_j + d_j, every x_j an output: a chain of five identical steps, detected
-  // without hints (D37): one recurrent scan domain of five rows whose carry gather reads the
+  // without hints (D41): one recurrent scan domain of five rows whose carry gather reads the
   // input for the first row and the previous row after that.
   Tape t;
   const int n = 5;
@@ -252,7 +252,7 @@ TEST(IrProgram, DirectRecurrenceIsAScanDomain) {
 }
 
 TEST(IrProgram, TwoStepChainsAreNotScans) {
-  // Two identical steps in a row are straight-line code (D37: a chain needs three): x·a·b with
+  // Two identical steps in a row are straight-line code (D41: a chain needs three): x·a·b with
   // a, b references stays one class of inner nodes, exp(exp(x)) with the inner exp an output
   // stays a level-split class (D23).
   Tape t;
@@ -397,7 +397,7 @@ TEST(IrProgram, SerialisationIsExactOnTheM1Book) {
 // A group of more than 24 steps is named "<op>[<steps>]" with no whitespace, so that serialize
 // (one token per name) round-trips: five different two-node steps cycled fifteen times is one
 // 30-step group (the cycle is ten nodes long, beyond the depth the scan detection looks for a
-// carry, so it is straight-line code, not a chain: D37; two alternating steps would be a
+// carry, so it is straight-line code, not a chain: D41; two alternating steps would be a
 // period-two scan).
 TEST(IrProgram, LongGroupNamesSerialiseAndRoundTrip) {
   Tape t;

@@ -1,4 +1,4 @@
-// M3/G3 E0 gate: the tiled interpreter on the scan fixtures (D37) — the RFR compounding book
+// M3/G3 E0 gate: the tiled interpreter on the scan fixtures (D41) — the RFR compounding book
 // (fixtures/rfr_book.hpp) and the affine scan (fixtures/affine_scan.hpp) — bitwise the templated
 // double maths and the tape replay at the record point and at 64 batch states at B = 1; a
 // batched run (B = 64) lane for lane bitwise the 64 single-state runs; every tile in {1, 7, 256,

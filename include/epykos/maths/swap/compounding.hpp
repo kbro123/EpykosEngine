@@ -1,5 +1,5 @@
 // EpykosEngine — daily compounding of an in-arrears RFR coupon, written once and templated on
-// Scalar (D3) as the NATURAL product loop (DESIGN.md §5.6, D37):
+// Scalar (D3) as the NATURAL product loop (DESIGN.md §5.6, D41):
 //
 //   factor = Π_i (1 + r_i·τ_i)          acc = 1; for each sub-period: acc = acc · (1 + r_i·τ_i)
 //   R      = (factor − 1) / τ           the compounded rate over the coupon's accrual τ

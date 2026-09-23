@@ -2,7 +2,7 @@
 // n_steps steps on n_paths paths, the shape M6's short-rate simulation will record (a mean-
 // reverting step with a per-step coefficient and increment), written as the natural time loop
 // with the paths inside it — so the chains interleave on the tape and the signature pass must
-// lay the scan's rows out chain-major (D37).
+// lay the scan's rows out chain-major (D41).
 //
 //   a_k       = exp(−κ·Δt_k)
 //   drift_k   = θ·(1 − a_k)                      (shared by every path)

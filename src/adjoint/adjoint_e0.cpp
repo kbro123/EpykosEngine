@@ -422,7 +422,7 @@ struct Lanes {
       const int last = static_cast<int>(g.steps.size()) - 1;
       double* dom_values = c.values + idx(dom.value_base) * static_cast<size_t>(L);
       // A scan's rows read earlier rows of the domain through the carry: one row per tile, in
-      // row order, so that every operand load sees the previous row's value (D37).
+      // row order, so that every operand load sees the previous row's value (D41).
       const int tile = c.plan->domains[d].is_scan ? 1 : c.tile;
       for (int r0 = 0; r0 < dom.rows; r0 += tile) {
         const int n = std::min(tile, dom.rows - r0);
@@ -486,7 +486,7 @@ struct Lanes {
       const AdjointPlan::DomainPlan& dp = plan.domains[d];
       const int last = static_cast<int>(g.steps.size()) - 1;
       const double* dom_values = c.values + idx(dom.value_base) * static_cast<size_t>(L);
-      // The reverse scan (D37): a scan's rows one at a time from the last to the first, so
+      // The reverse scan (D41): a scan's rows one at a time from the last to the first, so
       // that row r's pull sees the edge slot (carry, r + 1) its successor's reverse has just
       // written — the carried adjoint. Rows of other domains are independent and go in tiles.
       // Mutant adjoint.scan_forward_order: the scan's rows are reversed in row order, so the

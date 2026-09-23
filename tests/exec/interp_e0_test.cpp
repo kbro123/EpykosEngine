@@ -264,7 +264,7 @@ TEST(Interp, SameClassChainsSplitByLevelRunBitwise) {
     EXPECT_EQ(ir::scan_class_domains(program).size(), 2u) << ir::to_string(program);
     EXPECT_EQ(check_against_replay(tape, program, {{1.5, 2.5, 3.5}, {-1.0, 0.25, 8.0}}), 0u);
   }
-  // A 5-step recurrence x_j = x_{j-1}*c_j + d_j (every x_j an output): since M3/G3 (D37) one
+  // A 5-step recurrence x_j = x_{j-1}*c_j + d_j (every x_j an output): since M3/G3 (D41) one
   // scan domain of five rows, evaluated wave by wave; bitwise the replay at every lane tile.
   {
     Tape tape;

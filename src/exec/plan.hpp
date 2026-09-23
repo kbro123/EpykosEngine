@@ -245,7 +245,7 @@ struct GroupPlan {
   std::vector<std::int32_t> tile_index;
   std::int32_t tile = 0;                 // rows per tile (foreign_start is indexed by r0 / tile)
   std::int32_t inlined_into = -1;        // this group is an inlined producer of that domain
-  // A scan domain (ir::Program::scans, D37): evaluated wave by wave — wave w is the rows
+  // A scan domain (ir::Program::scans, D41): evaluated wave by wave — wave w is the rows
   // wave_rows[wave_begin[w] .. wave_begin[w+1]) (ascending), the rows whose carry chain has
   // depth w — each wave in tiles of the indirect row mode into the member buffer, then copied
   // to the rows' slots of the value buffer, so that every row reads rows of earlier waves only.

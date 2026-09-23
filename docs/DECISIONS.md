@@ -515,3 +515,74 @@ Two mechanisms of M3/G1 that other packages build on.
    Mutant `affine.single_term_unscaled` (the coefficient dropped) is registered; no such product exists on the M1
    book, so it is caught by the curve E0 gates alone (`curve_record_e0_test`, `curve_composite_e0_test`), the
    mechanism of D32/D33 for an op the M1 book does not contain.
+
+## D37 — The implicit node is a block over solved inputs and residual outputs; the IFT rule; solve order and factorisation sharing measured (2026-09-23)
+Implements DESIGN.md §3.2 `implicit(F)` and D7 for M3/G4 (`include/epykos/solver/`, `src/solver/`; PROBLEM.md §5).
+1. **Representation.** An implicit node is recorded, on the one tape, as a *block*: its unknowns are tape Inputs the
+   solver layer fills in (solved inputs), its residuals are tape outputs the solver drives to zero (residual outputs),
+   and its two O1 diagnostics — `‖Jᵀr‖∞` and the iteration count — are solved inputs registered as outputs. The block
+   (`solver::ImplicitBlock`: those ordinals, the start point, the solver options) lives in a `solver::ImplicitRegistry`
+   beside the tape; ordinals are stable across every pass, so the registry survives cse / dce / fold_sum /
+   affine_collapse untouched, and every landed consumer of a tape — validate, the passes, infer, expand, the
+   interpreter, the adjoint — sees the straight-line program over Inputs that the residual sub-program and the book
+   are once z is known. The reserved opcode `Op::Implicit` stays reserved: promoting the block into the node table
+   and the IR would touch every pass and both engines for no semantic gain while G3 rewrites the same files for
+   `Scan`; it can be done later without changing the recording API. `Tape::set_input_value` (the one Tape addition)
+   lets the record-time solve write the calibrated values into the record point.
+2. **One tape, one residual program.** `solver::implicit()` records the residual in place on the current tape
+   (the calibration instruments' discount factors are ordinary nodes of that tape and cse merges them with the
+   book's), then lifts the residual sub-program out by the backward slice from the residual outputs
+   (`tape/slice.hpp`: Inputs kept as Inputs, no arithmetic, E0 by construction), infers its IR and builds its
+   interpreter and adjoint (`solver::ResidualProgram`). The untaped solve — Gauss–Newton with Levenberg–Marquardt
+   damping on rejected steps, stop at `‖F‖∞ < 1e-14` or 50 iterations — uses that program for every value and its
+   batched adjoint for every Jacobian (one lane per residual, `out_bar = e_i`: rows of J from `state_bar`), never a
+   second copy of the maths. The tape's length is independent of the iteration count (three starting points give the
+   same node count and the same IR up to the record-point values; measured: 4 / 3 / 3 iterations, 75,881 nodes each).
+3. **Backward: the implicit-function rule.** With every lane's Jacobian factorised at its solution (Eigen
+   `PartialPivLU` for a square block, the Gauss–Newton normal equations for an over-determined one, double side only,
+   hidden behind the headers), `solver::ImplicitProgram::adjoint` runs the whole-program adjoint over every tape input
+   and then, per lane and blocks in reverse recording order, `λ = F_z⁻ᵀ z̄`, `p̄ −= F_pᵀ λ`, the pull landing on
+   free inputs (quotes) or on earlier blocks' unknowns, which their own rule then propagates (the multi-curve chain).
+   The diagnostics' adjoints are dropped (stop-gradient). Forward mode: `Factors::ift_tangent` for a recorded block,
+   `solver::implicit_dual<N>` (`solver/tangent.hpp`) for the templated maths on `Dual<N>`, the oracle of the IFT.
+4. **Sharing gate.** `ir/sharing.hpp`: per domain, which output groups it feeds (`reach`), who reads it (`readers`),
+   the report over the domains ending in a given op (`sharing`, `Op::Exp` = the discount factors) and the
+   assertions `assert_all_shared` / `assert_shared(expected)` plus `duplicates(p, op)` (expand the IR, cse it, count
+   the merged `op` nodes: a DF computed twice). On the calibrated M1 tape every DF domain feeds both the residuals and
+   the book and no DF is computed twice; there are **two** DF domains of disjoint times, the interpolated
+   `exp(mul(neg(@),$))` (2,563 rows) and the knot-time `exp(mul(@,$))` (4 rows), because DF(0) and the 7-day
+   instrument share `neg(z_0)` and D22's fan-out rule materialises it. D22 already names the fold (absorb a lone
+   `Neg` into the affine pass); it is not done here because on the M1 interpreter the reshaped exp group loses its
+   fused-pair exp tail (the tail needs a pair) and the ragged affine loses its inlined evaluation (the inliner needs
+   uniform member counts) — a cost-model decision for M4's R1/R3. G5/G6 gate on "every DF domain feeds both and no
+   DF is duplicated"; the domain count is reported.
+5. **Lanes.** A scenario per lane recalibrates: lanes are solved one at a time and never mix, so lane b of a batched
+   run is bitwise its B = 1 run (forward, solved curve, diagnostics and adjoint; `tests/solver/m1_implicit_lanes_e0_test`).
+   Lanes whose block parameters are bitwise identical share one solve and one factorisation (`dedup_lanes`; the
+   risk ladder's one-lane-per-output pattern: 64 lanes, 1 solve). Jacobian policy per block or per program:
+   `per_iteration` (Newton / LM, J at every iterate) or `chord` (the record-point factorisation drives every lane's
+   steps, Jacobian-free; a lane whose contraction stalls or whose step is rejected refreshes its own J); the
+   solution's Jacobian is evaluated once at the end either way (`final_jacobian`, the exact IFT and the `‖Jᵀr‖∞`
+   diagnostic). Measured on the M1 fixture at 10 bp quote shocks (`bench/solver/m1_implicit_bench`, d448afd70180,
+   load 5.4 → 3.6 of 16, n = 20 × 0.2 s, `bench/results/d448afd70180/solver_m1_implicit.json`; medians, µs):
+   forward B = 1 per-iteration 154.4 from the flat start (5 Jacobians, 5 residual evaluations) / 137.6 warm
+   (4 / 4), chord 96.1 (1 / 7) / 94.7 (1 / 6); B = 64 per-iteration 6,987 / 6,201, chord 3,594 / 3,515 (64
+   Jacobians, 551–593 residual evaluations, no lane refreshed) — the solves cost about 72 µs per lane with the
+   Jacobian at every iterate and 30 µs with the shared factorisation (one Jacobian per lane, evaluated at the
+   solution for the IFT), on top of the 1,584 µs whole-program run; 64 identical lanes 1,674 (one solve);
+   forward + IFT adjoint of the book PV at B = 1 505.8 per-iteration / 461.8 chord (the M2 value + adjoint alone:
+   418.5), at B = 8 2,486 / 2,154. `chord` is the default for scenario lanes; `per_iteration` stays the reference.
+6. **Solve order.** `solver::CurveSet` discovers each instrument's curve dependencies from the maths (a scratch
+   recording sliced back to the curves' inputs), orders the strongly connected components (Tarjan) and records one
+   block per component (`Mode::sequential`) or one block for every curve (`Mode::joint`). On the two-curve fixture
+   (12-knot discount curve, 6-knot projection curve whose basis swaps read both): sequential 4 + 3 iterations,
+   5 + 4 Jacobians (12×12 and 6×6); joint 4 iterations, 5 Jacobians (18×18); the two modes' adjoints agree to
+   6e-16 of the row scale. Timed (same run, B = 1, one quote shocked 1 bp): sequential 123.7 µs from the flat
+   starts / 62.1 warm, joint 199.0 / 119.4 — a joint Jacobian is one adjoint lane per residual over the union
+   program (18 lanes of 286 values) where the sequential blocks cost 12 + 6 lanes of 187 and 99. Sequential is the
+   default: fewer flops per Jacobian, and it exposes the chained IFT the xccy curves of Stage B need.
+7. **Mutants** (D32, D33): `implicit.ift_not_transposed`, `implicit.ift_drop_fp`, `implicit.stale_jacobian` in
+   `src/solver/residual.cpp`, each caught by all three IFT gates `solver_m1_implicit_adjoint_test`,
+   `solver_curve_set_adjoint_test` and `solver_m1_implicit_vs_dual_test` (16/16 registered mutants caught against
+   25 gates, `scripts/mutation_test.sh`); the forward-mode gate at 1e-12 is the one that sees a stale Jacobian
+   whatever the start point.

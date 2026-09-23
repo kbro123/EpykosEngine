@@ -105,6 +105,20 @@ recognises.
 `select` vs `pin`: the **value** owns a `select`'s mask; the **solver** owns a `pin`'s mask. That distinction is what
 removes Newton 2-cycles at kinks (see `PRIOR_ART.md`, desk_mixed).
 
+As implemented (M3/G4, D37; `solver/implicit.hpp`, `solver/residual.hpp`, `solver/implicit_program.hpp`,
+`solver/curve_set.hpp`): an implicit node is a *block* on the one tape — its unknowns are Inputs the solver fills in,
+its residuals outputs it drives to zero, its O1 diagnostics (`‖Jᵀr‖∞`, iterations) solved inputs registered as outputs —
+kept in an `ImplicitRegistry` of ordinals that survives every pass; `Op::Implicit` stays reserved. The residual
+sub-program is the backward slice of the tape from the residual outputs (`tape/slice.hpp`), with its own interpreter
+and adjoint; the untaped solve (Gauss–Newton / LM, `‖F‖∞ < 1e-14` or 50 iterations) takes values from the one and
+Jacobians from the other (one adjoint lane per residual). Backward is the IFT rule `λ = F_z⁻ᵀ z̄`, `p̄ −= F_pᵀ λ` per
+lane with the solution's factorised Jacobian, blocks in reverse order so a curve's unknowns pull into the curves it
+read; forward mode is `implicit_dual<N>` on the templated maths. A `CurveSet` infers each instrument's curve
+dependencies from a scratch recording and solves the strongly connected components in order (or all curves jointly).
+Batch lanes recalibrate independently (bitwise the single-lane runs), identical lanes share one solve, and the
+record-point factorisation may drive every lane's steps (`chord`) with a per-lane refresh on a stall. `ir/sharing.hpp`
+asserts the cross-stage sharing: every DF domain feeds both the residuals and the book, and no DF is computed twice.
+
 ---
 
 ## 4. Recording

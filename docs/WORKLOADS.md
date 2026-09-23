@@ -112,7 +112,7 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   |---|---|---|
   | `implicit.ift_not_transposed` | the IFT multiplier solves `F_z λ = z̄` instead of `F_zᵀ λ = z̄` | the calibrated M1 book (F_z is not symmetric) |
   | `implicit.ift_drop_fp` | the parameter pull `p̄ −= F_pᵀ λ` is skipped: the quotes receive no adjoint | the calibrated M1 book (every quote adjoint arrives through it) |
-  | `implicit.stale_jacobian` | the IFT uses the last iterate's Jacobian, not the solution's (a 1e-9 relative error) | **below the 1e-6 bump gate**; the forward-mode gate at 1e-12 |
+  | `implicit.stale_jacobian` | the IFT uses the last iterate's Jacobian, not the solution's | the forward-mode gate at 1e-12 (which sees it whatever the start); from the fixture's flat 3 % start the last iterate is far enough from the solution for the 1e-6 bump gates to see it too (measured: caught by all three, and by the lanes E0 gate through a NaN diagnostic under the chord policy) |
 - **Near-miss shapes** (`include/epykos/fixtures/nearmiss_shapes.hpp`, the gate fixture the mutation harness showed
   was missing, D32): 42 templated shapes over six positive inputs, each an op tree that differs from a neighbour in
   exactly one respect a signature may overlook — a constant on the left or the right of `−` and `/`, a constant in

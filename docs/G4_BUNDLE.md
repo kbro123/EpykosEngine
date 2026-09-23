@@ -93,9 +93,11 @@ days until next business date following the observation date"). The ARRC recomme
 ("Two-Day Backward Shifted Observation Period and No Lockouts") and the unshifted one for loans [10].
 
 Variants in the registry for the Stage A trade population (labelled customised, `cross_check: own_research`):
-`USD-SOFR-OIS-SHIFT2` (2-day observation shift) and `USD-SOFR-OIS-SHIFT2-LOCKOUT2` (2-day shift and 2-day lockout).
-ARRC: "dealers may be able to offer customized over-the-counter derivatives with lockouts to facilitate client
-hedging" [10].
+`USD-SOFR-OIS-SHIFT2` (2-day observation shift), `USD-SOFR-OIS-SHIFT2-LOCKOUT2` (2-day shift and 2-day lockout), and
+`USD-SOFR-OIS-LOOKBACK2` (2-day lookback, NO observation shift — added M3-fix: the plain lookback method was
+implemented and unit-tested at the conventions layer only, never priced by an instrument, closing the gap PROBLEM.md
+§3 states for every realism-checklist item). ARRC: "dealers may be able to offer customized over-the-counter
+derivatives with lockouts to facilitate client hedging" [10].
 
 SOFR arithmetic-average swaps (`USD-SOFR-AVG-SWAP`): "Overnight Averaging" of the 2021 ISDA Definitions / the
 USD-SOFR Average FROs [5, §2]; the average is calendar-day weighted on ACT/360 as for SR1 [12]. Frequencies and lags
@@ -156,6 +158,17 @@ The 11:00 CET EURIBOR publication time is **UNVERIFIED** (not in the harvested E
 | eom, stub | as SOFR OIS (**UNVERIFIED**); front and back stubs eligible [22] | |
 | tenors | as SOFR OIS; LCH: 7 days to 51 years [22] | quoted set **UNVERIFIED** by fetch |
 
+**M3-fix follow-up (still unresolved):** a further research pass looked for a clearly-dated current (2024+) primary
+or CCP source to settle the payment-lag disagreement one way or the other. CME's EUR-ESTR-OIS / EONIA-conversion PDF
+still blocks automated fetch; the CFTC-filed LCH EUR-ESTR clearing submission (2022-01-06) and the Tradeweb SEF
+rulebook chapter 9 do not state a payment-lag figure; LCH's *Product Specific Contract Terms and Eligibility
+Criteria Manual* (LCH Limited, effective 2025-01-01) [26] lists `EUR-EuroSTR-OIS Compound` as an eligible product
+(currency, floating rate option, tenor and notional limits) but that table carries no payment-lag column, so it
+neither confirms nor overturns either side. The registry keeps **2** as the default (unchanged); a named variant
+`EUR-ESTR-OIS-LAG1` (payment_lag 1, otherwise identical, `cross_check: own_research`) is added so Stage A's EUR-side
+PVs and risk can be sanity-checked under both conventions — the same pattern as `USD-SOFR-OIS-SHIFT2` for a
+customised parameter, not a resolution of the disagreement.
+
 ### EUR.4 EURIBOR swaps (`EUR-EURIBOR-3M-IRS`, `EUR-EURIBOR-6M-IRS`)
 
 | value | registry | source |
@@ -210,7 +223,7 @@ fetch).
 | €STR index: ACT/360, TARGET, publication lag 1 | as listed | [16][18][19] | **agree** |
 | EURIBOR 3M/6M: ACT/360, TARGET, fixing lag 2 | as listed | [20][21][22] | **agree** |
 | SOFR OIS: spot 2, payment 2, MF, calendar USD+USD-FED, fixed ACT/360 1Y, float compounded 1Y ACT/360 | as listed | [5][6][8][9][10] | **agree** |
-| €STR OIS payment lag | 2 ("desk-confirmed; EONIA legacy was 1 BD") | Strata 2 [9]; TP ICAP 1 [19]; LCH 2019 1 [22] | **disagree among sources**; registry 2; recorded (EUR.3) |
+| €STR OIS payment lag | 2 ("desk-confirmed; EONIA legacy was 1 BD") | Strata 2 [9]; TP ICAP 1 [19]; LCH 2019 1 [22] | **disagree among sources**; registry 2, variant `EUR-ESTR-OIS-LAG1` = 1; still unresolved after further research (EUR.3, M3-fix, [26]) |
 | €STR OIS: spot 2, MF, TARGET, fixed ACT/360 1Y, float compounded 1Y ACT/360 | as listed | [9][19] | **agree** |
 | EURIBOR IRS fixed-leg day count | 30E/360 | 30/360 (Bond Basis): CFTC MAT [8], Bloomberg SEF [21], Strata 30U/360 [9] | **disagree**; registry 30/360; recorded (EUR.4) |
 | EURIBOR IRS: fixed annual, float 3M quarterly / 6M semi-annual ACT/360, spot 2, payment 0, MF, TARGET | as listed | [8][21] | **agree** |
@@ -263,6 +276,7 @@ Not imported (no Stage A use): Fed Funds index and products, FF/SOFR basis, GBP/
 23. M. Bianchetti, M. Carlicchi, Markets Evolution After the Credit Crunch, arXiv:1301.7078 (harvested PDF).
 24. Eurex, Three-Month EURIBOR Futures (FEU3) contract specifications. https://www.eurex.com/ex-en/markets/int/mon/euribor-derivatives/euribor/Three-Month-EURIBOR-Futures-137458
 25. ECB, Governing Council meeting calendar. https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html
+26. LCH Limited, Product Specific Contract Terms and Eligibility Criteria Manual, effective 2025-01-01 (harvested PDF, read 2026-09-23; M3-fix). https://www.lseg.com/content/dam/post-trade/en_us/documents/lch/rulebooks/lch-ltd/product-specific-contract-terms-and-eligibility-criteria-manual-250101.pdf — an eligibility table (product, currency, floating rate option, tenor and notional limits); no payment-lag column, so it does not settle EUR.3's disagreement.
 
 ---
 

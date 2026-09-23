@@ -1,0 +1,17 @@
+{
+ "preset": "reference (-O3 -march=x86-64-v3 -fno-math-errno -ffp-contract=off)",
+ "roundtrip_ok": true,
+ "e0_ok": true,
+ "hand_e1_ok": true,
+ "supplementary": {
+  "hand_m1_hand_e0_test_ok": true,
+  "exec_interp_test_ok": true
+ },
+ "evidence": {
+  "ir_roundtrip_test": "exit 0; PASSED",
+  "exec_m1_interp_e0_test": "exit 0; PASSED",
+  "hand_m1_hand_test": "exit 0; PASSED",
+  "hand_m1_hand_e0_test": "exit 0; PASSED",
+  "exec_interp_test": "exit 0; PASSED"
+ }
+}

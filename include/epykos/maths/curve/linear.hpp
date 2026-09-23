@@ -1,5 +1,6 @@
-// EpykosEngine — the M1 curve (docs/WORKLOADS.md §M1): zero rate linear in t between knots, flat
-// beyond both ends, DF(t) = exp(−z(t)·t).
+// EpykosEngine — the linear-in-zero-rate curve scheme (M1's curve, docs/WORKLOADS.md §M1): zero
+// rate linear in t between knots, flat beyond both ends, DF(t) = exp(−z(t)·t). M4 adds the other
+// schemes, the interpolation variables and the composite curve beside it (RESUME.md §2).
 //
 // Templated on Scalar (D3). The interpolation weights depend only on t and the knot times, which
 // are structure, so they are plain doubles; only the knot values z are Scalar. Nothing here
@@ -8,7 +9,7 @@
 
 #include <cmath>
 
-namespace epykos::m1 {
+namespace epykos::curve::linear {
 
 // z(t) on n knots at times knot_t[0] < ... < knot_t[n−1] with values z[0..n).
 //   t <= knot_t[0]      : z[0]                     (flat extrapolation)
@@ -34,4 +35,4 @@ Scalar df(const double* knot_t, const Scalar* z, int n, double t) {
   return exp(-zt * t);
 }
 
-}  // namespace epykos::m1
+}  // namespace epykos::curve::linear

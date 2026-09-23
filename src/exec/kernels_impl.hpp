@@ -38,7 +38,7 @@
 #include <stdexcept>
 #include <type_traits>
 
-#include "epykos/hand/exp_poly.hpp"
+#include "epykos/maths/exp_poly.hpp"
 #include "plan.hpp"
 
 namespace epykos::exec::detail {
@@ -295,7 +295,7 @@ void k_load(const Operand& a, const RunCtx& ctx, int r0, const std::int32_t* idx
 template <Kind KA, int L, bool Ind>
 void k_exp_poly(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out) {
   load_impl<KA, L, Ind>(s.a, ctx, r0, idx, n, out);
-  hand::exp_poly_array(out, out, n * lanes<L>(ctx));
+  maths::exp_poly_array(out, out, n * lanes<L>(ctx));
 }
 
 // Fma / Select over three materialised (Vec) operands: three scratch buffers, the output is a
@@ -1107,7 +1107,7 @@ EPYKOS_EXEC_INLINE void apply_tails(const TailSet& t, double* o, int nb) noexcep
   for (int j = 0; j < t.n; ++j) {
     if (t.op[j] == Op::Exp) {
       if (t.poly) {
-        for (int q = 0; q < n; ++q) o[q] = hand::exp_poly(o[q]);
+        for (int q = 0; q < n; ++q) o[q] = maths::exp_poly(o[q]);
       } else {
         for (int q = 0; q < n; ++q) o[q] = apply1<Op::Exp>(o[q]);
       }

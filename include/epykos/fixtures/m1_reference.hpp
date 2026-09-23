@@ -10,10 +10,10 @@
 #include <cstdint>
 #include <vector>
 
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/maths/m1/price.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/fixtures/m1_price.hpp"
 
-namespace epykos::m1 {
+namespace epykos::fixtures {
 
 struct ReferenceTable {
   int n_swaps = 0;
@@ -58,4 +58,4 @@ inline ReferenceTable m1_reference_values(std::uint64_t seed = default_seed) {
   return m1_reference_values(make_m1_book(seed), make_m1_batch(seed));
 }
 
-}  // namespace epykos::m1
+}  // namespace epykos::fixtures

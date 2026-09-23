@@ -1,7 +1,8 @@
-// EpykosEngine — a branch-free exp(x) on double that auto-vectorises (M1/P5).
+// EpykosEngine — a branch-free exp(x) on double that auto-vectorises (M1/P5; engine maths since
+// D28: exec::Interpreter's ExpMode::poly and the hand-fused reference in bench/hand/ both use it).
 //
-// The hand-fused reference needs exp once per unique discount time and per batch lane: ~3k times
-// at B = 1, ~200k values at B = 64. libm's exp is a scalar call the compiler cannot vectorise, so a
+// A rates book needs exp once per unique discount time and per batch lane: ~3k times at B = 1,
+// ~200k values at B = 64. libm's exp is a scalar call the compiler cannot vectorise, so a
 // performance engineer supplies one written as straight-line arithmetic over plain doubles: every
 // loop `for (l) y[l] = exp_poly(x[l])` vectorises under -march=x86-64-v3 (or NEON) with no
 // intrinsics.
@@ -13,7 +14,7 @@
 // field. Every step is a single IEEE rounding (std::fma), so per-lane results are bit-identical
 // between the scalar and the vectorised instantiations (no reassociation; no -ffast-math, D13).
 // Error bound about 1.2 ulp worst case vs the exact value (measured against libm in
-// tests/hand/exp_poly_test.cpp); the M1 gate is E1 (1e-12), so this is far inside it.
+// tests/maths/exp_poly_test.cpp); the M1 gate is E1 (1e-12), so this is far inside it.
 //
 // Valid input range: −708 < x < 709 (k in [−1022, 1023], so 2^k is a normal double). Outside that
 // the exponent-field construction wraps and the result is garbage; the M1 kernel's arguments are
@@ -25,7 +26,7 @@
 #include <cmath>
 #include <cstdint>
 
-namespace epykos::hand {
+namespace epykos::maths {
 
 namespace exp_poly_detail {
 
@@ -92,4 +93,4 @@ inline void exp_poly_array(const double* x, double* y, int n) noexcept {
   for (int i = 0; i < n; ++i) y[i] = exp_poly(x[i]);
 }
 
-}  // namespace epykos::hand
+}  // namespace epykos::maths

@@ -22,9 +22,9 @@
 #include "epykos/exec/interpreter.hpp"
 #include "epykos/ir/program.hpp"
 #include "epykos/ir/signature.hpp"
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/maths/m1/reference.hpp"
-#include "epykos/tape/record_m1.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/fixtures/m1_reference.hpp"
+#include "epykos/fixtures/record_m1.hpp"
 #include "epykos/tape/replay.hpp"
 #include "epykos/tape/tape.hpp"
 #include "ir/ir_test_helpers.hpp"
@@ -33,7 +33,7 @@
 #error "an _e0_test.cpp TU must see EPYKOS_FP_CONTRACT_OFF"
 #endif
 
-namespace m1 = epykos::m1;
+namespace fixtures = epykos::fixtures;
 namespace ir = epykos::ir;
 namespace exec = epykos::exec;
 using epykos::Replayer;
@@ -48,9 +48,9 @@ std::uint64_t bits(double v) {
 }
 
 struct Fixture {
-  m1::Book book;
-  m1::Batch batch;
-  m1::ReferenceTable oracle;       // price_book<double> in this TU: the P1 oracle
+  fixtures::Book book;
+  fixtures::Batch batch;
+  fixtures::ReferenceTable oracle;       // price_book<double> in this TU: the P1 oracle
   Tape tape;                       // record_m1: the P2 tape after the E0 passes
   ir::Program program;             // infer: the P3 IR
   std::vector<std::vector<double>> states;   // record point, then the 64 batch states
@@ -60,14 +60,14 @@ struct Fixture {
 const Fixture& fixture() {
   static const Fixture f = [] {
     Fixture x;
-    x.book = m1::make_m1_book();
-    x.batch = m1::make_m1_batch();
-    x.oracle = m1::m1_reference_values(x.book, x.batch);
-    x.tape = m1::record_m1(x.book);
+    x.book = fixtures::make_m1_book();
+    x.batch = fixtures::make_m1_batch();
+    x.oracle = fixtures::m1_reference_values(x.book, x.batch);
+    x.tape = fixtures::record_m1(x.book);
     x.program = ir::infer(x.tape);
     x.states.push_back(x.tape.input_values());
     for (int b = 0; b < x.batch.n_states; ++b) {
-      std::vector<double> z(static_cast<std::size_t>(m1::n_knots));
+      std::vector<double> z(static_cast<std::size_t>(fixtures::n_knots));
       x.batch.state(b, z.data());
       x.states.push_back(z);
     }
@@ -217,8 +217,8 @@ TEST(M1InterpE0, SmallerBooksAgreeWithReplayAndOracle) {
   const Fixture& f = fixture();
   const std::vector<std::vector<int>> cases = {{300}, {3}, {0, 1, 2, 3, 4, 200, 201, 202, 203, 204}};
   for (const std::vector<int>& swaps : cases) {
-    const m1::Book sub = epykos::test::sub_book(f.book, swaps);
-    const Tape tape = m1::record_m1(sub);
+    const fixtures::Book sub = epykos::test::sub_book(f.book, swaps);
+    const Tape tape = fixtures::record_m1(sub);
     const ir::Program program = ir::infer(tape);
     Replayer rp(tape);
     exec::Interpreter in(program);
@@ -227,7 +227,7 @@ TEST(M1InterpE0, SmallerBooksAgreeWithReplayAndOracle) {
     const std::vector<std::vector<double>> single = run_single(in, f.states);
     for (std::size_t s = 0; s < f.states.size(); ++s) {
       rp.run(f.states[s].data(), expect.data());
-      m1::m1_reference_state(sub, f.states[s].data(), oracle.data());
+      fixtures::m1_reference_state(sub, f.states[s].data(), oracle.data());
       mismatches += count_mismatches(single[s].data(), expect.data(), expect.size(), "sub-book B=1 vs replay", "");
       mismatches += count_mismatches(single[s].data(), oracle.data(), oracle.size(), "sub-book B=1 vs oracle", "");
     }

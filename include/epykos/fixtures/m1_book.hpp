@@ -1,5 +1,6 @@
 // EpykosEngine — the M1 kill-test book (docs/WORKLOADS.md §M1, D16): 1,000 annual OIS swaps on a
 // 12-knot curve, generated from the seed. Plain arrays only (structure-of-arrays); no data files.
+// A test-only fixture (namespace epykos::fixtures, D28), not engine API.
 #pragma once
 
 #include <array>
@@ -7,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace epykos::m1 {
+namespace epykos::fixtures {
 
 inline constexpr int n_knots = 12;
 inline constexpr int n_swaps = 1000;
@@ -111,4 +112,4 @@ double par_rate(const Book& book, int i, const double* z);
 // input.
 void dump_csv(const Book& book, const std::string& path);
 
-}  // namespace epykos::m1
+}  // namespace epykos::fixtures

@@ -1,11 +1,15 @@
 # EpykosEngine — root build (owned by M1/P0).
 #
 # Layout (docs/RESUME.md §2):
-#   include/epykos/**   public headers, namespace epykos, macros EPY_*
+#   include/epykos/**   public headers, namespace epykos, macros EPY_* (include/epykos/fixtures/ is
+#                       test-only: seeded books, oracles, record helpers; not engine API, D28)
 #   src/**              non-template implementation, compiled into the static library `epykos`
+#                       (src/fixtures/ = the seeded book generator, test-only)
 #   src/catalogue/generated/   committed generated kernels (M3); globbed like any other source
 #   tests/**/*_test.cpp one gtest executable each (tests/CMakeLists.txt)
 #   bench/**/*_bench.cpp one Google Benchmark executable each (bench/CMakeLists.txt)
+#   bench/hand/         the hand-fused reference kernel, static library `epykos_hand` (D9, D28):
+#                       built whenever tests or benches are, linked by tests/hand and bench/hand
 #   third_party/        vendored by scripts/bootstrap.sh (gitignored)
 #
 # Every source list is a file(GLOB ... CONFIGURE_DEPENDS): adding a header, a source, a test
@@ -136,8 +140,9 @@ add_library(epykos::epykos ALIAS epykos)
 # on both compilers, and sees EPYKOS_FP_CONTRACT_OFF=1 (the TU #errors without it). Their bits
 # therefore never depend on the preset or on the compiler's contraction default: GCC contracts
 # multiply-adds in C++ even with -std=c++20 (its ISO-mode -ffp-contract=off default is for C
-# only), clang within a statement. They are the fixture generators (book, RNG draws), the
-# hand-fused reference kernel and the interpreter kernels. Same convention as tests/**/*_e0_test.cpp.
+# only), clang within a statement. They are the fixture generators (book, RNG draws) and the
+# interpreter kernels; bench/hand/CMakeLists.txt pins the hand-fused reference kernel the same way.
+# Same convention as tests/**/*_e0_test.cpp.
 set(EPYKOS_E0_SOURCES ${EPYKOS_SOURCES})
 list(FILTER EPYKOS_E0_SOURCES INCLUDE REGEX "_e0\\.cpp$")
 set_source_files_properties(${EPYKOS_E0_SOURCES} PROPERTIES
@@ -157,8 +162,12 @@ target_compile_definitions(epykos PRIVATE
 
 if(EPYKOS_BUILD_TESTS)
   enable_testing()
-  add_subdirectory(tests)
 endif()
-if(EPYKOS_BUILD_BENCH)
+# bench/ first: it always defines the hand-fused reference library epykos_hand (bench/hand), which
+# tests/hand links; the benchmark executables themselves are only added with EPYKOS_BUILD_BENCH.
+if(EPYKOS_BUILD_TESTS OR EPYKOS_BUILD_BENCH)
   add_subdirectory(bench)
+endif()
+if(EPYKOS_BUILD_TESTS)
+  add_subdirectory(tests)
 endif()

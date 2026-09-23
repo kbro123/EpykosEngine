@@ -3,14 +3,14 @@
 
 #include <cmath>
 
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/maths/m1/curve.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/maths/curve/linear.hpp"
 
-using epykos::m1::df;
-using epykos::m1::knot_times;
-using epykos::m1::n_knots;
-using epykos::m1::record_state;
-using epykos::m1::zero_rate;
+using epykos::curve::linear::df;
+using epykos::fixtures::knot_times;
+using epykos::fixtures::n_knots;
+using epykos::fixtures::record_state;
+using epykos::curve::linear::zero_rate;
 
 TEST(M1Curve, ZeroRateAtKnotsIsTheKnotValue) {
   for (int k = 0; k < n_knots; ++k) {

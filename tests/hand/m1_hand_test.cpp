@@ -26,13 +26,13 @@
 #include <new>
 #include <vector>
 
-#include "epykos/hand/m1_hand_kernel.hpp"
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/maths/m1/price.hpp"
-#include "epykos/maths/m1/reference.hpp"
+#include "hand/m1_hand_kernel.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/fixtures/m1_price.hpp"
+#include "epykos/fixtures/m1_reference.hpp"
 #include "epykos/version.hpp"
 
-namespace m1 = epykos::m1;
+namespace fixtures = epykos::fixtures;
 using epykos::hand::HandArith;
 using epykos::hand::HandExp;
 using epykos::hand::M1HandKernel;
@@ -61,17 +61,17 @@ namespace {
 
 constexpr double kTol = 1e-12;
 
-const m1::Book& book() {
-  static const m1::Book b = m1::make_m1_book();
+const fixtures::Book& book() {
+  static const fixtures::Book b = fixtures::make_m1_book();
   return b;
 }
-const m1::Batch& batch() {
-  static const m1::Batch b = m1::make_m1_batch();
+const fixtures::Batch& batch() {
+  static const fixtures::Batch b = fixtures::make_m1_batch();
   return b;
 }
 // The oracle in this TU (the preset's contraction; E1 either way).
-const m1::ReferenceTable& oracle() {
-  static const m1::ReferenceTable t = m1::m1_reference_values(book(), batch());
+const fixtures::ReferenceTable& oracle() {
+  static const fixtures::ReferenceTable t = fixtures::m1_reference_values(book(), batch());
   return t;
 }
 // |fixed_i| + |float_i| per state (index b = -1 is the record point), the scale of each swap pv.
@@ -87,7 +87,7 @@ const std::vector<double>& leg_scale() {
       }
       for (int i = 0; i < 1000; ++i) {
         v[static_cast<std::size_t>(b + 1) * 1000u + static_cast<std::size_t>(i)] =
-            std::fabs(m1::fixed_leg_pv<double>(book(), i, z)) + std::fabs(m1::float_leg_pv<double>(book(), i, z));
+            std::fabs(fixtures::fixed_leg_pv<double>(book(), i, z)) + std::fabs(fixtures::float_leg_pv<double>(book(), i, z));
       }
     }
     return v;
@@ -110,7 +110,7 @@ struct GateStats {
 // Runs eval at the record point and the 64 states and applies the gate.
 GateStats run_gate(const M1HandKernel& k, const char* label) {
   GateStats g;
-  const m1::ReferenceTable& t = oracle();
+  const fixtures::ReferenceTable& t = oracle();
   const std::vector<double>& scale = leg_scale();
   std::vector<double> pv(1001);
   double z[12];
@@ -249,7 +249,7 @@ TEST(M1Hand, GateStdExp) {
 // fused mode would not be exercising its rewrites).
 TEST(M1Hand, FusedModeDiffersFromOracleByRoundingOnly) {
   const M1HandKernel k(book());
-  const m1::ReferenceTable& t = oracle();
+  const fixtures::ReferenceTable& t = oracle();
   std::vector<double> pv(1001);
   k.eval(book().z0.data(), pv.data(), pv.data() + 1000);
   EXPECT_NE(std::memcmp(pv.data(), t.record.data(), 1001 * sizeof(double)), 0);

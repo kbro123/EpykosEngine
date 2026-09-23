@@ -7,7 +7,7 @@
 #include <iostream>
 #include <vector>
 
-#include "epykos/hand/exp_poly.hpp"
+#include "epykos/maths/exp_poly.hpp"
 #include "epykos/rng/philox.hpp"
 
 namespace {
@@ -22,12 +22,12 @@ double ulp_diff(double a, double b) {
 }  // namespace
 
 TEST(ExpPoly, ExactAtZeroAndPowersOfTwoRange) {
-  EXPECT_EQ(epykos::hand::exp_poly(0.0), 1.0);
-  EXPECT_EQ(epykos::hand::exp_poly(-0.0), 1.0);
+  EXPECT_EQ(epykos::maths::exp_poly(0.0), 1.0);
+  EXPECT_EQ(epykos::maths::exp_poly(-0.0), 1.0);
   // ln2·k lands on 2^k up to rounding of the argument itself.
   for (int k = -10; k <= 10; ++k) {
     const double x = static_cast<double>(k) * std::log(2.0);
-    EXPECT_LE(ulp_diff(epykos::hand::exp_poly(x), std::exp(x)), 2.0) << k;
+    EXPECT_LE(ulp_diff(epykos::maths::exp_poly(x), std::exp(x)), 2.0) << k;
   }
 }
 
@@ -38,7 +38,7 @@ TEST(ExpPoly, WithinTwoUlpOfLibm) {
   const int n = 200001;
   for (int i = 0; i < n; ++i) {
     const double x = -2.0 + 3.0 * static_cast<double>(i) / static_cast<double>(n - 1);
-    const double d = ulp_diff(epykos::hand::exp_poly(x), std::exp(x));
+    const double d = ulp_diff(epykos::maths::exp_poly(x), std::exp(x));
     if (d > worst) {
       worst = d;
       worst_x = x;
@@ -51,7 +51,7 @@ TEST(ExpPoly, WithinTwoUlpOfLibm) {
   double worst_wide = 0.0, worst_wide_x = 0.0;
   for (int i = 0; i < 200000; ++i) {
     const double x = g.uniform_range(-700.0, 700.0);
-    const double d = ulp_diff(epykos::hand::exp_poly(x), std::exp(x));
+    const double d = ulp_diff(epykos::maths::exp_poly(x), std::exp(x));
     if (d > worst_wide) {
       worst_wide = d;
       worst_wide_x = x;
@@ -66,11 +66,11 @@ TEST(ExpPoly, ArrayIsScalarBitwise) {
   epykos::rng::Philox g(20260922, 555001);
   std::vector<double> x(4099), y(4099), s(4099);
   for (std::size_t i = 0; i < x.size(); ++i) x[i] = g.uniform_range(-3.0, 1.0);
-  epykos::hand::exp_poly_array(x.data(), y.data(), static_cast<int>(x.size()));
-  for (std::size_t i = 0; i < x.size(); ++i) s[i] = epykos::hand::exp_poly(x[i]);
+  epykos::maths::exp_poly_array(x.data(), y.data(), static_cast<int>(x.size()));
+  for (std::size_t i = 0; i < x.size(); ++i) s[i] = epykos::maths::exp_poly(x[i]);
   EXPECT_EQ(std::memcmp(y.data(), s.data(), x.size() * sizeof(double)), 0);
   // In place.
   std::vector<double> z = x;
-  epykos::hand::exp_poly_array(z.data(), z.data(), static_cast<int>(z.size()));
+  epykos::maths::exp_poly_array(z.data(), z.data(), static_cast<int>(z.size()));
   EXPECT_EQ(std::memcmp(z.data(), s.data(), x.size() * sizeof(double)), 0);
 }

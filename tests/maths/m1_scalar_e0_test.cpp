@@ -8,9 +8,9 @@
 #include <cstdint>
 #include <vector>
 
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/maths/m1/curve.hpp"
-#include "epykos/maths/m1/price.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/maths/curve/linear.hpp"
+#include "epykos/fixtures/m1_price.hpp"
 
 #ifndef EPYKOS_FP_CONTRACT_OFF
 #error "an _e0_test.cpp TU must see EPYKOS_FP_CONTRACT_OFF"
@@ -65,15 +65,15 @@ TEST(M1ScalarE0, ContractOperators) {
 }
 
 TEST(M1ScalarE0, RestrictedScalarMatchesDoubleBitwise) {
-  const epykos::m1::Book b = epykos::m1::make_m1_book();
-  std::vector<Boxed> zb(epykos::m1::n_knots);
-  for (int k = 0; k < epykos::m1::n_knots; ++k) zb[static_cast<std::size_t>(k)] = {b.z0[static_cast<std::size_t>(k)]};
+  const epykos::fixtures::Book b = epykos::fixtures::make_m1_book();
+  std::vector<Boxed> zb(epykos::fixtures::n_knots);
+  for (int k = 0; k < epykos::fixtures::n_knots; ++k) zb[static_cast<std::size_t>(k)] = {b.z0[static_cast<std::size_t>(k)]};
 
   std::vector<double> pv_d(static_cast<std::size_t>(b.n_swaps + 1));
   std::vector<Boxed> pv_b(static_cast<std::size_t>(b.n_swaps + 1));
-  epykos::m1::price_book<double>(b, b.z0.data(), pv_d.data(), pv_d.data() + b.n_swaps);
+  epykos::fixtures::price_book<double>(b, b.z0.data(), pv_d.data(), pv_d.data() + b.n_swaps);
   Boxed::ops = Boxed::mixed = Boxed::exps = 0;
-  epykos::m1::price_book<Boxed>(b, zb.data(), pv_b.data(), pv_b.data() + b.n_swaps);
+  epykos::fixtures::price_book<Boxed>(b, zb.data(), pv_b.data(), pv_b.data() + b.n_swaps);
 
   for (int i = 0; i <= b.n_swaps; ++i) {
     const auto s = static_cast<std::size_t>(i);
@@ -86,20 +86,20 @@ TEST(M1ScalarE0, RestrictedScalarMatchesDoubleBitwise) {
   int expected_exps = 0;
   for (int r = 0; r < b.n_rows; ++r) {
     const auto s = static_cast<std::size_t>(r);
-    expected_exps += 1 + (b.row_leg[s] == epykos::m1::float_leg && !b.row_is_realised_first[s]);
+    expected_exps += 1 + (b.row_leg[s] == epykos::fixtures::float_leg && !b.row_is_realised_first[s]);
   }
   EXPECT_EQ(Boxed::exps, static_cast<std::uint64_t>(expected_exps));
 }
 
 TEST(M1ScalarE0, CurveTemplatesOnRestrictedScalar) {
-  std::vector<Boxed> zb(epykos::m1::n_knots);
-  for (int k = 0; k < epykos::m1::n_knots; ++k) zb[static_cast<std::size_t>(k)] = {epykos::m1::record_state[static_cast<std::size_t>(k)]};
+  std::vector<Boxed> zb(epykos::fixtures::n_knots);
+  for (int k = 0; k < epykos::fixtures::n_knots; ++k) zb[static_cast<std::size_t>(k)] = {epykos::fixtures::record_state[static_cast<std::size_t>(k)]};
   for (double t : {-0.5, 0.0, 7.0 / 365.0, 0.1, 1.0, 2.6, 731.0 / 365.0, 29.9, 30.0, 45.0}) {
-    const double zd = epykos::m1::zero_rate(epykos::m1::knot_times.data(), epykos::m1::record_state.data(), epykos::m1::n_knots, t);
-    const Boxed zbx = epykos::m1::zero_rate(epykos::m1::knot_times.data(), zb.data(), epykos::m1::n_knots, t);
+    const double zd = epykos::curve::linear::zero_rate(epykos::fixtures::knot_times.data(), epykos::fixtures::record_state.data(), epykos::fixtures::n_knots, t);
+    const Boxed zbx = epykos::curve::linear::zero_rate(epykos::fixtures::knot_times.data(), zb.data(), epykos::fixtures::n_knots, t);
     EXPECT_EQ(zbx.v, zd) << t;
-    const double dd = epykos::m1::df(epykos::m1::knot_times.data(), epykos::m1::record_state.data(), epykos::m1::n_knots, t);
-    const Boxed db = epykos::m1::df(epykos::m1::knot_times.data(), zb.data(), epykos::m1::n_knots, t);
+    const double dd = epykos::curve::linear::df(epykos::fixtures::knot_times.data(), epykos::fixtures::record_state.data(), epykos::fixtures::n_knots, t);
+    const Boxed db = epykos::curve::linear::df(epykos::fixtures::knot_times.data(), zb.data(), epykos::fixtures::n_knots, t);
     EXPECT_EQ(db.v, dd) << t;
   }
 }

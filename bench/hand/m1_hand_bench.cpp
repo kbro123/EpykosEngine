@@ -17,23 +17,23 @@
 #include <cstdint>
 #include <vector>
 
-#include "epykos/hand/m1_hand_kernel.hpp"
-#include "epykos/maths/m1/book.hpp"
+#include "hand/m1_hand_kernel.hpp"
+#include "epykos/fixtures/m1_book.hpp"
 
 namespace {
 
-namespace m1 = epykos::m1;
+namespace fixtures = epykos::fixtures;
 using epykos::hand::HandArith;
 using epykos::hand::HandExp;
 using epykos::hand::M1HandKernel;
 using epykos::hand::M1HandOptions;
 
-const m1::Book& book() {
-  static const m1::Book b = m1::make_m1_book();
+const fixtures::Book& book() {
+  static const fixtures::Book b = fixtures::make_m1_book();
   return b;
 }
-const m1::Batch& batch() {
-  static const m1::Batch b = m1::make_m1_batch();
+const fixtures::Batch& batch() {
+  static const fixtures::Batch b = fixtures::make_m1_batch();
   return b;
 }
 

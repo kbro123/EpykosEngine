@@ -12,14 +12,14 @@
 #include "epykos/ir/expand.hpp"
 #include "epykos/ir/program.hpp"
 #include "epykos/ir/signature.hpp"
-#include "epykos/maths/m1/book.hpp"
+#include "epykos/fixtures/m1_book.hpp"
 #include "epykos/tape/passes.hpp"
-#include "epykos/tape/record_m1.hpp"
+#include "epykos/fixtures/record_m1.hpp"
 #include "epykos/tape/tape.hpp"
 #include "ir/ir_test_helpers.hpp"
 #include "tape/mini_book.hpp"
 
-namespace m1 = epykos::m1;
+namespace fixtures = epykos::fixtures;
 namespace ir = epykos::ir;
 using epykos::Tape;
 
@@ -50,30 +50,30 @@ void expect_roundtrip(const Tape& tape, const char* what, bool print_program) {
 }  // namespace
 
 TEST(IrRoundtrip, M1BookAfterPasses) {
-  const m1::Book book = m1::make_m1_book();
-  m1::RecordM1Stats rs;
-  const Tape tape = m1::record_m1(book, &rs);
+  const fixtures::Book book = fixtures::make_m1_book();
+  fixtures::RecordM1Stats rs;
+  const Tape tape = fixtures::record_m1(book, &rs);
   expect_roundtrip(tape, "M1 book (record_m1)", true);
 }
 
 TEST(IrRoundtrip, M1BookRawRecording) {
-  const m1::Book book = m1::make_m1_book();
-  const Tape tape = m1::record_m1_raw(book);
+  const fixtures::Book book = fixtures::make_m1_book();
+  const Tape tape = fixtures::record_m1_raw(book);
   expect_roundtrip(tape, "M1 book (raw recording)", false);
 }
 
 TEST(IrRoundtrip, SmallerBooks) {
-  const m1::Book full = m1::make_m1_book();
+  const fixtures::Book full = fixtures::make_m1_book();
   const std::vector<std::pair<const char*, std::vector<int>>> cases = {
       {"1 swap, unseasoned (swap 300)", {300}},
       {"1 swap, seasoned (swap 3)", {3}},
       {"10 swaps (0..4, 200..204)", {0, 1, 2, 3, 4, 200, 201, 202, 203, 204}},
   };
   for (const auto& [name, swaps] : cases) {
-    const m1::Book sub = epykos::test::sub_book(full, swaps);
+    const fixtures::Book sub = epykos::test::sub_book(full, swaps);
     ASSERT_EQ(sub.n_swaps, static_cast<int>(swaps.size()));
-    expect_roundtrip(m1::record_m1(sub), name, true);
-    expect_roundtrip(m1::record_m1_raw(sub), (std::string(name) + " raw").c_str(), false);
+    expect_roundtrip(fixtures::record_m1(sub), name, true);
+    expect_roundtrip(fixtures::record_m1_raw(sub), (std::string(name) + " raw").c_str(), false);
   }
 }
 
@@ -88,8 +88,8 @@ TEST(IrRoundtrip, MiniBookWithSelect) {
 // The comparison is a real check: a changed constant, a swapped non-commutative operand, a
 // dropped node or a changed output is reported with the offending nodes.
 TEST(IrRoundtrip, ComparisonDetectsDifferences) {
-  const m1::Book full = m1::make_m1_book();
-  const Tape tape = m1::record_m1(epykos::test::sub_book(full, {0, 300}));
+  const fixtures::Book full = fixtures::make_m1_book();
+  const Tape tape = fixtures::record_m1(epykos::test::sub_book(full, {0, 300}));
   const ir::Program program = ir::infer(tape);
   {
     ir::Program bad = program;

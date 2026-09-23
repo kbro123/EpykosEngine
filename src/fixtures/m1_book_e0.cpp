@@ -10,7 +10,7 @@
 #endif
 
 
-#include "epykos/maths/m1/book.hpp"
+#include "epykos/fixtures/m1_book.hpp"
 
 #include <cstddef>
 #include <fstream>
@@ -18,11 +18,11 @@
 #include <stdexcept>
 
 #include "epykos/maths/calendar.hpp"
-#include "epykos/maths/m1/curve.hpp"
-#include "epykos/maths/m1/price.hpp"
+#include "epykos/maths/curve/linear.hpp"
+#include "epykos/fixtures/m1_price.hpp"
 #include "epykos/rng/philox.hpp"
 
-namespace epykos::m1 {
+namespace epykos::fixtures {
 
 namespace {
 
@@ -54,7 +54,7 @@ Book make_m1_book(std::uint64_t seed) {
   b.par.assign(n, 0.0);
 
   // z(1) on the record-point curve, for the realised rates.
-  const double z1 = zero_rate<double>(b.knot_t.data(), b.z0.data(), n_knots, 1.0);
+  const double z1 = curve::linear::zero_rate<double>(b.knot_t.data(), b.z0.data(), n_knots, 1.0);
 
   // Swap data: sub-stream i, draws 0..5 in a fixed order (unused draws are still consumed so that
   // each quantity is a fixed function of (seed, i)).
@@ -162,4 +162,4 @@ void dump_csv(const Book& book, const std::string& path) {
   for (int k = 0; k < n_knots; ++k) out << k << ',' << book.knot_t[idx(k)] << ',' << book.z0[idx(k)] << '\n';
 }
 
-}  // namespace epykos::m1
+}  // namespace epykos::fixtures

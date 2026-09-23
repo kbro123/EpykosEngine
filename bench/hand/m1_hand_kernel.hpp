@@ -45,9 +45,10 @@
 //                         against price_book<double> compiled with -ffp-contract=off. This is the
 //                         structural check that the tables are exactly right; it is not the fast
 //                         kernel. It forces shared_reciprocal = false and exp = std_exp.
-// Its source is an E0 TU (src/hand/m1_hand_kernel_e0.cpp: -ffp-contract=off in every preset on
-// every compiler, like the book generator; D25), so its bits do not depend on the compiler's
-// contraction choices: the only fused operations are the explicit std::fma calls of the fused mode.
+// Its source is an E0 TU (bench/hand/m1_hand_kernel_e0.cpp, pinned by bench/hand/CMakeLists.txt to
+// -ffp-contract=off in every preset on every compiler, like the book generator; D25, D28), so its
+// bits do not depend on the compiler's contraction choices: the only fused operations are the
+// explicit std::fma calls of the fused mode.
 
 //
 // eval_batch(B) is bitwise equal to B calls of eval on the corresponding lanes: every lane runs
@@ -60,7 +61,7 @@
 #include <cstddef>
 #include <vector>
 
-#include "epykos/maths/m1/book.hpp"
+#include "epykos/fixtures/m1_book.hpp"
 
 namespace epykos::hand {
 
@@ -71,12 +72,12 @@ struct M1HandOptions {
   HandArith arith = HandArith::fused;
   bool shared_reciprocal = true;  // fused mode only: one 1/DF(e) per unique time, shared by the float rows that read it
   HandExp exp = HandExp::poly;    // reference mode forces std_exp
-  int max_batch = m1::n_states;   // scratch is sized once for this many lanes; eval_batch(B > max_batch) throws
+  int max_batch = fixtures::n_states;  // scratch is sized once for this many lanes; eval_batch(B > max_batch) throws
 };
 
 class M1HandKernel {
  public:
-  explicit M1HandKernel(const m1::Book& book, M1HandOptions options = {});
+  explicit M1HandKernel(const fixtures::Book& book, M1HandOptions options = {});
 
   // z[0..12): swap_pv[0..1000) in swap order, *book_pv = left fold of swap_pv.
   void eval(const double* z, double* swap_pv, double* book_pv) const;

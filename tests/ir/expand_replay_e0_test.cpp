@@ -19,9 +19,9 @@
 #include "epykos/ir/expand.hpp"
 #include "epykos/ir/program.hpp"
 #include "epykos/ir/signature.hpp"
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/maths/m1/reference.hpp"
-#include "epykos/tape/record_m1.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/fixtures/m1_reference.hpp"
+#include "epykos/fixtures/record_m1.hpp"
 #include "epykos/tape/replay.hpp"
 #include "epykos/tape/tape.hpp"
 #include "ir/ir_test_helpers.hpp"
@@ -30,7 +30,7 @@
 #error "an _e0_test.cpp TU must see EPYKOS_FP_CONTRACT_OFF"
 #endif
 
-namespace m1 = epykos::m1;
+namespace fixtures = epykos::fixtures;
 namespace ir = epykos::ir;
 using epykos::Replayer;
 using epykos::Tape;
@@ -44,17 +44,17 @@ std::uint64_t bits(double v) {
 }
 
 struct Fixture {
-  m1::Book book;
-  m1::Batch batch;
-  m1::ReferenceTable oracle;
+  fixtures::Book book;
+  fixtures::Batch batch;
+  fixtures::ReferenceTable oracle;
 };
 
 const Fixture& fixture() {
   static const Fixture f = [] {
     Fixture x;
-    x.book = m1::make_m1_book();
-    x.batch = m1::make_m1_batch();
-    x.oracle = m1::m1_reference_values(x.book, x.batch);
+    x.book = fixtures::make_m1_book();
+    x.batch = fixtures::make_m1_batch();
+    x.oracle = fixtures::m1_reference_values(x.book, x.batch);
     return x;
   }();
   return f;
@@ -67,7 +67,7 @@ std::vector<std::vector<double>> gate_states(const Tape& tape) {
   std::vector<std::vector<double>> states;
   states.push_back(tape.input_values());
   for (int b = 0; b < f.batch.n_states; ++b) {
-    std::vector<double> z(static_cast<std::size_t>(m1::n_knots));
+    std::vector<double> z(static_cast<std::size_t>(fixtures::n_knots));
     f.batch.state(b, z.data());
     states.push_back(z);
   }
@@ -91,7 +91,7 @@ std::size_t count_mismatches(const std::vector<double>& a, const std::vector<dou
 
 TEST(IrExpandE0, ExpandedTapeReplaysBitIdenticallyAtAllStates) {
   const Fixture& f = fixture();
-  const Tape tape = m1::record_m1(f.book);
+  const Tape tape = fixtures::record_m1(f.book);
   const ir::Program program = ir::infer(tape);
   const Tape expanded = ir::expand(program);
   std::string diff;
@@ -122,7 +122,7 @@ TEST(IrExpandE0, ExpandedTapeReplaysBitIdenticallyAtAllStates) {
 
 TEST(IrExpandE0, RawRecordingExpandsAndReplaysBitIdentically) {
   const Fixture& f = fixture();
-  const Tape tape = m1::record_m1_raw(f.book);
+  const Tape tape = fixtures::record_m1_raw(f.book);
   const ir::Program program = ir::infer(tape);
   const Tape expanded = ir::expand(program);
   std::string diff;
@@ -147,8 +147,8 @@ TEST(IrExpandE0, SmallerBooksAndSerialisedProgramAgree) {
   const Fixture& f = fixture();
   const std::vector<std::vector<int>> cases = {{300}, {3}, {0, 1, 2, 3, 4, 200, 201, 202, 203, 204}};
   for (const std::vector<int>& swaps : cases) {
-    const m1::Book sub = epykos::test::sub_book(f.book, swaps);
-    const Tape tape = m1::record_m1(sub);
+    const fixtures::Book sub = epykos::test::sub_book(f.book, swaps);
+    const Tape tape = fixtures::record_m1(sub);
     const ir::Program program = ir::infer(tape);
     const ir::Program parsed = ir::deserialize(ir::serialize(program));
     ASSERT_TRUE(parsed == program) << "serialisation is exact";
@@ -165,7 +165,7 @@ TEST(IrExpandE0, SmallerBooksAndSerialisedProgramAgree) {
       original.run(z.data(), out_o.data());
       regenerated.run(z.data(), out_r.data());
       evaluator.run(z.data(), out_e.data());
-      m1::m1_reference_state(sub, z.data(), oracle.data());
+      fixtures::m1_reference_state(sub, z.data(), oracle.data());
       mismatches += count_mismatches(out_o, out_r, "sub-book expanded replay", "");
       mismatches += count_mismatches(out_o, out_e, "sub-book IR evaluator", "");
       mismatches += count_mismatches(out_r, oracle, "sub-book vs oracle", "");

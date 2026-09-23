@@ -22,11 +22,11 @@
 #include "epykos/ir/expand.hpp"
 #include "epykos/ir/program.hpp"
 #include "epykos/ir/signature.hpp"
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/tape/record_m1.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/fixtures/record_m1.hpp"
 #include "epykos/tape/tape.hpp"
 
-namespace m1 = epykos::m1;
+namespace fixtures = epykos::fixtures;
 namespace ir = epykos::ir;
 using epykos::Op;
 
@@ -39,7 +39,7 @@ std::uint64_t bits(double v) {
 }
 
 struct Fixture {
-  m1::Book book;
+  fixtures::Book book;
   ir::Program program;
   ir::InferStats stats;
   // Book-derived counts.
@@ -56,9 +56,9 @@ struct Fixture {
 const Fixture& fixture() {
   static const Fixture f = [] {
     Fixture x;
-    x.book = m1::make_m1_book();
-    x.program = ir::infer(m1::record_m1(x.book), &x.stats);
-    const m1::Book& b = x.book;
+    x.book = fixtures::make_m1_book();
+    x.program = ir::infer(fixtures::record_m1(x.book), &x.stats);
+    const fixtures::Book& b = x.book;
     for (int i = 0; i < b.n_swaps; ++i) {
       x.n_fixed += static_cast<std::size_t>(b.tenor[static_cast<std::size_t>(i)]);
       x.n_two_plus += (b.tenor[static_cast<std::size_t>(i)] >= 2);
@@ -68,7 +68,7 @@ const Fixture& fixture() {
     for (int r = 0; r < b.n_rows; ++r) {
       const auto s = static_cast<std::size_t>(r);
       x.df_times.push_back(b.row_t_end[s]);
-      if (b.row_leg[s] == m1::float_leg) {
+      if (b.row_leg[s] == fixtures::float_leg) {
         if (b.row_is_realised_first[s]) {
           ++x.n_realised;
         } else {
@@ -219,7 +219,7 @@ TEST(IrDomainChain, TimesDomainHasOneExpPerDistinctTime) {
 TEST(IrDomainChain, CouponClassesPartitionTheRowsWithSeasonedFirstOutsideFloat) {
   const Fixture& f = fixture();
   const ir::Program& p = f.program;
-  const m1::Book& b = f.book;
+  const fixtures::Book& b = f.book;
   const ir::domain_id ddf = the_domain(p, "exp(mul(neg(@0),$0))");
   const ir::domain_id dfix = the_domain(p, "mul($0,@0)");              // N·τ·K·DF(e) and N·τ·R·DF(e)
   const ir::domain_id dfwd = the_domain(p, "div(sub(div(@0,@1),#0),$0)");  // (DF(s)/DF(e) − 1)/τ
@@ -248,7 +248,7 @@ TEST(IrDomainChain, CouponClassesPartitionTheRowsWithSeasonedFirstOutsideFloat) 
     const auto i = static_cast<std::size_t>(b.row_swap[s]);
     const double N = b.notional[i];
     const double tau = b.row_tau[s];
-    if (b.row_leg[s] == m1::fixed_leg) {
+    if (b.row_leg[s] == fixtures::fixed_leg) {
       expect_fix.push_back(N * tau * b.fixed_rate[i]);
     } else if (b.row_is_realised_first[s]) {
       expect_fix.push_back(N * tau * b.realised_rate[i]);
@@ -266,9 +266,9 @@ TEST(IrDomainChain, CouponClassesPartitionTheRowsWithSeasonedFirstOutsideFloat) 
   // The seasoned-first rows are not float rows: no float row carries a realised rate.
   std::size_t realised_in_float = 0;
   for (double v : column_of(p, gflt.steps[0].a).values) {
-    for (int i = 0; i < m1::n_seasoned; ++i) {
+    for (int i = 0; i < fixtures::n_seasoned; ++i) {
       const auto s = static_cast<std::size_t>(i);
-      const int r0 = m1::float_row_begin(b, i);
+      const int r0 = fixtures::float_row_begin(b, i);
       if (bits(v) == bits(b.notional[s] * b.row_tau[static_cast<std::size_t>(r0)] * b.realised_rate[s])) ++realised_in_float;
     }
   }
@@ -284,7 +284,7 @@ TEST(IrDomainChain, CouponClassesPartitionTheRowsWithSeasonedFirstOutsideFloat) 
 TEST(IrDomainChain, LegsSwapsAndBookAreSegmentsAndLevels) {
   const Fixture& f = fixture();
   const ir::Program& p = f.program;
-  const m1::Book& b = f.book;
+  const fixtures::Book& b = f.book;
   const ir::domain_id dfix = the_domain(p, "mul($0,@0)");
   const ir::domain_id dflt = the_domain(p, "mul(mul($0,@0),@1)");
   const std::vector<ir::domain_id> sums = domains_named(p, "sum(%0)");

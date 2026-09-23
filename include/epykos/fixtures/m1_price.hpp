@@ -1,43 +1,30 @@
-// EpykosEngine — the M1 pricing maths, written once and templated on Scalar (D3), exactly as the
-// coupon formulas of docs/WORKLOADS.md §M1:
+// EpykosEngine — the M1 book pricer (test-only fixture): the leg, swap and book folds of
+// docs/WORKLOADS.md §M1 over the seeded Book's row table, written once and templated on Scalar
+// (D3). The coupon formulas are the engine's (maths/swap/ois.hpp) and the curve is the engine's
+// linear-in-zero-rate scheme (maths/curve/linear.hpp); this header only walks the fixture's rows:
 //
-//   fixed coupon            pv = N·τ_j·K·DF(e_j)
-//   float coupon            fwd_j = (DF(s_j)/DF(e_j) − 1)/τ_j,  pv = N·τ_j·fwd_j·DF(e_j)
-//   seasoned first coupon   fwd_1 replaced by the realised rate R; τ_1 still accrues from s_1 to e_1
-//   swap                    pv = s_i·(Σ fixed − Σ float)
-//   book                    pv = Σ_i pv_i
+//   fixed leg    Σ_j N·τ_j·K·DF(e_j)
+//   float leg    Σ_j N·τ_j·fwd_j·DF(e_j), fwd_j = (DF(s_j)/DF(e_j) − 1)/τ_j, the first coupon
+//                realised (fwd_1 replaced by R) when the row says so
+//   swap         pv = s_i·(Σ fixed − Σ float)
+//   book         pv = Σ_i pv_i
 //
+// Instantiated on double it is the oracle (m1_reference.hpp); on Rec it records (record_m1.hpp).
 // Telescoping the float leg is the fusion pass's job, never the author's. Sums are left folds so a
-// fold-sum pass sees a left-deep add chain and the double instantiation is a fixed evaluation order.
+// fold-sum pass sees a left-deep add chain and the double instantiation is a fixed evaluation
+// order. The arithmetic is M1's maths/m1/price.hpp unchanged (D28), so every E0 gate that replays
+// against it stays bitwise.
 //
 // Scalar needs: copy, + − * / between Scalars, unary minus, exp (found by ADL or std::), and mixed
 // arithmetic with double on either side. No comparison, no conversion to double, no std::max/min/abs.
 // Every branch below is on structure (row flags, indices, times), never on a Scalar value.
 #pragma once
 
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/maths/m1/curve.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/maths/curve/linear.hpp"
+#include "epykos/maths/swap/ois.hpp"
 
-namespace epykos::m1 {
-
-// pv = N·τ·K·DF(e)
-template <class Scalar>
-Scalar fixed_coupon_pv(double N, double tau, double K, const Scalar& df_e) {
-  return N * tau * K * df_e;
-}
-
-// fwd = (DF(s)/DF(e) − 1)/τ ;  pv = N·τ·fwd·DF(e)
-template <class Scalar>
-Scalar float_coupon_pv(double N, double tau, const Scalar& df_s, const Scalar& df_e) {
-  const Scalar fwd = (df_s / df_e - 1.0) / tau;
-  return N * tau * fwd * df_e;
-}
-
-// The seasoned first float coupon: fwd replaced by the realised rate R.  pv = N·τ·R·DF(e)
-template <class Scalar>
-Scalar realised_coupon_pv(double N, double tau, double R, const Scalar& df_e) {
-  return N * tau * R * df_e;
-}
+namespace epykos::fixtures {
 
 // Σ_j N·τ_j·DF(e_j) over the fixed leg's rows (the fixed leg with K = 1).
 template <class Scalar>
@@ -47,7 +34,7 @@ Scalar annuity(const Book& b, int i, const Scalar* z) {
   const double N = b.notional[static_cast<std::size_t>(i)];
   auto term = [&](int j) {
     const std::size_t r = static_cast<std::size_t>(r0 + j);
-    const Scalar df_e = df(b.knot_t.data(), z, n_knots, b.row_t_end[r]);
+    const Scalar df_e = curve::linear::df(b.knot_t.data(), z, n_knots, b.row_t_end[r]);
     return N * b.row_tau[r] * df_e;
   };
   Scalar acc = term(0);
@@ -64,8 +51,8 @@ Scalar fixed_leg_pv(const Book& b, int i, const Scalar* z) {
   const double K = b.fixed_rate[static_cast<std::size_t>(i)];
   auto term = [&](int j) {
     const std::size_t r = static_cast<std::size_t>(r0 + j);
-    const Scalar df_e = df(b.knot_t.data(), z, n_knots, b.row_t_end[r]);
-    return fixed_coupon_pv(N, b.row_tau[r], K, df_e);
+    const Scalar df_e = curve::linear::df(b.knot_t.data(), z, n_knots, b.row_t_end[r]);
+    return ois::fixed_coupon_pv(N, b.row_tau[r], K, df_e);
   };
   Scalar acc = term(0);
   for (int j = 1; j < T; ++j) acc = acc + term(j);
@@ -81,10 +68,10 @@ Scalar float_leg_pv(const Book& b, int i, const Scalar* z) {
   const double R = b.realised_rate[static_cast<std::size_t>(i)];
   auto term = [&](int j) {
     const std::size_t r = static_cast<std::size_t>(r0 + j);
-    const Scalar df_e = df(b.knot_t.data(), z, n_knots, b.row_t_end[r]);
-    if (b.row_is_realised_first[r]) return realised_coupon_pv(N, b.row_tau[r], R, df_e);
-    const Scalar df_s = df(b.knot_t.data(), z, n_knots, b.row_t_start[r]);
-    return float_coupon_pv(N, b.row_tau[r], df_s, df_e);
+    const Scalar df_e = curve::linear::df(b.knot_t.data(), z, n_knots, b.row_t_end[r]);
+    if (b.row_is_realised_first[r]) return ois::realised_coupon_pv(N, b.row_tau[r], R, df_e);
+    const Scalar df_s = curve::linear::df(b.knot_t.data(), z, n_knots, b.row_t_start[r]);
+    return ois::float_coupon_pv(N, b.row_tau[r], df_s, df_e);
   };
   Scalar acc = term(0);
   for (int j = 1; j < T; ++j) acc = acc + term(j);
@@ -109,4 +96,4 @@ void price_book(const Book& b, const Scalar* z, Scalar* swap_pv_out, Scalar* boo
   *book_pv_out = acc;
 }
 
-}  // namespace epykos::m1
+}  // namespace epykos::fixtures

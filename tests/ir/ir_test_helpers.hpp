@@ -4,15 +4,15 @@
 #include <cstddef>
 #include <vector>
 
-#include "epykos/maths/m1/book.hpp"
+#include "epykos/fixtures/m1_book.hpp"
 
 namespace epykos::test {
 
 // A smaller seeded book: the given swaps of `full` (in the given order) with their coupon rows,
 // renumbered. Every per-swap value (tenor, notional, K, R, ...) is the seeded one, so the small
 // books are fixed by the seed too. Nothing else changes: the same maths prices it.
-inline m1::Book sub_book(const m1::Book& full, const std::vector<int>& swaps) {
-  m1::Book s;
+inline fixtures::Book sub_book(const fixtures::Book& full, const std::vector<int>& swaps) {
+  fixtures::Book s;
   s.knot_t = full.knot_t;
   s.z0 = full.z0;
   s.n_swaps = static_cast<int>(swaps.size());

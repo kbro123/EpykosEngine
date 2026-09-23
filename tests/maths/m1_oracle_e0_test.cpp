@@ -10,16 +10,16 @@
 #include <iostream>
 #include <vector>
 
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/maths/m1/price.hpp"
-#include "epykos/maths/m1/reference.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/fixtures/m1_price.hpp"
+#include "epykos/fixtures/m1_reference.hpp"
 #include "epykos/version.hpp"
 
 #ifndef EPYKOS_FP_CONTRACT_OFF
 #error "an _e0_test.cpp TU must see EPYKOS_FP_CONTRACT_OFF"
 #endif
 
-namespace m1 = epykos::m1;
+namespace fixtures = epykos::fixtures;
 
 namespace {
 
@@ -41,7 +41,7 @@ std::uint64_t digest(const std::vector<double>& v) {
 }  // namespace
 
 TEST(M1OracleE0, TableShapeAndOrdering) {
-  const m1::ReferenceTable t = m1::m1_reference_values();
+  const fixtures::ReferenceTable t = fixtures::m1_reference_values();
   ASSERT_EQ(t.n_swaps, 1000);
   ASSERT_EQ(t.n_states, 64);
   ASSERT_EQ(t.stride(), 1001);
@@ -63,42 +63,42 @@ TEST(M1OracleE0, TableShapeAndOrdering) {
 }
 
 TEST(M1OracleE0, BatchStateZeroIsTheRecordPointBitwise) {
-  const m1::ReferenceTable t = m1::m1_reference_values();
+  const fixtures::ReferenceTable t = fixtures::m1_reference_values();
   EXPECT_EQ(std::memcmp(t.record.data(), t.state(0), 1001 * sizeof(double)), 0);
   // The other states are genuinely different states.
   for (int b = 1; b < t.n_states; ++b) EXPECT_NE(t.book_pv(b), t.record_book_pv()) << b;
 }
 
 TEST(M1OracleE0, TableIsTheTemplatedDoubleMathsInThisTU) {
-  const m1::Book book = m1::make_m1_book();
-  const m1::Batch batch = m1::make_m1_batch();
-  const m1::ReferenceTable t = m1::m1_reference_values(book, batch);
+  const fixtures::Book book = fixtures::make_m1_book();
+  const fixtures::Batch batch = fixtures::make_m1_batch();
+  const fixtures::ReferenceTable t = fixtures::m1_reference_values(book, batch);
   std::vector<double> out(1001);
-  m1::price_book<double>(book, book.z0.data(), out.data(), out.data() + 1000);
+  fixtures::price_book<double>(book, book.z0.data(), out.data(), out.data() + 1000);
   EXPECT_EQ(std::memcmp(out.data(), t.record.data(), 1001 * sizeof(double)), 0);
   double z[12];
   for (int b = 0; b < batch.n_states; ++b) {
     batch.state(b, z);
-    m1::price_book<double>(book, z, out.data(), out.data() + 1000);
+    fixtures::price_book<double>(book, z, out.data(), out.data() + 1000);
     EXPECT_EQ(std::memcmp(out.data(), t.state(b), 1001 * sizeof(double)), 0) << b;
-    m1::m1_reference_state(book, z, out.data());
+    fixtures::m1_reference_state(book, z, out.data());
     EXPECT_EQ(std::memcmp(out.data(), t.state(b), 1001 * sizeof(double)), 0) << b;
   }
   // The seed overload is the same table.
-  const m1::ReferenceTable u = m1::m1_reference_values(m1::default_seed);
+  const fixtures::ReferenceTable u = fixtures::m1_reference_values(fixtures::default_seed);
   EXPECT_EQ(u.record, t.record);
   EXPECT_EQ(u.batch, t.batch);
 }
 
 TEST(M1OracleE0, Deterministic) {
-  const m1::ReferenceTable a = m1::m1_reference_values();
-  const m1::ReferenceTable b = m1::m1_reference_values();
+  const fixtures::ReferenceTable a = fixtures::m1_reference_values();
+  const fixtures::ReferenceTable b = fixtures::m1_reference_values();
   EXPECT_EQ(a.record, b.record);
   EXPECT_EQ(a.batch, b.batch);
 }
 
 TEST(M1OracleE0, ReportValues) {
-  const m1::ReferenceTable t = m1::m1_reference_values();
+  const fixtures::ReferenceTable t = fixtures::m1_reference_values();
   std::cout << std::setprecision(17) << "m1 oracle: build " << epykos::build_config() << " ["
             << epykos::build_flags() << "], libepykos fp-contract-off=" << epykos::build_fp_contract_off()
             << ", this TU fp-contract-off=1\n"

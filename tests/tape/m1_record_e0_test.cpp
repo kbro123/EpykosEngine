@@ -1,4 +1,4 @@
-// M1/P2 integration E0 gate: the UNMODIFIED P1 maths (maths/m1/price.hpp) records on Rec, and the
+// M1/P2 integration E0 gate: the UNMODIFIED P1 maths (fixtures/m1_price.hpp) records on Rec, and the
 // tape replays bit-identically to price_book<double> at the record point and at every one of the
 // 64 batch states — before any pass and after each of cse, dce, fold_sum, affine_collapse, dce.
 //
@@ -17,13 +17,13 @@
 #include <string>
 #include <vector>
 
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/maths/m1/price.hpp"
-#include "epykos/maths/m1/reference.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/fixtures/m1_price.hpp"
+#include "epykos/fixtures/m1_reference.hpp"
 #include "epykos/scalar/rec.hpp"
 #include "epykos/tape/op.hpp"
 #include "epykos/tape/passes.hpp"
-#include "epykos/tape/record_m1.hpp"
+#include "epykos/fixtures/record_m1.hpp"
 #include "epykos/tape/replay.hpp"
 #include "epykos/tape/tape.hpp"
 #include "tape/tape_test_helpers.hpp"
@@ -32,7 +32,7 @@
 #error "an _e0_test.cpp TU must see EPYKOS_FP_CONTRACT_OFF"
 #endif
 
-namespace m1 = epykos::m1;
+namespace fixtures = epykos::fixtures;
 using epykos::Op;
 using epykos::PassResult;
 using epykos::Rec;
@@ -45,17 +45,17 @@ namespace {
 
 // The seeded fixtures and the double oracle of this TU, built once.
 struct Fixture {
-  m1::Book book;
-  m1::Batch batch;
-  m1::ReferenceTable oracle;  // record + 64 states, computed in this (contraction-free) TU
+  fixtures::Book book;
+  fixtures::Batch batch;
+  fixtures::ReferenceTable oracle;  // record + 64 states, computed in this (contraction-free) TU
 };
 
 const Fixture& fixture() {
   static const Fixture f = [] {
     Fixture x;
-    x.book = m1::make_m1_book();
-    x.batch = m1::make_m1_batch();
-    x.oracle = m1::m1_reference_values(x.book, x.batch);
+    x.book = fixtures::make_m1_book();
+    x.batch = fixtures::make_m1_batch();
+    x.oracle = fixtures::m1_reference_values(x.book, x.batch);
     return x;
   }();
   return f;
@@ -65,11 +65,11 @@ const Fixture& fixture() {
 // oracle bitwise. Returns the number of mismatching (state, output) pairs.
 std::size_t replay_mismatches(const Tape& tape, const char* what) {
   const Fixture& f = fixture();
-  EXPECT_EQ(tape.num_inputs(), static_cast<std::size_t>(m1::n_knots)) << what;
+  EXPECT_EQ(tape.num_inputs(), static_cast<std::size_t>(fixtures::n_knots)) << what;
   EXPECT_EQ(tape.num_outputs(), static_cast<std::size_t>(f.book.n_swaps + 1)) << what;
   Replayer rp(tape);
   std::vector<double> out(tape.num_outputs(), 0.0);
-  std::vector<double> z(static_cast<std::size_t>(m1::n_knots), 0.0);
+  std::vector<double> z(static_cast<std::size_t>(fixtures::n_knots), 0.0);
   std::size_t mismatches = 0;
   auto check = [&](const double* expect, const std::string& where) {
     for (std::size_t k = 0; k < out.size(); ++k) {
@@ -114,13 +114,13 @@ void log_counts(const char* stage, const Tape& t) {
 }
 
 // The distinct discount times the maths evaluates: DF(e_j) on every row, DF(s_j) on float rows
-// that are not the realised first coupon (price.hpp). After cse there is one Exp per time.
-std::vector<double> distinct_df_times(const m1::Book& b) {
+// that are not the realised first coupon (m1_price.hpp). After cse there is one Exp per time.
+std::vector<double> distinct_df_times(const fixtures::Book& b) {
   std::vector<double> ts;
   for (int r = 0; r < b.n_rows; ++r) {
     const auto s = static_cast<std::size_t>(r);
     ts.push_back(b.row_t_end[s]);
-    if (b.row_leg[s] == m1::float_leg && !b.row_is_realised_first[s]) ts.push_back(b.row_t_start[s]);
+    if (b.row_leg[s] == fixtures::float_leg && !b.row_is_realised_first[s]) ts.push_back(b.row_t_start[s]);
   }
   std::sort(ts.begin(), ts.end());
   ts.erase(std::unique(ts.begin(), ts.end()), ts.end());
@@ -130,7 +130,7 @@ std::vector<double> distinct_df_times(const m1::Book& b) {
 // Times strictly inside the knot range and not on a knot: the ones whose zero rate is a two-term
 // interpolation ((1 − w)·z_k + w·z_{k+1}) and therefore one Sum after fold_sum / one Affine after
 // affine_collapse.
-std::size_t count_interior_times(const m1::Book& b, const std::vector<double>& ts) {
+std::size_t count_interior_times(const fixtures::Book& b, const std::vector<double>& ts) {
   std::size_t n = 0;
   for (double t : ts) {
     if (!(t > b.knot_t.front() && t < b.knot_t.back())) continue;
@@ -140,7 +140,7 @@ std::size_t count_interior_times(const m1::Book& b, const std::vector<double>& t
   return n;
 }
 
-std::size_t count_swaps_with_two_or_more_periods(const m1::Book& b) {
+std::size_t count_swaps_with_two_or_more_periods(const fixtures::Book& b) {
   std::size_t n = 0;
   for (int t : b.tenor) n += (t >= 2);
   return n;
@@ -159,11 +159,11 @@ TEST(M1RecordE0, UnmodifiedMathsRecordsWithoutThrowing) {
   // no Rec used outside its scope. Any of these throws RecordError.
   ASSERT_NO_THROW({
     Tape::Scope scope(t);
-    std::vector<Rec> z(static_cast<std::size_t>(m1::n_knots));
-    for (int k = 0; k < m1::n_knots; ++k) {
+    std::vector<Rec> z(static_cast<std::size_t>(fixtures::n_knots));
+    for (int k = 0; k < fixtures::n_knots; ++k) {
       z[static_cast<std::size_t>(k)] = epykos::make_input(t, f.book.z0[static_cast<std::size_t>(k)]);
     }
-    m1::price_book<Rec>(f.book, z.data(), swap_pv.data(), &book_pv);
+    fixtures::price_book<Rec>(f.book, z.data(), swap_pv.data(), &book_pv);
     for (const Rec& pv : swap_pv) epykos::register_output(t, pv);
     epykos::register_output(t, book_pv);
   });
@@ -173,7 +173,7 @@ TEST(M1RecordE0, UnmodifiedMathsRecordsWithoutThrowing) {
   ASSERT_EQ(t.num_inputs(), 12u);
   ASSERT_EQ(t.num_outputs(), 1001u);
   // Input ordinal k is knot k with the record-point value z0[k].
-  for (int k = 0; k < m1::n_knots; ++k) {
+  for (int k = 0; k < fixtures::n_knots; ++k) {
     const epykos::Node& n = t[t.inputs()[static_cast<std::size_t>(k)]];
     EXPECT_EQ(n.op, Op::Input) << k;
     EXPECT_EQ(n.a, k) << k;
@@ -206,7 +206,7 @@ TEST(M1RecordE0, UnmodifiedMathsRecordsWithoutThrowing) {
   std::size_t expected_exps = 0;
   for (int r = 0; r < f.book.n_rows; ++r) {
     const auto s = static_cast<std::size_t>(r);
-    expected_exps += 1 + (f.book.row_leg[s] == m1::float_leg && !f.book.row_is_realised_first[s]);
+    expected_exps += 1 + (f.book.row_leg[s] == fixtures::float_leg && !f.book.row_is_realised_first[s]);
   }
   EXPECT_EQ(count_op(t, Op::Exp), expected_exps);
 
@@ -222,7 +222,7 @@ TEST(M1RecordE0, UnmodifiedMathsRecordsWithoutThrowing) {
 
 TEST(M1RecordE0, ReplayIsBitIdenticalToDoubleAfterEveryPass) {
   const Fixture& f = fixture();
-  Tape t = m1::record_m1_raw(f.book);
+  Tape t = fixtures::record_m1_raw(f.book);
   log_counts("recorded", t);
   const std::size_t n_recorded = t.size();
   ASSERT_EQ(replay_mismatches(t, "raw recording"), 0u);
@@ -307,18 +307,18 @@ TEST(M1RecordE0, ReplayIsBitIdenticalToDoubleAfterEveryPass) {
 // Batch state 0 is the record point bitwise, on the tape as on the oracle.
 TEST(M1RecordE0, BatchStateZeroReplaysAsTheRecordPoint) {
   const Fixture& f = fixture();
-  Tape t = m1::record_m1(f.book);
+  Tape t = fixtures::record_m1(f.book);
   Replayer rp(t);
   std::vector<double> out_rec(t.num_outputs()), out_0(t.num_outputs());
   const std::vector<double> z_rec = t.input_values();
   rp.run(z_rec.data(), out_rec.data());
-  std::vector<double> z0(static_cast<std::size_t>(m1::n_knots));
+  std::vector<double> z0(static_cast<std::size_t>(fixtures::n_knots));
   f.batch.state(0, z0.data());
   EXPECT_EQ(z0, z_rec);
   rp.run(z0.data(), out_0.data());
   for (std::size_t k = 0; k < out_rec.size(); ++k) EXPECT_EQ(bits(out_rec[k]), bits(out_0[k])) << k;
   // And the other states are genuinely different states.
-  std::vector<double> z(static_cast<std::size_t>(m1::n_knots)), out(t.num_outputs());
+  std::vector<double> z(static_cast<std::size_t>(fixtures::n_knots)), out(t.num_outputs());
   for (int b = 1; b < f.batch.n_states; ++b) {
     f.batch.state(b, z.data());
     rp.run(z.data(), out.data());
@@ -331,7 +331,7 @@ TEST(M1RecordE0, BatchStateZeroReplaysAsTheRecordPoint) {
 TEST(M1RecordE0, HelperEqualsTheManualPipelineAndStandardPasses) {
   const Fixture& f = fixture();
   // Manual: raw recording then the five passes.
-  Tape manual = m1::record_m1_raw(f.book);
+  Tape manual = fixtures::record_m1_raw(f.book);
   const std::size_t n_raw = manual.size();
   epykos::cse(manual);
   const std::size_t n_cse = manual.size();
@@ -344,8 +344,8 @@ TEST(M1RecordE0, HelperEqualsTheManualPipelineAndStandardPasses) {
   epykos::dce(manual);
   const std::size_t n_final = manual.size();
 
-  m1::RecordM1Stats stats;
-  const Tape helper = m1::record_m1(f.book, &stats);
+  fixtures::RecordM1Stats stats;
+  const Tape helper = fixtures::record_m1(f.book, &stats);
   EXPECT_EQ(stats.recorded, n_raw);
   EXPECT_EQ(stats.after_cse, n_cse);
   EXPECT_EQ(stats.after_dce, n_dce);
@@ -358,22 +358,22 @@ TEST(M1RecordE0, HelperEqualsTheManualPipelineAndStandardPasses) {
   EXPECT_EQ(epykos::to_string(helper), epykos::to_string(manual));
 
   // standard_passes on a fresh raw recording is the same tape.
-  Tape standard = m1::record_m1_raw(f.book);
+  Tape standard = fixtures::record_m1_raw(f.book);
   epykos::standard_passes(standard);
   EXPECT_EQ(epykos::to_string(standard), epykos::to_string(helper));
 
   // run_passes = false is the raw recording.
-  m1::RecordM1Options no_passes;
+  fixtures::RecordM1Options no_passes;
   no_passes.run_passes = false;
-  m1::RecordM1Stats raw_stats;
-  const Tape raw = m1::record_m1(f.book, &raw_stats, no_passes);
+  fixtures::RecordM1Stats raw_stats;
+  const Tape raw = fixtures::record_m1(f.book, &raw_stats, no_passes);
   EXPECT_EQ(raw.size(), n_raw);
   EXPECT_EQ(raw_stats.recorded, n_raw);
   EXPECT_EQ(raw_stats.after_final_dce, n_raw);
-  EXPECT_EQ(epykos::to_string(raw), epykos::to_string(m1::record_m1_raw(f.book)));
+  EXPECT_EQ(epykos::to_string(raw), epykos::to_string(fixtures::record_m1_raw(f.book)));
 
   // Recording is deterministic: two recordings of the same book are the same tape.
-  EXPECT_EQ(epykos::to_string(m1::record_m1(f.book)), epykos::to_string(helper));
+  EXPECT_EQ(epykos::to_string(fixtures::record_m1(f.book)), epykos::to_string(helper));
 
   // And the helper's tape is the E0 tape.
   EXPECT_EQ(replay_mismatches(helper, "record_m1"), 0u);

@@ -1,21 +1,21 @@
 // The hand-fused M1 reference kernel (M1/P5). See the header for the design.
 //
-// An E0 TU (src/**/*_e0.cpp, root CMakeLists.txt): compiled with -ffp-contract=off in every
-// preset on every compiler, so the reference-arithmetic mode is bitwise the contraction-free
+// An E0 TU (bench/hand/*_e0.cpp, bench/hand/CMakeLists.txt; the src/**/*_e0.cpp convention of the
+// root CMakeLists.txt): compiled with -ffp-contract=off in every preset on every compiler, so the reference-arithmetic mode is bitwise the contraction-free
 // oracle and the fused mode's only fused operations are its explicit std::fma calls (D13, D25).
 #ifndef EPYKOS_FP_CONTRACT_OFF
-#error "m1_hand_kernel_e0.cpp must be compiled with -ffp-contract=off (see the *_e0.cpp rule in CMakeLists.txt)"
+#error "m1_hand_kernel_e0.cpp must be compiled with -ffp-contract=off (see the *_e0.cpp rule in bench/hand/CMakeLists.txt)"
 #endif
 
 
-#include "epykos/hand/m1_hand_kernel.hpp"
+#include "hand/m1_hand_kernel.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
-#include "epykos/hand/exp_poly.hpp"
-#include "epykos/maths/m1/curve.hpp"
+#include "epykos/maths/exp_poly.hpp"
+#include "epykos/maths/curve/linear.hpp"
 
 namespace epykos::hand {
 
@@ -33,21 +33,21 @@ int round_up(int n, int m) { return ((n + m - 1) / m) * m; }
 
 int M1HandKernel::lane_tile() const noexcept { return kLaneTile; }
 
-M1HandKernel::M1HandKernel(const m1::Book& book, M1HandOptions options) : opt_(options) {
+M1HandKernel::M1HandKernel(const fixtures::Book& book, M1HandOptions options) : opt_(options) {
   if (opt_.arith == HandArith::reference) {
     opt_.shared_reciprocal = false;
     opt_.exp = HandExp::std_exp;
   }
   if (opt_.max_batch < 1) throw std::invalid_argument("M1HandKernel: max_batch must be >= 1");
   n_swaps_ = book.n_swaps;
-  n_knots_ = m1::n_knots;
+  n_knots_ = fixtures::n_knots;
 
   // ---- unique discount times: every coupon end, plus every non-realised float coupon start.
   std::vector<double> times;
   times.reserve(idx(book.n_rows) * 2);
   for (int r = 0; r < book.n_rows; ++r) {
     times.push_back(book.row_t_end[idx(r)]);
-    if (book.row_leg[idx(r)] == m1::float_leg && !book.row_is_realised_first[idx(r)]) {
+    if (book.row_leg[idx(r)] == fixtures::float_leg && !book.row_is_realised_first[idx(r)]) {
       times.push_back(book.row_t_start[idx(r)]);
     }
   }
@@ -123,7 +123,7 @@ M1HandKernel::M1HandKernel(const m1::Book& book, M1HandOptions options) : opt_(o
     const double R = book.realised_rate[idx(i)];
     int p = plain_begin_[idx(pos)];
     // Fixed leg: coef = N·τ·K in the oracle's order ((N·τ)·K).
-    const int f0 = m1::fixed_row_begin(book, i);
+    const int f0 = fixtures::fixed_row_begin(book, i);
     for (int j = 0; j < T; ++j, ++p) {
       const std::size_t r = idx(f0 + j);
       plain_time_[idx(p)] = time_index(book.row_t_end[r]);
@@ -131,7 +131,7 @@ M1HandKernel::M1HandKernel(const m1::Book& book, M1HandOptions options) : opt_(o
     }
     // Float leg: the realised first coupon is a plain row with coef = (N·τ)·R; the others carry a
     // forward.
-    const int g0 = m1::float_row_begin(book, i);
+    const int g0 = fixtures::float_row_begin(book, i);
     int q = float_begin_[idx(pos)];
     for (int j = 0; j < T; ++j) {
       const std::size_t r = idx(g0 + j);
@@ -155,9 +155,9 @@ M1HandKernel::M1HandKernel(const m1::Book& book, M1HandOptions options) : opt_(o
 
   if (static_cast<int>(time_.size()) != n_times_) throw std::logic_error("M1HandKernel: unused time");
 
-  // ---- W: the weights of zero_rate() in curve.hpp, computed with the same expressions so that
-  // w0·z[k0] + w1·z[k1] is the oracle's (1 − w)·z[k] + w·z[k+1] bitwise, and z[k] exactly at the
-  // knots and beyond the ends (1.0·z + 0.0·z).
+  // ---- W: the weights of curve::linear::zero_rate() (maths/curve/linear.hpp), computed with the
+  // same expressions so that w0·z[k0] + w1·z[k1] is the oracle's (1 − w)·z[k] + w·z[k+1] bitwise,
+  // and z[k] exactly at the knots and beyond the ends (1.0·z + 0.0·z).
   knot0_.resize(idx(n_times_));
   knot1_.resize(idx(n_times_));
   w0_.resize(idx(n_times_));
@@ -242,7 +242,7 @@ void M1HandKernel::curve_pass() const {
   // 2. DF = exp(x) in place.
   const int total = nu * stride;
   if (opt_.exp == HandExp::poly) {
-    exp_poly_array(df, df, total);
+    maths::exp_poly_array(df, df, total);
   } else {
     for (int i = 0; i < total; ++i) df[i] = std::exp(df[i]);
   }

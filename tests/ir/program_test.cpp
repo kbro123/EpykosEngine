@@ -14,16 +14,16 @@
 #include "epykos/ir/expand.hpp"
 #include "epykos/ir/program.hpp"
 #include "epykos/ir/signature.hpp"
-#include "epykos/maths/m1/book.hpp"
+#include "epykos/fixtures/m1_book.hpp"
 #include "epykos/scalar/rec.hpp"
 #include "epykos/tape/passes.hpp"
-#include "epykos/tape/record_m1.hpp"
+#include "epykos/fixtures/record_m1.hpp"
 #include "epykos/tape/replay.hpp"
 #include "epykos/tape/tape.hpp"
 #include "ir/ir_test_helpers.hpp"
 
 namespace ir = epykos::ir;
-namespace m1 = epykos::m1;
+namespace fixtures = epykos::fixtures;
 using epykos::make_input;
 using epykos::Op;
 using epykos::Rec;
@@ -273,8 +273,8 @@ TEST(IrProgram, IndirectCycleIsSplitByLevelWithoutARecurrence) {
 }
 
 TEST(IrProgram, ValidateRejectsCorruptPrograms) {
-  const m1::Book full = m1::make_m1_book();
-  const ir::Program good = ir::infer(m1::record_m1(epykos::test::sub_book(full, {0, 300})));
+  const fixtures::Book full = fixtures::make_m1_book();
+  const ir::Program good = ir::infer(fixtures::record_m1(epykos::test::sub_book(full, {0, 300})));
   ASSERT_NO_THROW(ir::validate(good));
   {
     ir::Program bad = good;
@@ -313,7 +313,7 @@ TEST(IrProgram, ValidateRejectsCorruptPrograms) {
 }
 
 TEST(IrProgram, SerialisationIsExactOnTheM1Book) {
-  const ir::Program p = ir::infer(m1::record_m1(m1::make_m1_book()));
+  const ir::Program p = ir::infer(fixtures::record_m1(fixtures::make_m1_book()));
   const std::string text = ir::serialize(p);
   const ir::Program q = ir::deserialize(text);
   EXPECT_TRUE(q == p);

@@ -25,28 +25,28 @@
 #include "epykos/exec/interpreter.hpp"
 #include "epykos/ir/program.hpp"
 #include "epykos/ir/signature.hpp"
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/tape/record_m1.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/fixtures/record_m1.hpp"
 #include "epykos/tape/tape.hpp"
 
 namespace {
 
-namespace m1 = epykos::m1;
+namespace fixtures = epykos::fixtures;
 namespace ir = epykos::ir;
 using epykos::exec::ExpMode;
 using epykos::exec::Interpreter;
 using epykos::exec::Options;
 
-const m1::Book& book() {
-  static const m1::Book b = m1::make_m1_book();
+const fixtures::Book& book() {
+  static const fixtures::Book b = fixtures::make_m1_book();
   return b;
 }
-const m1::Batch& batch() {
-  static const m1::Batch b = m1::make_m1_batch();
+const fixtures::Batch& batch() {
+  static const fixtures::Batch b = fixtures::make_m1_batch();
   return b;
 }
 const epykos::Tape& tape() {
-  static const epykos::Tape t = m1::record_m1(book());
+  static const epykos::Tape t = fixtures::record_m1(book());
   return t;
 }
 const ir::Program& program() {
@@ -59,7 +59,7 @@ Options options_for(const benchmark::State& state) {
   o.tile = static_cast<int>(state.range(0));
   o.lane_tile = static_cast<int>(state.range(1));
   o.exp = state.range(2) == 0 ? ExpMode::std_exp : ExpMode::poly;
-  o.max_batch = m1::n_states;
+  o.max_batch = fixtures::n_states;
   return o;
 }
 
@@ -73,7 +73,7 @@ void set_counters(benchmark::State& state, const Interpreter& in, int B) {
   state.counters["domains"] = static_cast<double>(program().domains.size());
   state.counters["ns_per_state"] = benchmark::Counter(
       static_cast<double>(B), benchmark::Counter::kIsIterationInvariantRate | benchmark::Counter::kInvert);
-  state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) * B * m1::n_swaps);
+  state.SetItemsProcessed(static_cast<std::int64_t>(state.iterations()) * B * fixtures::n_swaps);
 }
 
 // B = 1: the state written fresh each repetition (a tiny drift so the compiler cannot hoist it).
@@ -118,7 +118,7 @@ void BM_InterpBuild(benchmark::State& state) {
 }
 void BM_InterpPipeline(benchmark::State& state) {
   for (auto _ : state) {
-    const epykos::Tape t = m1::record_m1(book());
+    const epykos::Tape t = fixtures::record_m1(book());
     const ir::Program p = ir::infer(t);
     Interpreter in(p);
     benchmark::DoNotOptimize(in.num_values());

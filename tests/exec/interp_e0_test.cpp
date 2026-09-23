@@ -23,17 +23,17 @@
 #include "epykos/ir/evaluate.hpp"
 #include "epykos/ir/program.hpp"
 #include "epykos/ir/signature.hpp"
-#include "epykos/maths/m1/book.hpp"
+#include "epykos/fixtures/m1_book.hpp"
 #include "epykos/scalar/rec.hpp"
 #include "epykos/tape/passes.hpp"
-#include "epykos/tape/record_m1.hpp"
+#include "epykos/fixtures/record_m1.hpp"
 #include "epykos/tape/replay.hpp"
 #include "epykos/tape/tape.hpp"
 #include "tape/mini_book.hpp"
 
 namespace ir = epykos::ir;
 namespace exec = epykos::exec;
-namespace m1 = epykos::m1;
+namespace fixtures = epykos::fixtures;
 using epykos::Op;
 using epykos::Rec;
 using epykos::Replayer;
@@ -288,8 +288,8 @@ TEST(Interp, SameClassChainsSplitByLevelRunBitwise) {
 
 TEST(Interp, OptionsAndBatchWidthAreValidated) {
 
-  const m1::Book book = m1::make_m1_book();
-  const Tape tape = m1::record_m1(book);
+  const fixtures::Book book = fixtures::make_m1_book();
+  const Tape tape = fixtures::record_m1(book);
   const ir::Program program = ir::infer(tape);
   EXPECT_THROW(exec::Interpreter(program, exec::Options{0, 64, 8, exec::ExpMode::std_exp}), std::invalid_argument);
   EXPECT_THROW(exec::Interpreter(program, exec::Options{256, 0, 8, exec::ExpMode::std_exp}), std::invalid_argument);
@@ -311,8 +311,8 @@ TEST(Interp, OptionsAndBatchWidthAreValidated) {
 }
 
 TEST(Interp, DescribeListsTheM1Plan) {
-  const m1::Book book = m1::make_m1_book();
-  const Tape tape = m1::record_m1(book);
+  const fixtures::Book book = fixtures::make_m1_book();
+  const Tape tape = fixtures::record_m1(book);
   const ir::Program program = ir::infer(tape);
   exec::Interpreter in(program);
   const std::string d = in.describe();
@@ -331,9 +331,9 @@ TEST(Interp, DescribeListsTheM1Plan) {
 
 // E1: exp_poly instead of std::exp. Within 1e-12 relative of the E0 result on the M1 book.
 TEST(Interp, ExpPolyModeIsWithinE1OfStdExp) {
-  const m1::Book book = m1::make_m1_book();
-  const m1::Batch batch = m1::make_m1_batch();
-  const Tape tape = m1::record_m1(book);
+  const fixtures::Book book = fixtures::make_m1_book();
+  const fixtures::Batch batch = fixtures::make_m1_batch();
+  const Tape tape = fixtures::record_m1(book);
   const ir::Program program = ir::infer(tape);
   exec::Options poly;
   poly.exp = exec::ExpMode::poly;

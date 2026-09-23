@@ -8,15 +8,15 @@
 #include <cstring>
 #include <vector>
 
-#include "epykos/hand/m1_hand_kernel.hpp"
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/maths/m1/reference.hpp"
+#include "hand/m1_hand_kernel.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/fixtures/m1_reference.hpp"
 
 #ifndef EPYKOS_FP_CONTRACT_OFF
 #error "an _e0_test.cpp TU must see EPYKOS_FP_CONTRACT_OFF"
 #endif
 
-namespace m1 = epykos::m1;
+namespace fixtures = epykos::fixtures;
 using epykos::hand::HandArith;
 using epykos::hand::HandExp;
 using epykos::hand::M1HandKernel;
@@ -24,16 +24,16 @@ using epykos::hand::M1HandOptions;
 
 namespace {
 
-const m1::Book& book() {
-  static const m1::Book b = m1::make_m1_book();
+const fixtures::Book& book() {
+  static const fixtures::Book b = fixtures::make_m1_book();
   return b;
 }
-const m1::Batch& batch() {
-  static const m1::Batch b = m1::make_m1_batch();
+const fixtures::Batch& batch() {
+  static const fixtures::Batch b = fixtures::make_m1_batch();
   return b;
 }
-const m1::ReferenceTable& oracle() {
-  static const m1::ReferenceTable t = m1::m1_reference_values(book(), batch());
+const fixtures::ReferenceTable& oracle() {
+  static const fixtures::ReferenceTable t = fixtures::m1_reference_values(book(), batch());
   return t;
 }
 
@@ -60,7 +60,7 @@ TEST(M1HandE0, RecordPointBitwise) {
   std::vector<double> pv(1000);
   double bpv = 0.0;
   k.eval(book().z0.data(), pv.data(), &bpv);
-  const m1::ReferenceTable& t = oracle();
+  const fixtures::ReferenceTable& t = oracle();
   int diff = 0;
   for (int i = 0; i < 1000; ++i) {
     if (std::memcmp(&pv[static_cast<std::size_t>(i)], &t.record[static_cast<std::size_t>(i)], sizeof(double)) != 0) {
@@ -75,7 +75,7 @@ TEST(M1HandE0, RecordPointBitwise) {
 
 TEST(M1HandE0, AllStatesBitwise) {
   const M1HandKernel k(book(), reference_options());
-  const m1::ReferenceTable& t = oracle();
+  const fixtures::ReferenceTable& t = oracle();
   std::vector<double> pv(1001);
   double z[12];
   int bad_states = 0;
@@ -97,7 +97,7 @@ TEST(M1HandE0, AllStatesBitwise) {
 // eval_batch on the 64 states is bitwise the oracle table (and hence bitwise 64 evals).
 TEST(M1HandE0, BatchBitwise) {
   const M1HandKernel k(book(), reference_options());
-  const m1::ReferenceTable& t = oracle();
+  const fixtures::ReferenceTable& t = oracle();
   std::vector<double> pv(1000 * 64), bpv(64);
   k.eval_batch(batch().z.data(), 64, pv.data(), bpv.data());
   int bad = 0;

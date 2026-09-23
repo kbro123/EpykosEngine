@@ -59,7 +59,7 @@
 //
 // Exactness: ExpMode::std_exp evaluates Exp with std::exp, which is what the recorder, the
 // replay and the reference evaluator use (E0). ExpMode::poly uses the vectorisable exp_poly of
-// hand/exp_poly.hpp (≤ 1 ulp of std::exp: E1) for like-for-like timing against the hand-fused
+// maths/exp_poly.hpp (≤ 1 ulp of std::exp: E1) for like-for-like timing against the hand-fused
 // kernel's default; the E0 gates never use it.
 #pragma once
 

@@ -1,6 +1,6 @@
 // M1/P7: the fixture bits do not depend on the compiler or the preset (D13, D25).
 //
-// (1) Everything src/maths/m1/book_e0.cpp computes with floating-point arithmetic — par rates,
+// (1) Everything src/fixtures/m1_book_e0.cpp computes with floating-point arithmetic — par rates,
 //     fixed rates, realised rates, accrual fractions, discount times, the batch states — is
 //     recomputed here, in a contraction-free TU, from the same draws and the same templates, and
 //     must be bitwise what libepykos holds. A compiler that contracted the book generator (GCC 13
@@ -20,10 +20,10 @@
 #include <vector>
 
 #include "epykos/maths/calendar.hpp"
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/maths/m1/curve.hpp"
-#include "epykos/maths/m1/price.hpp"
-#include "epykos/maths/m1/reference.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/maths/curve/linear.hpp"
+#include "epykos/fixtures/m1_price.hpp"
+#include "epykos/fixtures/m1_reference.hpp"
 #include "epykos/rng/philox.hpp"
 #include "epykos/version.hpp"
 
@@ -31,7 +31,7 @@
 #error "an _e0_test.cpp TU must see EPYKOS_FP_CONTRACT_OFF"
 #endif
 
-namespace m1 = epykos::m1;
+namespace fixtures = epykos::fixtures;
 namespace rng = epykos::rng;
 namespace calendar = epykos::calendar;
 
@@ -62,12 +62,12 @@ struct Digest {
 
 std::size_t idx(int i) { return static_cast<std::size_t>(i); }
 
-const m1::Book& book() {
-  static const m1::Book b = m1::make_m1_book();
+const fixtures::Book& book() {
+  static const fixtures::Book b = fixtures::make_m1_book();
   return b;
 }
-const m1::Batch& batch() {
-  static const m1::Batch b = m1::make_m1_batch();
+const fixtures::Batch& batch() {
+  static const fixtures::Batch b = fixtures::make_m1_batch();
   return b;
 }
 
@@ -75,18 +75,18 @@ const m1::Batch& batch() {
 
 // (1) The generator's arithmetic, recomputed in this contraction-free TU, is bitwise the library's.
 TEST(M1FixtureE0, BookArithmeticIsContractionFree) {
-  const m1::Book& b = book();
-  ASSERT_EQ(b.n_swaps, m1::n_swaps);
-  const double z1 = m1::zero_rate<double>(b.knot_t.data(), b.z0.data(), m1::n_knots, 1.0);
+  const fixtures::Book& b = book();
+  ASSERT_EQ(b.n_swaps, fixtures::n_swaps);
+  const double z1 = epykos::curve::linear::zero_rate<double>(b.knot_t.data(), b.z0.data(), fixtures::n_knots, 1.0);
   EXPECT_EQ(bits(z1), bits(b.z0[4])) << "t = 1 is knot 4";
   int bad_par = 0, bad_k = 0, bad_r = 0, bad_eps = 0;
   for (int i = 0; i < b.n_swaps; ++i) {
     // Draws 4 and 5 of sub-stream i (the generator's order: tenor, notional, side, offset, ε, R multiplier).
-    rng::Philox g(m1::default_seed, static_cast<std::uint64_t>(i), 4);
+    rng::Philox g(fixtures::default_seed, static_cast<std::uint64_t>(i), 4);
     const double eps = g.uniform_range(-0.05, 0.05);
     const double r_mult = g.uniform_range(-0.1, 0.1);
     if (bits(eps) != bits(b.eps[idx(i)])) ++bad_eps;
-    const double par = m1::float_leg_pv<double>(b, i, b.z0.data()) / m1::annuity<double>(b, i, b.z0.data());
+    const double par = fixtures::float_leg_pv<double>(b, i, b.z0.data()) / fixtures::annuity<double>(b, i, b.z0.data());
     if (bits(par) != bits(b.par[idx(i)])) ++bad_par;
     if (bits(par * (1.0 + b.eps[idx(i)])) != bits(b.fixed_rate[idx(i)])) ++bad_k;
     const double r = b.seasoned[idx(i)] ? z1 * (1.0 + r_mult) : 0.0;
@@ -109,14 +109,14 @@ TEST(M1FixtureE0, BookArithmeticIsContractionFree) {
 }
 
 TEST(M1FixtureE0, BatchArithmeticIsContractionFree) {
-  const m1::Batch& bt = batch();
-  ASSERT_EQ(bt.n_states, m1::n_states);
+  const fixtures::Batch& bt = batch();
+  ASSERT_EQ(bt.n_states, fixtures::n_states);
   int bad = 0;
   for (int s = 0; s < bt.n_states; ++s) {
-    rng::Philox g(m1::default_seed, m1::batch_substream_base + static_cast<std::uint64_t>(s));
-    for (int k = 0; k < m1::n_knots; ++k) {
-      const double delta = (s == 0) ? 0.0 : m1::batch_sigma * g.gaussian();
-      const double z = m1::record_state[idx(k)] + delta;  // the mul + add is the contraction candidate
+    rng::Philox g(fixtures::default_seed, fixtures::batch_substream_base + static_cast<std::uint64_t>(s));
+    for (int k = 0; k < fixtures::n_knots; ++k) {
+      const double delta = (s == 0) ? 0.0 : fixtures::batch_sigma * g.gaussian();
+      const double z = fixtures::record_state[idx(k)] + delta;  // the mul + add is the contraction candidate
       if (bits(z) != bits(bt.at(k, s))) ++bad;
     }
   }
@@ -127,7 +127,7 @@ TEST(M1FixtureE0, BatchArithmeticIsContractionFree) {
 // were taken on Apple clang 21 (x86-64) and confirmed on GCC 13 (Linux); a change means the
 // fixture, the RNG or the calendar changed, which WORKLOADS.md §M1 does not allow.
 TEST(M1FixtureE0, LibmIndependentDigestsAreToolchainInvariant) {
-  const m1::Book& b = book();
+  const fixtures::Book& b = book();
   Digest ints;  // tenor, side, d0, seasoned, row table days and flags
   ints.add_all(b.tenor);
   ints.add_all(b.side);
@@ -146,13 +146,13 @@ TEST(M1FixtureE0, LibmIndependentDigestsAreToolchainInvariant) {
   reals.add_all(b.row_t_start);
   reals.add_all(b.row_t_end);
   Digest draws;  // the six uniform draws of every swap sub-stream and the 12 of every batch sub-stream
-  for (int i = 0; i < m1::n_swaps; ++i) {
-    const rng::Philox g(m1::default_seed, static_cast<std::uint64_t>(i));
+  for (int i = 0; i < fixtures::n_swaps; ++i) {
+    const rng::Philox g(fixtures::default_seed, static_cast<std::uint64_t>(i));
     for (std::uint64_t n = 0; n < 6; ++n) draws.add(g.uniform_at(n));
   }
-  for (int s = 0; s < m1::n_states; ++s) {
-    const rng::Philox g(m1::default_seed, m1::batch_substream_base + static_cast<std::uint64_t>(s));
-    for (std::uint64_t n = 0; n < static_cast<std::uint64_t>(m1::n_knots); ++n) draws.add(g.uniform_open_at(n));
+  for (int s = 0; s < fixtures::n_states; ++s) {
+    const rng::Philox g(fixtures::default_seed, fixtures::batch_substream_base + static_cast<std::uint64_t>(s));
+    for (std::uint64_t n = 0; n < static_cast<std::uint64_t>(fixtures::n_knots); ++n) draws.add(g.uniform_open_at(n));
   }
   std::cout << std::hex << "m1 fixture digests: ints " << ints.h << ", reals " << reals.h << ", draws " << draws.h
             << std::dec << "\n";
@@ -164,13 +164,13 @@ TEST(M1FixtureE0, LibmIndependentDigestsAreToolchainInvariant) {
 
 // (3) libm-dependent digests: reported for the log, never asserted.
 TEST(M1FixtureE0, ReportLibmDependentDigests) {
-  const m1::Book& b = book();
+  const fixtures::Book& b = book();
   Digest notional, par, k, states;
   notional.add_all(b.notional);
   par.add_all(b.par);
   k.add_all(b.fixed_rate);
   states.add_all(batch().z);
-  const m1::ReferenceTable t = m1::m1_reference_values(b, batch());
+  const fixtures::ReferenceTable t = fixtures::m1_reference_values(b, batch());
   Digest oracle;
   oracle.add_all(t.record);
   oracle.add_all(t.batch);

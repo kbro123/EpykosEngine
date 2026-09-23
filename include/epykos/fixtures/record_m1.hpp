@@ -1,5 +1,6 @@
-// EpykosEngine — recording the M1 book (M1/P2 integration): the unmodified P1 maths
-// (maths/m1/price.hpp) instantiated on Rec, then the E0 tape passes.
+// EpykosEngine — recording the M1 book (M1/P2 integration; a test-only fixture): the unmodified P1
+// maths (fixtures/m1_price.hpp over maths/swap/ois.hpp and maths/curve/linear.hpp) instantiated on
+// Rec, then the E0 tape passes.
 //
 // This is the one place that turns docs/WORKLOADS.md §M1 into a tape; P3 (signature pass), P4
 // (interpreter) and P6 (benchmark) start from it rather than recording on their own.
@@ -8,7 +9,7 @@
 //   inputs   ordinal k = knot k, i.e. z[k] for k in [0, n_knots); the record-point values are the
 //            book's z0, so tape.input_values() == book.z0
 //   outputs  ordinal i in [0, n_swaps) = swap PV i in swap order, ordinal n_swaps = the book PV —
-//            the same ordering as the double oracle (maths/m1/reference.hpp)
+//            the same ordering as the double oracle (fixtures/m1_reference.hpp)
 //
 // Header-only on purpose: the record-point values that Rec carries are computed under the
 // including TU's contraction setting, so an *_e0_test.cpp TU (or the reference preset) gets
@@ -18,13 +19,13 @@
 #include <cstddef>
 #include <vector>
 
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/maths/m1/price.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/fixtures/m1_price.hpp"
 #include "epykos/scalar/rec.hpp"
 #include "epykos/tape/passes.hpp"
 #include "epykos/tape/tape.hpp"
 
-namespace epykos::m1 {
+namespace epykos::fixtures {
 
 // Node counts along the pipeline (informational; the tape itself is the source of truth).
 struct RecordM1Stats {
@@ -92,4 +93,4 @@ inline Tape record_m1(const Book& book, RecordM1Stats* stats = nullptr, RecordM1
   return tape;
 }
 
-}  // namespace epykos::m1
+}  // namespace epykos::fixtures

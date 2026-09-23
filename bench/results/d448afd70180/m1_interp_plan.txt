@@ -1,0 +1,14 @@
+interpreter plan: tile 256 rows, lane_tile 8 (buffers hold 8 lanes), max_batch 64, exp std::exp
+  lane-width kernels: runtime, 1, 4, 8, 16, 32, 64; a chunk of L lanes uses the L kernel or the runtime one
+  values: 42314 rows x 8 lanes = 2.6 MB; scratch: 3 step + 3 temporary + 1 accumulator buffers x 256 x 8 doubles = 112.0 KB; plan tables 206.5 KB
+  d0 input rows 12 level 0 reads {} | 1 tile(s): input -> values
+  d1 affine(#0;%0) rows 2561 level 0 reads {d0} | whole-domain affine: members per row 2..2, 5122 members, 1 length bucket(s) in 11 block(s) of <= 256 rows, transposed, c_0 lit
+  d2 exp(mul(neg(@0),$0)) rows 2564 level 0 reads {d0 d1} | 11 tile(s): neg(gat) -> s0; mul(vec,col) -> s1; exp(vec) -> values
+  d3 mul($0,@0) rows 16103 level 0 reads {d2} | 63 tile(s): mul(col,gat) -> values
+  d4 div(sub(div(@0,@1),#0),$0) rows 2432 level 0 reads {d2} | 10 tile(s): div(gat,gat) -> s0; sub(vec,lit) -> s1; div(vec,col) -> values
+  d5 mul(mul($0,@0),@1) rows 15703 level 0 reads {d2 d4} | 62 tile(s): mul(col,gat) -> s0; mul(vec,gat) -> values
+  d6 sum(%0) rows 1938 level 0 reads {d3 d5} | whole-domain sum: members per row 2..30, 31744 members, 29 length bucket(s) in 29 block(s) of <= 256 rows, transposed
+  d7 mul($0,sub(@0,@1)) rows 969 level 1 reads {d6} | 4 tile(s): sub(gat,gat) -> s0; mul(col,vec) -> values
+  d8 mul($0,sub(@0,@1)) rows 31 level 0 reads {d3 d5} | 1 tile(s): sub(gat,gat) -> s0; mul(col,vec) -> values
+  d9 sum(%0) rows 1 level 2 reads {d7 d8} | whole-domain sum: members per row 1000..1000, 1000 members, 1 length bucket(s) in 1 block(s) of <= 256 rows, transposed
+  per lane chunk: 155 tile passes, 264 kernel calls; outputs 1001, inputs 12

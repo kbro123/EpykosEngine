@@ -36,7 +36,7 @@ namespace {
 
 // The mutation set as documented in docs/WORKLOADS.md §M2, in the order the harness runs it.
 // Editing the registry in the header without editing this list (or the other way round) fails
-// ListsEveryMutant. Q4b adds the adjoint mutants here and there together.
+// ListsEveryMutant. The adjoint mutants (M2/Q4b) are the last five.
 const std::vector<std::string> documented = {
     "cse.merge_nonequal",
     "fold_sum.wrong_order",
@@ -46,6 +46,11 @@ const std::vector<std::string> documented = {
     "expander.segment_off_by_one",
     "signature.merge_classes",
     "interpreter.tile_boundary",
+    "adjoint.wrong_transpose",
+    "adjoint.drop_broadcast",
+    "adjoint.affine_not_transposed",
+    "adjoint.select_wrong_arm",
+    "adjoint.recip_rule_sign",
 };
 
 std::vector<std::string> registry_names() {

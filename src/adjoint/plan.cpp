@@ -2,10 +2,13 @@
 // no floating-point arithmetic happens here (coefficients are copied), so this TU needs no pin.
 #include "epykos/adjoint/plan.hpp"
 
+#include <algorithm>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "epykos/mutation/mutation.hpp"
 
 namespace epykos::adjoint {
 
@@ -165,6 +168,21 @@ AdjointPlan build_plan(const Program& p) {
     }
   }
 
+  // Mutants (D32; M2/Q4b), each queried once per build_plan. adjoint.wrong_transpose: gather 0's
+  // reader slots come from the forward index array - value v is pulled from the slot of row
+  // index[r] (mod rows) instead of the row r that read it. adjoint.drop_broadcast: the last
+  // member of every Sum row gets no reader entry, so the broadcast of the row's adjoint skips it.
+  // adjoint.affine_not_transposed: an Affine reader's coefficient is read from the forward table
+  // at the reader's transposed position (W's entries in W^T's order: the table was not transposed
+  // with the readers).
+  const bool wrong_transpose = mutant("adjoint.wrong_transpose");
+  const std::int32_t drop_broadcast = mutant("adjoint.drop_broadcast") ? 1 : 0;
+  const bool affine_not_transposed = mutant("adjoint.affine_not_transposed");
+  // One past the last member of row r of segment s that receives the row's adjoint.
+  auto member_end = [&](const Segment& sg, std::int32_t r, bool affine) {
+    return sg.offsets[idx(r) + 1] - (affine ? 0 : drop_broadcast);
+  };
+
   // "Who reads me" CSRs.
   Csr out_csr(n_values), gat_csr(n_values), sum_csr(n_values), aff_csr(n_values);
   for (size_t o = 0; o < p.outputs.size(); ++o) out_csr.count(p.outputs[o]);
@@ -172,8 +190,13 @@ AdjointPlan build_plan(const Program& p) {
     for (ir::value_id v : g.index) gat_csr.count(v);
   }
   for (size_t s = 0; s < p.segments.size(); ++s) {
-    Csr& c = plan.segment_is_affine[s] ? aff_csr : sum_csr;
-    for (ir::value_id v : p.segments[s].members) c.count(v);
+    const Segment& sg = p.segments[s];
+    const bool affine = plan.segment_is_affine[s] != 0;
+    Csr& c = affine ? aff_csr : sum_csr;
+    const std::int32_t rows = p.domains[idx(sg.domain)].rows;
+    for (std::int32_t r = 0; r < rows; ++r) {
+      for (std::int32_t m = sg.offsets[idx(r)]; m < member_end(sg, r, affine); ++m) c.count(sg.members[idx(m)]);
+    }
   }
   out_csr.finish();
   gat_csr.finish();
@@ -189,8 +212,10 @@ AdjointPlan build_plan(const Program& p) {
   }
   for (size_t g = 0; g < p.gathers.size(); ++g) {
     const Gather& gt = p.gathers[g];
+    const std::int32_t rows = p.domains[idx(gt.domain)].rows;
     for (size_t r = 0; r < gt.index.size(); ++r) {
-      plan.gather_readers[gat_csr.place(gt.index[r])] = plan.gather_slot_base[g] + static_cast<std::int32_t>(r);
+      const std::int32_t row = wrong_transpose && g == 0 ? gt.index[r] % rows : static_cast<std::int32_t>(r);
+      plan.gather_readers[gat_csr.place(gt.index[r])] = plan.gather_slot_base[g] + row;
     }
   }
   for (size_t s = 0; s < p.segments.size(); ++s) {
@@ -199,12 +224,12 @@ AdjointPlan build_plan(const Program& p) {
     const std::int32_t rows = p.domains[idx(sg.domain)].rows;
     for (std::int32_t r = 0; r < rows; ++r) {
       const std::int32_t edge = plan.segment_slot_base[s] + r;
-      for (std::int32_t m = sg.offsets[idx(r)]; m < sg.offsets[idx(r) + 1]; ++m) {
+      for (std::int32_t m = sg.offsets[idx(r)]; m < member_end(sg, r, affine); ++m) {
         const ir::value_id v = sg.members[idx(m)];
         if (affine) {
           const size_t at = aff_csr.place(v);
           plan.affine_readers[at] = edge;
-          plan.affine_coefs[at] = sg.coefs[idx(m)];
+          plan.affine_coefs[at] = sg.coefs[affine_not_transposed ? at % sg.coefs.size() : idx(m)];
         } else {
           plan.sum_readers[sum_csr.place(v)] = edge;
         }

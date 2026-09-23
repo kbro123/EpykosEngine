@@ -13,6 +13,11 @@
 //
 // Seeded: the constants of shape s, instance i come from sub-stream 400000 + s, draw i (D17);
 // the state ball below from sub-stream 410000 + r. No data files.
+//
+// The Scalar vocabulary (select, recip, max, min, abs, exp, log, sqrt, fma) is called unqualified:
+// the double and Rec overloads are namespace-scope functions of epykos (found by ordinary lookup
+// from this nested namespace), Dual<N>'s are hidden friends found only by ADL, so a qualified
+// recip(x) would not instantiate on Dual (the adjoint-vs-Dual gate, M2/Q4b).
 #pragma once
 
 #include <cmath>
@@ -85,14 +90,14 @@ struct NearmissShapes {
   static S fma_c_c(S x, S y, S, double c, double) { return fma(x, y, S(c)); }
   static S fma_refs(S x, S y, S z, double, double) { return fma(x, y, z); }
   // The reciprocal and the quotient it stands in for.
-  static S recip_of(S x, S, S, double, double) { return epykos::recip(x); }
+  static S recip_of(S x, S, S, double, double) { return recip(x); }
   static S one_over(S x, S, S, double, double) { return 1.0 / x; }
   // Comparisons the other way round, and max / min / abs (selects with swapped arms).
   static S select_gt(S x, S y, S z, double, double) { return select(x > y, y, z); }
   static S select_le_const(S x, S y, S z, double c, double) { return select(c <= x, y, z); }
-  static S max_of(S x, S y, S, double, double) { return epykos::max(x, y); }
-  static S min_of(S x, S y, S, double, double) { return epykos::min(x, y); }
-  static S abs_of(S x, S y, S, double, double) { return epykos::abs(x - y); }
+  static S max_of(S x, S y, S, double, double) { return max(x, y); }
+  static S min_of(S x, S y, S, double, double) { return min(x, y); }
+  static S abs_of(S x, S y, S, double, double) { return abs(x - y); }
 
   using Fn = S (*)(S, S, S, double, double);
   static std::vector<Fn> all() {

@@ -16,8 +16,10 @@
 // mutant), checks that every name has exactly one use site under src/ and that every use site
 // names a registered mutant, and checks the selector against the environment.
 //
-// Adding a mutant: add the name here and to the registry test's expected list, then the guarded
-// line in the pass. A name is "<pass>.<defect>", lower case, dot-separated.
+// Adding a mutant: add the name here, to the registry test's expected list and to the table in
+// docs/WORKLOADS.md §M2, then the guarded line in the pass. A name is "<pass>.<defect>", lower
+// case, dot-separated. A mutant of an op the M1 book does not contain (select, recip) is
+// exercised by the near-miss shapes fixture's gates; the table says which fixture exercises each.
 #pragma once
 
 #include <cstddef>
@@ -35,6 +37,11 @@ inline constexpr std::string_view registry[] = {
     "expander.segment_off_by_one",   // expand: every segment loses its last member
     "signature.merge_classes",       // infer: the const-slot pattern is not part of the signature (a constant slot is a reference)
     "interpreter.tile_boundary",     // Interpreter::run: the last row of every elementwise tile is skipped
+    "adjoint.wrong_transpose",       // build_plan: gather 0's pull reads the slot of row index[r] (the forward index array) instead of row r
+    "adjoint.drop_broadcast",        // build_plan: the last member of every Sum row gets no reader entry (the broadcast skips it)
+    "adjoint.affine_not_transposed", // build_plan: Affine reader coefficients read from the forward table at the transposed position (W, not W^T)
+    "adjoint.select_wrong_arm",      // Adjoint::run: the select rule routes the adjoint to the other arm (no select on the M1 book: the near-miss gate)
+    "adjoint.recip_rule_sign",       // Adjoint::run: recip's rule accumulates +(ybar*y)*y instead of -(ybar*y)*y (no recip on the M1 book: the near-miss gate)
 };
 inline constexpr std::size_t registry_size = sizeof(registry) / sizeof(registry[0]);
 

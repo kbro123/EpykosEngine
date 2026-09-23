@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "epykos/adjoint/adjoint.hpp"
+#include "epykos/mutation/mutation.hpp"
 
 namespace epykos::adjoint {
 
@@ -55,6 +56,10 @@ struct Ctx {
   int B = 0;
   int b0 = 0;
   int L = 0;
+  // Mutants (D32; M2/Q4b), queried once per run() and read by the rules only in the mutation
+  // build (mutation::compiled_in is a constexpr false elsewhere, so the checks fold away).
+  bool select_wrong_arm = false;  // adjoint.select_wrong_arm: the adjoint goes to the other arm
+  bool recip_rule_sign = false;   // adjoint.recip_rule_sign: abar += (ybar*y)*y instead of -=
 };
 
 // ---- flat elementwise kernels over N = n·L contiguous elements (row-major, lane innermost).
@@ -122,6 +127,10 @@ inline void acc_sqrt(size_t N, double* EPY_RESTRICT t, const double* EPY_RESTRIC
 }
 inline void acc_recip(size_t N, double* EPY_RESTRICT t, const double* EPY_RESTRICT yb, const double* EPY_RESTRICT y) {
   for (size_t e = 0; e < N; ++e) t[e] -= (yb[e] * y[e]) * y[e];
+}
+// Mutant adjoint.recip_rule_sign: the sign of the reciprocal's rule.
+inline void acc_recip_wrong_sign(size_t N, double* EPY_RESTRICT t, const double* EPY_RESTRICT yb, const double* EPY_RESTRICT y) {
+  for (size_t e = 0; e < N; ++e) t[e] += (yb[e] * y[e]) * y[e];
 }
 // Div: abar += ybar/b; bbar -= (ybar/b)·y — the quotient t is computed once per element.
 inline void acc_div(size_t N, double* EPY_RESTRICT ta, double* EPY_RESTRICT tb, const double* EPY_RESTRICT yb,
@@ -354,7 +363,10 @@ struct Lanes {
             if (ta) acc_sqrt(N, ta, yb, y);
             break;
           case Op::Recip:
-            if (ta) acc_recip(N, ta, yb, y);
+            if (ta) {
+              if (mutation::compiled_in && c.recip_rule_sign) acc_recip_wrong_sign(N, ta, yb, y);
+              else acc_recip(N, ta, yb, y);
+            }
             break;
           case Op::Fma:
             if (ta) acc_plus_mul(N, ta, yb, b);
@@ -362,8 +374,13 @@ struct Lanes {
             if (tc) acc_plus(N, tc, yb);
             break;
           case Op::Select:
-            if (tb) acc_select_true(N, tb, yb, a);
-            if (tc) acc_select_false(N, tc, yb, a);
+            if (mutation::compiled_in && c.select_wrong_arm) {
+              if (tb) acc_select_false(N, tb, yb, a);
+              if (tc) acc_select_true(N, tc, yb, a);
+            } else {
+              if (tb) acc_select_true(N, tb, yb, a);
+              if (tc) acc_select_false(N, tc, yb, a);
+            }
             break;
           default: break;
         }
@@ -547,6 +564,8 @@ void Adjoint::run(const double* state, int B, const double* out_bar, double* out
   c.out = out;
   c.state_bar = state_bar;
   c.B = B;
+  c.select_wrong_arm = mutant("adjoint.select_wrong_arm");
+  c.recip_rule_sign = mutant("adjoint.recip_rule_sign");
   for (int b0 = 0; b0 < B; b0 += im.Lt) {
     c.b0 = b0;
     c.L = std::min(im.Lt, B - b0);

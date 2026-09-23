@@ -9,10 +9,11 @@
 #   2. reads the registry from the registry test (tests/mutation/registry_test.cpp prints it),
 #      so the list the harness runs is the list the binary carries — nothing can be skipped;
 #   3. selects the gate tests: the ctest entries whose name matches EPYKOS_GATE_REGEX, by default
-#      the round-trip identity tests, the E0 differential tests and any verify tests
-#      ('roundtrip|differential|verify|_e0_test$'), never a test under tests/mutation/. The
-#      passes' own unit tests are not gates: a mutant caught only by a test written for it has
-#      not been caught;
+#      the round-trip identity tests, the E0 differential tests, any verify tests and the adjoint
+#      tolerance gates (adjoint vs finite differences, vs the Dual tangent, linearity: the tests
+#      named *_adjoint_test) ('roundtrip|differential|verify|_adjoint_test$|_e0_test$'), never a
+#      test under tests/mutation/. The passes' own unit tests are not gates: a mutant caught only
+#      by a test written for it has not been caught;
 #   4. runs the gates with no mutant selected (they must all pass, or the harness is meaningless);
 #   5. for every mutant, runs the gates with EPYKOS_MUTANT=<name> and records which ones fail
 #      (a crash, an exception or a timeout counts as a failure, and is labelled as such);
@@ -32,7 +33,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 PRESET=mutation
 BUILD_DIR="$ROOT/build/$PRESET"
 LOG_DIR="$BUILD_DIR/mutation"
-GATE_REGEX="${EPYKOS_GATE_REGEX:-roundtrip|differential|verify|_e0_test$}"
+GATE_REGEX="${EPYKOS_GATE_REGEX:-roundtrip|differential|verify|_adjoint_test$|_e0_test$}"
 JOBS="${EPYKOS_MUTATION_JOBS:-4}"
 TIMEOUT=900
 BUILD=1

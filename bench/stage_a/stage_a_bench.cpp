@@ -16,9 +16,9 @@
 //                        ImplicitProgram drives them; policy 0 = per_iteration (Newton / LM,
 //                        the Jacobian at every iterate), 1 = chord (the record-point
 //                        factorisation drives the steps: the scenario grid's policy)
-//   BM_Evaluate/B        (M3/G6) O2 evaluation: the whole-program interpreter alone at the
-//                        record point (the solved full state), B identical lanes — what a
-//                        scenario lane costs after its solves
+//   BM_Evaluate/B/L      (M3/G6) O2 evaluation: the whole-program interpreter alone at the
+//                        record point (the solved full state), B identical lanes at lane tile
+//                        L — what a scenario lane costs after its solves
 //
 // Run, e.g.:
 //   bench/run.sh build/release/bench/stage_a_stage_a_bench --benchmark_repetitions=5 --benchmark_min_time=1s
@@ -185,10 +185,15 @@ void BM_Calibrate(benchmark::State& state) {
 }
 BENCHMARK(BM_Calibrate)->Arg(0)->Arg(1)->Unit(benchmark::kMillisecond);
 
+// (B, lane_tile): lane_tile 8 is the grid's plan (stage_a_program_options' default); 1 and 32
+// are the M1 best points at B = 1 and B = 64, where the inliner and the exp tails fire.
 void BM_Evaluate(benchmark::State& state) {
   const Fixture& f = fixture();
   const int B = static_cast<int>(state.range(0));
-  solver::ImplicitProgram prog(f.t.tape, f.t.registry, fixtures::stage_a_program_options(f.s, 64));
+  const int lane_tile = static_cast<int>(state.range(1));
+  solver::ProgramOptions po = fixtures::stage_a_program_options(f.s, 64);
+  po.interpreter.lane_tile = lane_tile;
+  solver::ImplicitProgram prog(f.t.tape, f.t.registry, po);
   const std::vector<double> all = f.t.tape.input_values();   // the record point: quotes, solved knots, diagnostics
   const std::size_t n_in = all.size(), n_out = static_cast<std::size_t>(prog.n_outputs());
   std::vector<double> st(n_in * static_cast<std::size_t>(B)), out(n_out * static_cast<std::size_t>(B));
@@ -201,10 +206,12 @@ void BM_Evaluate(benchmark::State& state) {
     benchmark::ClobberMemory();
   }
   state.counters["B"] = static_cast<double>(B);
+  state.counters["lane_tile"] = static_cast<double>(lane_tile);
+  state.counters["fused_rows"] = static_cast<double>(prog.interpreter().num_fused_values());
   state.counters["values"] = static_cast<double>(prog.program().num_values());
   state.counters["domains"] = static_cast<double>(prog.program().domains.size());
 }
-BENCHMARK(BM_Evaluate)->Arg(1)->Arg(8)->Arg(64)->Unit(benchmark::kMillisecond);
+BENCHMARK(BM_Evaluate)->Args({1, 8})->Args({1, 1})->Args({8, 8})->Args({64, 8})->Args({64, 32})->Args({64, 64})->Unit(benchmark::kMillisecond);
 
 void BM_ForwardLadder(benchmark::State& state) {
   const Fixture& f = fixture();

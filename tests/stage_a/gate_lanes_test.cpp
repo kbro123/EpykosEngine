@@ -261,4 +261,18 @@ TEST(StageAGateLanes, OneTapeAndThePlan) {
   std::cout << "[  plan    ] written stage_a_plan.txt (" << plan.size() << " bytes) and stage_a_domains.csv (" << nd << " domains) in the test's working directory\n";
   std::cout << plan;
   EXPECT_GT(plan.size(), 0u);
+  // The same program planned at other lane tiles: the inliner and the exp tails are gated by
+  // the lane count (row fusion pays at L = 1 or L >= 16, exec/interpreter.cpp), so the plan
+  // the grid runs (lane_tile 8, the default of stage_a_program_options) differs from the B = 1
+  // and the wide-batch plans; written as stage_a_plan_L<lane_tile>.txt for the coverage report.
+  for (int lt : {1, 32}) {
+    epykos::exec::Options o;
+    o.max_batch = 64;
+    o.lane_tile = lt;
+    const epykos::exec::Interpreter in(p, o);
+    std::ofstream f("stage_a_plan_L" + std::to_string(lt) + ".txt");
+    f << in.describe();
+    std::cout << "[  plan L" << lt << " ] " << in.num_fused_values() << " of " << in.num_values() << " rows fused or inlined (never materialised) at lane_tile " << lt
+              << " vs " << prog.interpreter().num_fused_values() << " at lane_tile " << prog.interpreter().options().lane_tile << '\n';
+  }
 }

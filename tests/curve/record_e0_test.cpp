@@ -168,12 +168,6 @@ TEST(CurveRecordE0, EverySchemeAndVariableRoundTripsAndReplaysBitwise) {
         const bool allowed = o == Op::Input || o == Op::Affine || o == Op::Neg || o == Op::Mul;
         if (!allowed) EXPECT_EQ(h[static_cast<std::size_t>(op)], 0u) << sv.name() << ": " << epykos::to_string(o) << " in the log-DF subgraph";
       }
-      // Every Mul in the subgraph has a Const operand (−z·t, w·f_0): never a product of two values.
-      for (const epykos::Node& n : passed.tape.nodes()) {
-        if (n.op != Op::Mul || !n.tainted) continue;
-        const bool lc = passed.tape[n.a].op == Op::Const, rc = passed.tape[n.b].op == Op::Const;
-        if (!(lc || rc)) continue;  // the pricing's own products (N·τ·K·DF) are not in the subgraph either way
-      }
       if (sv.scheme != curve::SchemeKind::flat) EXPECT_GT(h[static_cast<std::size_t>(Op::Affine)], 0u) << sv.name() << ": affine rows";
     }
     std::cout << "[ " << sv.name() << " ] nodes raw " << raw.tape.size() << " -> passes " << passed.tape.size() << ", domains "

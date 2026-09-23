@@ -7,3 +7,4 @@ build/
 third_party/
 bench/results/*/tmp/
 compile_commands.json
+__pycache__/

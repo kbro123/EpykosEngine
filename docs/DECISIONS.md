@@ -658,3 +658,65 @@ value and records the other rather than resolving silently (D37): the EUR EURIBO
 (CFTC MAT, Bloomberg SEF, Strata) against SwapEngine's 30E/360; the €STR OIS payment lag is 2 (Strata, SwapEngine)
 against the TP ICAP template's and LCH 2019's 1. Futures carry no convexity adjustment (D35, stated). Items the
 research could not source are marked UNVERIFIED in both the bundle and the JSON, never presented as standard.
+
+## D43 — Instruments as templated maths over row tables; blueprints and curve definitions as data; the builder's rules (2026-09-23)
+Implements `PROBLEM.md` §3 "real instruments" and D36 for Stage A (M3/G2, `include/epykos/maths/instrument/`,
+`src/maths/instrument/`, `blueprints/instruments/*.json`, `blueprints/curves/*.json`). Eight choices:
+1. **The maths reads plain row tables** (`tables.hpp`: `Coupon`, `ObsDay`, `Leg`, `Instrument`) and a curve callable
+   `Scalar df(int slot, double t)`. Every branch of `coupon.hpp` / `instrument.hpp` is on a table field (the coupon
+   kind, a realised flag, the instrument kind, the side); the constants are the rows' doubles; a curve is a small
+   integer *slot* (the discount curve of a currency is the slot of its discount index, the projection curve of a
+   float leg the slot of its index; `builder.hpp` `CurveSlots` maps index names to slots), so a trade never names a
+   curve object and the same tables price off `solver::CurveStates::df`, a `Composite` state or a plain array.
+   Curve times are ACT/365F from the valuation date, the convention of every curve in `maths/curve/`.
+2. **Four coupon kinds, written the natural way.** Fixed `N τ K DF(t_pay)`; RFR compounded in arrears as the product
+   loop `acc = realised factor; acc = acc·(1 + f_i·w_i)` over the projected observation days of `conventions/rfr.hpp`
+   (plain, lookback, observation shift, lockout), `R = (acc − 1)/τ_obs` on the observation period's calendar days,
+   paid on the accrual period's day count through the payment lag (`maths/swap/compounding.hpp`'s `compound_step`
+   and `forward_rate`: the loop records as a scan domain, D41 — measured on the instrument sample: one scan domain
+   `mul(^,@0)@scan`, 52 chains of 47–259 steps after the passes); RFR arithmetic average as the running sum of the
+   daily forwards weighted by calendar days (a reduction, never a scan: it does not telescope); term rate fixing in
+   advance as the realised fixing (structure) or the forward over the accrual period with the index's day count. The
+   days already fixed enter as ONE double (the realised factor / weighted sum), not as a chain of constant steps as
+   in G3's fixture: they are structure, and the projected chain starts from that constant.
+3. **The projected rate FOR a day r is the overnight forward over the rate's own span** `[r, r')`, `r'` the next
+   fixing business day, applied for the entry's weight `n_i`: for the plain method the span and the weight coincide
+   and the product telescopes (the closed form the tests check, `float leg = N (DF(s) − DF(e))` at zero payment lag);
+   under lookback, observation shift and lockout they differ, and it does not.
+4. **Stated simplifications**, in code and here: a term-rate stub's forward runs over the accrual period with the
+   index's day count (not interpolated between index tenors); futures carry no convexity adjustment (D35), a future's
+   PV is `(price − traded price)/100 · notional`, undiscounted (variation margin), its calibration residual is in
+   rate units (`rate(curves) − (1 − q/100)`) so the solver's `‖F‖∞` tolerance means the same on every instrument; a
+   deposit is a one-period swap (the fixed coupon at the deposit rate against the index forward over the same
+   period, `par = the forward`); accrued interest is structure (the rate known so far — the fixed rate, the realised
+   fixing, the realised compounded / averaged rate — times the accrual to the valuation date); cash flows paid on or
+   before the valuation date are dropped; a projected observation day or a term fixing dated before the valuation
+   date without a rate in the history is an error, never a projection.
+5. **Blueprints** (`blueprint.hpp`, `blueprints/instruments/stage_a.json`): a named registry convention plus the
+   coupon kind per leg (with an observation override) and default trade fields; a `Trade` (blueprint, dates or
+   tenor, notional, side, rate / spread / traded price, futures contract) plus the registry, a fixings history, the
+   valuation date and the curve slots resolve into the tables (`build_instrument`). A trade of a known coupon kind
+   needs no C++: `tests/instrument/blueprint_test.cpp` adds a quarterly-fixed SOFR OIS with a 5-day lookback as a
+   convention file and a blueprint file and prices it. The strict schema is documented in `blueprint.hpp`; an
+   unknown key or a missing field fails with `file:line:column`, as the registry's does (D42).
+6. **Curve definitions** (`blueprints/curves/{usd,eur}.json`): the index a curve projects, its scheme and variable
+   (or regions with a scheme and variable each, boundaries at instrument tenors), knots (the instruments' maturities
+   — the last cash-flow time — or explicit tenors) and the calibration instrument set (blueprints with tenor lists,
+   or the front n futures contracts) with quote keys (`"<blueprint> <tenor>"` or the contract code).
+   `build_calibration_set` sorts the instruments by maturity, refuses two at one maturity, and returns the knot
+   times, the `RegionSpec`s and the instruments; `calibrate.hpp` `add_calibration_set` makes them one curve of a
+   `solver::CurveSet` with `instrument::residual` as each residual — the CurveSet's curve indices ARE the slots, and
+   the set discovers from the maths which curves an instrument reads (D40.6). Stage A's sets: USD-SOFR (the overnight
+   fixing, OIS 1M–3M, eight SR3 quarters, OIS 3Y–30Y: 22 instruments) on four schemes (linear zero, log-DF, monotone
+   cubic, a three-region composite); EUR-ESTR (18), EUR-EURIBOR-6M (the 6M deposit and fixed-vs-6M swaps, 12),
+   EUR-EURIBOR-3M (the 3M deposit, eight FEU3, 3s6s basis swaps, 18). Measured: the par quotes of a generating curve
+   are recovered to 3.4e-14 (USD) and 3e-14 / 2e-16 / 4e-16 (EUR, sequential blocks €STR → 6M → 3M discovered from
+   the maths) from a flat start.
+7. **The record-time facts of the instrument sample** (`fixtures/instrument_sample.hpp`: 75 seeded trades, five of
+   every Stage A blueprint, two of each seasoned, 44 inputs): 44,516 nodes / 33 domains / 29,369 values after the
+   passes; the interpreter bitwise the double maths at 17 states and lane for lane at B = 17 over 9 tile / lane-tile
+   configurations; the adjoint's Jacobian within 2.2e-15 of `Dual<44>` (gate 1e-12) and 3.7e-8 of central FD (gate
+   1e-6); round-trip identity raw (3 scan domains, 110 chains) and after the passes.
+8. **What is not here**: the CurveSet still interpolates linearly in the zero rate (D40); a definition on another
+   scheme keeps its regions for G5's Composite-aware solve. Cross-currency legs, MtM notionals and FX are Stage B.
+   No SwapEngine file was opened for this package: the conventions came from G0's registry (D37 was exercised by G0).

@@ -163,6 +163,24 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   for lane the single runs, tiles {1, 7, 256, 4096} × lane tiles {1, 3, 8, 32, 64}, odd B; the adjoint's Jacobian vs
   Dual at 1e-12 (relative to the row's scale, the leg scale for a swap PV) and vs central FD at 1e-6, linearity;
   the batched adjoint lane for lane the single runs, tiles, no allocation.
+- **Instrument sample** (M3/G2, D43; `include/epykos/fixtures/instrument_sample.hpp`, `src/fixtures/instrument_sample.cpp`;
+  synthetic, from the seed, no data files; the conventions and blueprints are the repository's data): five trades of
+  every Stage A blueprint (`blueprints/instruments/stage_a.json`: SOFR OIS plain / observation shift 2 / shift 2 +
+  lockout 2, SOFR averaging swap, SOFR ON deposit, SR3, SR1, €STR OIS, €STR ON deposit, EURIBOR 3M / 6M deposits,
+  EURIBOR 3M / 6M IRS, 3s6s basis, FEU3) at valuation 2026-09-23 on four linear-zero curves (USD-SOFR, EUR-ESTR,
+  EUR-EURIBOR-3M, EUR-EURIBOR-6M; knots 0.25, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30 years; record point base 3.8 % /
+  1.9 % / 2.1 % / 2.4 % rising 50 bp over the grid): per blueprint b (sub-stream 600000 + b, draws in order per trade)
+  tenor from {1Y, 2Y, 3Y, 5Y, 7Y} (deposits their own, futures contract i), notional log-uniform [1e6, 1e8], side ±1,
+  a start offset U{30..300} days back for trades 0 and 1 (seasoned, with realised fixings from `synthetic_fixings`
+  2025-01-01 to the day before the valuation date, seeds 20260922 + slot), ε ~ U(−0.05, 0.05) on the par rate /
+  spread, a futures traded price par ± U(−0.1, 0.1). Outputs: the 75 trade PVs then the book PV; states: a ball of
+  ±50 bp on every knot (sub-stream 601000 + r). Measured: 77 compounded coupons with ≥ 3 projected days (17,439
+  days), 4,352 averaged days, 225 term coupons, 32 current coupons, 8 realised term fixings; after the passes 44,516
+  nodes, 33 domains, 29,369 values, ONE scan domain `mul(^,@0)@scan` of 52 chains of 47–259 steps (CSE shares the
+  spot-starting trades' periods); raw 3 scan domains, 110 chains. Gates: round-trip identity raw and after the
+  passes; the interpreter bitwise the double maths and the replay at 17 states at B = 1 and lane for lane at B = 17
+  over tiles {1, 256, 4096} × lane tiles {1, 8, 17}; the adjoint's Jacobian vs `Dual<44>` at 1e-12 of the row scale
+  (measured 2.2e-15) and vs central FD at 1e-6 (3.7e-8).
 
 ---
 

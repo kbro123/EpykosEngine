@@ -41,7 +41,10 @@ implementation (instantiated on `double`) and the source the compiler records.
 ```
 Blueprint (instruments, curves, models as DATA)
    │  (M3/G0, D42: blueprints/conventions/*.json read by the strict in-house JSON reader into the
-   │   conventions registry — calendars from rules, day counts, schedules, IMM, RFR windows are code)
+   │   conventions registry — calendars from rules, day counts, schedules, IMM, RFR windows are code;
+   │   M3/G2, D43: blueprints/instruments/*.json name a convention and the coupon kind per leg,
+   │   blueprints/curves/*.json a scheme, variable, regions and the calibration instrument set;
+   │   maths/instrument/builder.hpp resolves a trade into the row tables the coupon maths prices from)
    │
    ▼
 Templated maths  ── instantiated on double ──►  reference values (the oracle)
@@ -176,6 +179,9 @@ by the uniform-column bucketing of §6 R2, not by the signature; D22).
 
 
 Across recordings the signature → domain map persists: a new trade of a known shape adds rows, not code.
+Measured on the instrument sample (M3/G2, D43: 75 trades of every Stage A type on four curves): 33 domains, one
+scan domain `mul(^,@0)@scan` holding every compounded coupon's projected days (52 chains of 47–259 steps after CSE),
+the averaged coupons as Sum reductions, the term coupons and deposits as elementwise rows.
 
 ---
 

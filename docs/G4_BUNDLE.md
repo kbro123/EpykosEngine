@@ -1,6 +1,6 @@
 # G4_BUNDLE — researched market conventions with sources
 
-Status: **M3/G0 (2026-09-23): USD and EUR sections** (Stage A of `PROBLEM.md`). GBP and JPY are M5/C1. Every
+Status: **M3/G0 (2026-09-23): USD and EUR sections** (Stage A of `PROBLEM.md`); **M3/G2 (2026-09-23): section 6, the instrument mechanics and curve definitions built on them**. GBP and JPY are M5/C1. Every
 value in `blueprints/conventions/*.json` carries the citation given here (the JSON `sources` objects quote the same
 passages); the registry test `tests/conventions/registry_test.cpp` asserts the values below.
 
@@ -263,3 +263,35 @@ Not imported (no Stage A use): Fed Funds index and products, FF/SOFR basis, GBP/
 23. M. Bianchetti, M. Carlicchi, Markets Evolution After the Credit Crunch, arXiv:1301.7078 (harvested PDF).
 24. Eurex, Three-Month EURIBOR Futures (FEU3) contract specifications. https://www.eurex.com/ex-en/markets/int/mon/euribor-derivatives/euribor/Three-Month-EURIBOR-Futures-137458
 25. ECB, Governing Council meeting calendar. https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html
+
+---
+
+## 6. Instrument mechanics and curve definitions (M3/G2, D43)
+
+The coupon mechanics of `include/epykos/maths/instrument/coupon.hpp` are code (D36); every convention they apply
+comes from the registry entries above. What the code implements, with the sources it follows:
+
+| mechanism | formula as coded | source |
+|---|---|---|
+| compounding in arrears | `Π (1 + r_i · n_i / basis)` over the observation days, `R = (Π − 1) · basis / (calendar days of the observation period)`, the coupon `N · τ_accrual · (R + spread) · DF(pay)` | 2021 ISDA Definitions §7.3 OIS compounding formula as cited in [5]; FRBNY SOFR Averages / Index compounding "each SOFR value multiplied by the number of calendar days it covers, divided by 360" [4]; the ARRC formulas for payment delay, lookback, observation shift and lockout [10] (the windows are `conventions/rfr.hpp`, USD.3) |
+| the projected rate for a day | the overnight forward over the rate's own span `[r, r')`, `r'` the next fixing business day, applied for the entry's weight (plain: span = weight, the product telescopes) | the definition of an overnight rate FOR a day, [3][4][16]; own statement of the projection |
+| arithmetic average | `Σ r_i · n_i / (calendar days)`, calendar-day weighted, the daily forwards for the projected days | ISDA Overnight Averaging / USD-SOFR Average FROs [5, §2]; CME SR1 "arithmetic average of daily SOFR values during the contract delivery month" [12] |
+| term rate fixing in advance | the fixing of `fixing_lag` business days before the accrual start when it is in the history (realised), else the forward over the accrual period with the index's day count | EURIBOR fixing T−2 [21][22]; the stub forward is NOT interpolated between index tenors — a stated simplification |
+| futures price | `100 · (1 − rate)`; SR3 = the compounded SOFR over the IMM quarter, SR1 = the average over the month, FEU3 = the 3M fixing of the last trading day (the deposit from the third Wednesday) | [11][12][13][24]; convexity adjustment zero, stated (D35, `PROBLEM.md` §9) |
+| deposit | a one-period swap: the fixed coupon at the deposit rate against the index forward over the same period; `par` = the forward | own construction (USD.5, EUR.6) |
+| 3s6s basis | the spread paid simple on the quarterly 3M leg, the 6M leg flat; `par spread = (PV 6M leg − PV 3M leg at the forwards) / annuity(3M leg)` | Bianchetti–Carlicchi [23]; EUR.5 |
+| accrued interest | the rate known so far (fixed rate, realised fixing, realised compounded / averaged rate) × the accrual from the period start to the valuation date | own statement (an O2 output of `PROBLEM.md`) |
+
+Curve definitions (`blueprints/curves/usd.json`, `eur.json`) take their tenor sets from the registry's cited
+standard tenors (USD.3, EUR.3, EUR.4, EUR.5) and the front-end instruments from `PROBLEM.md` §4 (deposits / fixings
+and futures on the front year, convexity zero): USD-SOFR = the overnight fixing, OIS 1M / 2M / 3M (bridging the
+fixing and the first IMM quarter — own construction, the exact front-end set is item 5 of section 4), eight SR3
+quarters, OIS 3Y–30Y, on four schemes (linear zero, log-DF, monotone cubic, a composite with regions at the 3Y and
+15Y knots); EUR-ESTR = the fixing and €STR OIS 1M–30Y; EUR-EURIBOR-6M = the 6M deposit and fixed-vs-6M swaps 1Y–30Y
+(the standard EUR IRS [8][21]); EUR-EURIBOR-3M = the 3M deposit, eight FEU3 contracts and 3s6s basis swaps 3Y–30Y
+against the 6M curve [23] — the multiple-curve bootstrapping of the 3M curve through basis swaps. Knots sit at the
+instruments' last cash-flow times. Futures notionals in the blueprints are the contract value at 100 points (SR3 /
+SR1: USD 250,000 = USD 2,500 per point [13]; FEU3: EUR 250,000 = EUR 2,500 per point [24]).
+
+No SwapEngine file was opened for G2: every convention came from the registry G0 imported and cross-checked (D37).
+

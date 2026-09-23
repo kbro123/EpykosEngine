@@ -46,7 +46,9 @@ into M4–M6 below, applied to the desk problem.
   side only (D14).
 - Instruments as templated maths over convention tables: RFR compounded (natural product recurrence → `scan`),
   RFR averaging, term-rate legs with fixing in advance, fixed legs, OIS / IBOR / tenor-basis swaps, deposits,
-  futures (convexity 0, stated); par rates and residuals.
+  futures (convexity 0, stated); par rates and residuals (G2 landed 2026-09-23, D43: row tables from the registry,
+  instrument blueprints and curve definitions as JSON, the compounded coupons recorded as scan domains, the Stage A
+  curve definitions calibrating through the implicit node).
 - `scan` domains: recurrence detection, interpreter and reverse-scan adjoint (G3 landed 2026-09-23, D41: chains of
   identical steps detected without hints, wave-by-wave interpreter, row-by-row reverse scan, three mutants caught).
 - `implicit` node with multi-curve dependencies inside the tape; residual sub-program sharing the DF domains with

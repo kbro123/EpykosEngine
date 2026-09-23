@@ -204,7 +204,8 @@ def main(argv):
         "within_physical_threshold": all(x <= cp / 2.0 for x in loads) if cp and loads else None,
         "physical_reading": None,
     }
-    if after and cp:
+    if after and cp and fp.get("load1") is not None and fp["load1"] > cp / 2.0:
+        # Only when the before-sweep hand run would actually be discarded under the physical reading.
         load_rule["physical_reading"] = {
             "note": "Under the physical reading the before-sweep hand run (load %s) would be discarded and the after-sweep re-run "
                     "(load %s) used as the denominator" % (fp.get("load1"), notes.get("load1_after_interp")),

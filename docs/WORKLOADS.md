@@ -88,7 +88,18 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   `affine.drop_offset` (c_0 dropped), `expander.drop_gather` (gather 0 reads the identity index),
   `expander.segment_off_by_one` (every segment loses its last member), `signature.merge_classes` (the const-slot
   pattern is not part of the signature), `interpreter.tile_boundary` (the last row of every elementwise tile is
-  skipped). The adjoint mutants (wrong transpose, dropped pull) are added by M2/Q4b once the adjoint lands.
+  skipped); then the adjoint mutants (M2/Q4b, D33), caught by the adjoint gates — `tests/adjoint/m1_adjoint_test.cpp`
+  (vs central FD, linearity) and `m1_adjoint_vs_dual_test.cpp` (vs forward mode) on the M1 book, and
+  `tests/adjoint/nearmiss_adjoint_test.cpp` (vs `Dual<6>` and FD on the near-miss shapes below) — never by a test
+  written for them:
+
+  | mutant | defect (one line in `src/adjoint/`) | exercised by |
+  |---|---|---|
+  | `adjoint.wrong_transpose` | gather 0's pull reads the slot of row `index[r]` (the forward index array) instead of the row `r` that read it | M1 book (the DF domain's gather of the times: no row coincides); the near-miss fixture after the passes (5 of gather 0's 10 rows coincide) — on its raw recording gather 0 is the identity index and the mutant is a no-op |
+  | `adjoint.drop_broadcast` | the last member of every Sum row gets no reader entry: the broadcast of the row's adjoint skips it | M1 book (leg / book Sums), near-miss sums |
+  | `adjoint.affine_not_transposed` | an Affine reader's coefficient is read from the forward table at the reader's transposed position (`W`'s entries in `Wᵀ`'s order) | M1 book (the interpolation Affine), near-miss affine chains |
+  | `adjoint.select_wrong_arm` | the select rule routes the adjoint to the other arm | **not exercisable on the M1 book** (no `select`); the near-miss select / max / min / abs shapes |
+  | `adjoint.recip_rule_sign` | recip's rule accumulates `+(ȳ·y)·y` instead of `−(ȳ·y)·y` | **not exercisable on the M1 book** (no `recip`); the near-miss `recip_of` shape |
 - **Near-miss shapes** (`include/epykos/fixtures/nearmiss_shapes.hpp`, the gate fixture the mutation harness showed
   was missing, D32): 42 templated shapes over six positive inputs, each an op tree that differs from a neighbour in
   exactly one respect a signature may overlook — a constant on the left or the right of `−` and `/`, a constant in
@@ -101,7 +112,10 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   total: 211 outputs. Record point `(0.7, 1.3, 2.1, 0.4, 1.9, 1.1)`; state ball of 64 draws, each input scaled by
   `U(0.5, 1.5)` from sub-stream `410000 + r` (draw 0 is the record point). Gates: round-trip identity raw and after
   the passes (36 raw classes), E0 replay after every pass vs the `double` instantiation, expanded tape and IR
-  evaluator E0, interpreter E0 at `B = 1` and `B = 64` over tiles {1, 7, 256} × lane tiles {1, 3, 8, 64}.
+  evaluator E0, interpreter E0 at `B = 1` and `B = 64` over tiles {1, 7, 256} × lane tiles {1, 3, 8, 64}; the
+  adjoint (M2/Q4b) vs the `Dual<6>` Jacobian at 1e-12 and vs central FD (`h = 1e-6`, 1e-6, where the difference does
+  not straddle a kink) on the raw recording and after the passes at the record point and 15 draws, and linearity in
+  the seed with the seeded adjoint checked against `Jᵀ·seed` from the Dual Jacobian.
 
 ---
 

@@ -356,3 +356,40 @@ every pass against the double instantiation on a 64-draw ball, and the interpret
 and lane tiles. Adjoint mutants (wrong transpose, dropped pull) are M2/Q4b's, after Q3 lands; rewrite mutants
 (R1–R7) land in M3 with the rewrites (WORKLOADS.md §M2). The harness is bash only (macOS bash 3.2 and Linux); no
 Python.
+
+## D33 — Adjoint mutants and the adjoint gates of the mutation harness (2026-09-23)
+Extends D32 with the adjoint's mutants (M2/Q4b) and adds the adjoint gates to the harness's default gate set.
+(1) **Five mutants**, one-line defects inside `src/adjoint/` (`plan.cpp` for the transposes, `adjoint_e0.cpp` for the
+local rules, each queried once per `build_plan` / `run`), registered in `include/epykos/mutation/mutation.hpp` and
+tabulated in `WORKLOADS.md` §M2: `adjoint.wrong_transpose` (gather 0's reader slots come from the forward index
+array: value v is pulled from the slot of row `index[r] mod rows`, not of the row `r` that read it),
+`adjoint.drop_broadcast` (the last member of every Sum row gets no reader entry), `adjoint.affine_not_transposed`
+(an Affine reader's coefficient is read from the forward table at the reader's transposed position — `W`'s entries
+in `Wᵀ`'s order), `adjoint.select_wrong_arm` (the adjoint goes to the other arm), `adjoint.recip_rule_sign`
+(`ā += (ȳ·y)·y` instead of `−=`). In every build but the mutation preset the checks are constexpr false and fold
+away; the E0 kernel's arithmetic is untouched (a mutant path is a separate function, never a sign multiplied in).
+(2) **The gates.** The E0 adjoint gate (`adjoint_m1_adjoint_e0_test`: forward bitwise, lanes bitwise, tiles bitwise)
+cannot see a defect in the reverse that is consistent per lane, so the harness's default gate regex becomes
+`roundtrip|differential|verify|_adjoint_test$|_vs_dual_test$|_e0_test$`: the tests named `*_adjoint_test` and
+`*_vs_dual_test` are the adjoint tolerance gates — `adjoint_m1_adjoint_test` (M1 book: `d(book)/dz` and the 50
+sampled swaps vs central FD at 1e-6, linearity at 1e-13), `adjoint_m1_adjoint_vs_dual_test` (M2/Q3b: the full
+1,001 × 12 Jacobian vs forward mode at 1e-12) and `adjoint_nearmiss_adjoint_test` below. `adjoint_rules_test` (the
+op rules on small recorded programs) stays a unit test of the pass and is not a gate.
+(3) **The near-miss adjoint gate** (`tests/adjoint/nearmiss_adjoint_test.cpp`) closes the gap D32 predicted for the
+adjoint: the M1 book has no `select`, `recip`, `fma`, `log` or `sqrt`, so `select_wrong_arm` and `recip_rule_sign`
+are *not exercisable on the M1 book* and would survive its gates. On the near-miss shapes fixture (WORKLOADS §M2)
+the adjoint's full Jacobian (one lane per output, `out_bar = e_o`) is compared with one forward pass of
+`nearmiss_evaluate<Dual<6>>` at 1e-12·max(|J|, 1) and with central FD (h = 1e-6) at 1e-6 rel / 1e-7 abs wherever the
+difference does not straddle a kink (an entry whose FD disagrees with the Dual tangent by more than the FD tolerance
+is a kink and is counted, not asserted; none at the 16 states), on the raw recording and after the standard passes
+at the record point and 15 ball draws (20,256 entries each; worst 1.9e-15 / 4.1e-15 vs Dual, 0.04 of the FD
+tolerance), plus linearity in the seed with the seeded adjoint checked against `Jᵀ·seed`. To instantiate the fixture
+on `Dual`, its calls to `recip` / `max` / `min` / `abs` became unqualified (`Dual`'s are hidden friends, found only by
+ADL; `double`'s and `Rec`'s are namespace-scope functions of `epykos`, found by ordinary lookup from
+`epykos::fixtures`): the `double` and `Rec` instantiations pick the same functions as before and the existing
+near-miss gates are unchanged bitwise.
+(4) **Result** (Apple clang 21, reference flags, `scripts/mutation_test.sh`): 13 registered mutants, all caught;
+the adjoint mutants by the adjoint gates only — `wrong_transpose`, `drop_broadcast` and `affine_not_transposed` by
+the M1 gates (FD and linearity; vs forward mode) and by the near-miss gate (after the passes; on the raw near-miss
+recording gather 0 is the identity index, where `wrong_transpose` is a no-op), `select_wrong_arm` and
+`recip_rule_sign` by the near-miss gate alone. The harness table is in `RESUME.md` §5 (M2/Q4b).

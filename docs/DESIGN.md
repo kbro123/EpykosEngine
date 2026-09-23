@@ -233,12 +233,14 @@ Correctness gates:
 - **differential**: compiled vs templated-`double` at randomised state in a ball around the record point (E0 exact under
   `-ffp-contract=off`, else E1 tolerance: D26's bound at the scale of the terms, D31; `verify/differential.hpp`,
   M2/Q1); this also catches missed branches;
-- **adjoint** vs central finite difference and vs forward mode;
+- **adjoint** vs central finite difference and vs forward mode (`Dual`), and linearity in the seed — on the M1 book
+  and on the near-miss shapes fixture, whose `select` / `recip` / `fma` / `log` / `sqrt` rules the book cannot
+  exercise (M2/Q3, Q4b);
 - **mutation testing** on rewrite rules (a mutated rule must fail a gate): every pass carries its mutants as one-line
   defects behind `epykos::mutant("<pass>.<defect>")` (`include/epykos/mutation/`), compiled in only by the `mutation`
   preset and selected one per process by `EPYKOS_MUTANT`; `scripts/mutation_test.sh` runs the gates above once per
   registered mutant and fails if any survives — a survivor is a gap in the gates, never a job for a mutant-specific
-  test (D32);
+  test (D32); the adjoint's mutants are caught by the adjoint gates, which are part of the harness's gate set (D33);
 - **external oracles** (QuantLib and others) added per product, test-only.
 
 Performance gates: per machine+toolchain fingerprint; fail on > 1.25× self-regression or an absolute target miss.

@@ -6,7 +6,8 @@
 //   structural_if(c)     a branch that must not depend on inputs (Rec: throws if tainted)
 //   max/min/abs          via select                              (Rec: records Select)
 //   exp/log/sqrt/fma     unqualified, found by ADL or `using std::exp;`
-// These are the `double` instantiations. scalar/rec.hpp provides the `Rec` ones.
+// These are the `double` instantiations. scalar/rec.hpp provides the `Rec` ones and scalar/dual.hpp
+// the `Dual<N>` ones.
 #pragma once
 
 #include <cmath>

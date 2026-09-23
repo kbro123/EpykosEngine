@@ -44,16 +44,18 @@ struct ProfileTable {
 struct ProfileScope {
   int slot;
   std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
-  explicit ProfileScope(int s) : slot(s < ProfileTable::slots - 1 ? s : ProfileTable::slots - 2) {}
+  explicit ProfileScope(int s) : slot(s) {}
   ~ProfileScope() { g_profile.ns[slot] += std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count(); }
 };
+// A domain's slot is its id; ids beyond the table fold into slots - 2, and slots - 1 is the output copy.
+inline int profile_domain_slot(int id) noexcept { return id < ProfileTable::slots - 1 ? id : ProfileTable::slots - 2; }
 }  // namespace
-#define EPYKOS_EXEC_PROFILE_SCOPE(slot) ProfileScope profile_scope_(slot)
-#define EPYKOS_EXEC_PROFILE_OUTPUT_SLOT (ProfileTable::slots - 1)
+#define EPYKOS_EXEC_PROFILE_SCOPE(domain) ProfileScope profile_scope_(profile_domain_slot(domain))
+#define EPYKOS_EXEC_PROFILE_OUTPUT_SCOPE() ProfileScope profile_scope_(ProfileTable::slots - 1)
 #define EPYKOS_EXEC_PROFILE_RUN() ++g_profile.runs
 #else
-#define EPYKOS_EXEC_PROFILE_SCOPE(slot)
-#define EPYKOS_EXEC_PROFILE_OUTPUT_SLOT 0
+#define EPYKOS_EXEC_PROFILE_SCOPE(domain)
+#define EPYKOS_EXEC_PROFILE_OUTPUT_SCOPE()
 #define EPYKOS_EXEC_PROFILE_RUN()
 #endif
 
@@ -1207,7 +1209,7 @@ void Interpreter::run(const double* state, int B, double* out) const {
       }
     }
     {
-      EPYKOS_EXEC_PROFILE_SCOPE(EPYKOS_EXEC_PROFILE_OUTPUT_SLOT);
+      EPYKOS_EXEC_PROFILE_OUTPUT_SCOPE();
       copy_out(ctx.v, values, im.late_ids.data(), im.late_ords.data(), static_cast<int>(im.late_ids.size()), out, B, b0, L);
     }
   }

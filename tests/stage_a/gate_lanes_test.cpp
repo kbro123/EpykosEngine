@@ -218,14 +218,18 @@ TEST(StageAGateLanes, OneTapeAndThePlan) {
   // segments (Sum / Affine members), and which of those readers are scans; output rows per domain.
   const std::size_t nd = p.domains.size();
   std::vector<std::set<ir::domain_id>> gather_readers(nd), segment_readers(nd), scan_readers(nd);
-  std::vector<std::size_t> output_rows(nd, 0), gather_slots(nd, 0), segment_slots(nd, 0);
+  std::vector<std::size_t> output_rows(nd, 0), gather_slots(nd, 0), segment_slots(nd, 0), gather_refs(nd, 0);
   for (std::size_t d = 0; d < nd; ++d) {
     for (const ir::Step& st : p.groups[d].steps) {
       for (const ir::Slot* sl : {&st.a, &st.b, &st.c}) {
         if (sl->kind == ir::SlotKind::Gather) {
           ++gather_slots[d];
           std::set<ir::domain_id> seen;
-          for (ir::value_id v : p.gathers[static_cast<std::size_t>(sl->index)].index) seen.insert(p.domain_of(v));
+          for (ir::value_id v : p.gathers[static_cast<std::size_t>(sl->index)].index) {
+            const ir::domain_id r = p.domain_of(v);
+            seen.insert(r);
+            if (r != static_cast<ir::domain_id>(d)) ++gather_refs[static_cast<std::size_t>(r)];
+          }
           for (ir::domain_id r : seen) {
             if (r == static_cast<ir::domain_id>(d)) continue;   // a scan's carry
             gather_readers[static_cast<std::size_t>(r)].insert(static_cast<ir::domain_id>(d));
@@ -243,7 +247,7 @@ TEST(StageAGateLanes, OneTapeAndThePlan) {
   for (ir::value_id v : p.outputs) ++output_rows[static_cast<std::size_t>(p.domain_of(v))];
   {
     std::ofstream f("stage_a_domains.csv");
-    f << "domain,shape,rows,level,scan,chains,last_op,steps,reads,gather_readers,segment_readers,scan_readers,output_rows\n";
+    f << "domain,shape,rows,level,scan,chains,last_op,steps,reads,gather_readers,segment_readers,scan_readers,output_rows,gather_refs\n";
     for (std::size_t d = 0; d < nd; ++d) {
       const ir::Domain& dom = p.domains[d];
       auto list = [](const std::set<ir::domain_id>& x) {
@@ -255,7 +259,7 @@ TEST(StageAGateLanes, OneTapeAndThePlan) {
       for (ir::domain_id r : dom.reads) reads += (reads.empty() ? "" : " ") + std::to_string(r);
       f << d << ",\"" << ir::shape_string(p, static_cast<ir::domain_id>(d)) << "\"," << dom.rows << ',' << dom.level << ',' << (dom.scan >= 0 ? 1 : 0) << ','
         << (dom.scan >= 0 ? p.scans[static_cast<std::size_t>(dom.scan)].chains() : 0) << ',' << epykos::to_string(p.groups[d].steps.back().op) << ',' << p.groups[d].steps.size() << ",\""
-        << reads << "\",\"" << list(gather_readers[d]) << "\",\"" << list(segment_readers[d]) << "\",\"" << list(scan_readers[d]) << "\"," << output_rows[d] << '\n';
+        << reads << "\",\"" << list(gather_readers[d]) << "\",\"" << list(segment_readers[d]) << "\",\"" << list(scan_readers[d]) << "\"," << output_rows[d] << ',' << gather_refs[d] << '\n';
     }
   }
   std::cout << "[  plan    ] written stage_a_plan.txt (" << plan.size() << " bytes) and stage_a_domains.csv (" << nd << " domains) in the test's working directory\n";

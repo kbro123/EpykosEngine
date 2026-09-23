@@ -1,0 +1,2342 @@
+{
+ "format": "epykos-m3-gate 1",
+ "package": "M3/G6 (m3-gate-1)",
+ "engine_commit": "0642a8fad0e2ee2ffa0a77862992328fa46b291c",
+ "fingerprint": {
+  "id": "d448afd70180",
+  "cpu": "Intel(R) Xeon(R) W-3223 CPU @ 3.50GHz",
+  "cores_physical": 8,
+  "cores_logical": 16,
+  "compiler": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+  "flags": "-O3 -march=x86-64-v3 -fno-math-errno",
+  "os": "Darwin",
+  "arch": "x86_64",
+  "flags_source": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m3-gate-1/build/release/epykos_flags.txt"
+ },
+ "bench_run": {
+  "file": "stage_a_stage_a.json",
+  "date": "2026-09-23T17:19:37+01:00",
+  "load": {
+   "before": 6.91,
+   "after": 3.25,
+   "cores_logical": 16,
+   "threshold": 8.0,
+   "within_threshold": true,
+   "check_enforced": true,
+   "rule": "docs/WORKLOADS.md M1 Measurement: 1-minute load average <= cores/2 before and after, cores = logical CPUs"
+  },
+  "git": {
+   "commit": "ee021a3f475d3e5ab69190f152d5b87ec38d0ca1",
+   "commit_short": "ee021a3",
+   "branch": "m3/m3-gate-1",
+   "dirty": false
+  },
+  "args": [
+   "--benchmark_repetitions=20",
+   "--benchmark_min_time=0.2s",
+   "--benchmark_report_aggregates_only=false",
+   "--benchmark_out_format=json"
+  ],
+  "note": "the run bench/run.sh derives from the binary (D34); accepted into baseline.json as the M4 baseline"
+ },
+ "gates": {
+  "release": {
+   "differential_e0": {
+    "ok": 1,
+    "draws": 64,
+    "batch": 8,
+    "outputs": 8191,
+    "mismatches": 0,
+    "max_ulps": 0
+   },
+   "adjoint_o2_vs_fd": {
+    "ok": 1,
+    "worst": 9.65184e-10,
+    "at_output": 240,
+    "knot": 6,
+    "h": 1e-06,
+    "gate": 1e-06,
+    "entries": 2030
+   },
+   "adjoint_o2_vs_dual": {
+    "ok": 1,
+    "worst": 2.7901e-15,
+    "at_output": 8189,
+    "knot": 38,
+    "gate": 1e-12,
+    "entries": 2030
+   },
+   "ift_vs_dual": {
+    "ok": 1,
+    "worst": 2.30115e-15,
+    "at_output": 1811,
+    "quote": 15,
+    "gate": 1e-12,
+    "entries": 3570,
+    "rows": 51
+   },
+   "ift_vs_bump": {
+    "ok": 1,
+    "worst": 5.09301e-08,
+    "at_output": 8190,
+    "quote": 39,
+    "gate": 1e-06,
+    "entries": 120,
+    "below_floor": 5,
+    "pairs": 50
+   },
+   "scenario_lanes": {
+    "ok": 1,
+    "lanes": 32,
+    "output_mismatches": 0,
+    "state_mismatches": 0,
+    "first_mismatching_lane": -1
+   },
+   "optimality_lanes": {
+    "ok": 1,
+    "worst": 1.23544e-13,
+    "gate": 1e-12,
+    "lanes": 32,
+    "blocks": 4
+   },
+   "optimality": {
+    "ok": 1,
+    "worst": 1.23544e-13,
+    "gate": 1e-12,
+    "blocks": 4
+   },
+   "recovery": {
+    "ok": 1,
+    "worst": 4.56267e-14,
+    "gate": 1e-12
+   },
+   "one_tape": {
+    "ok": 1,
+    "outputs": 8191,
+    "groups": 3,
+    "inputs": 148,
+    "free": 70,
+    "blocks": 4,
+    "nodes": 517036
+   }
+  },
+  "reference": {
+   "differential_e0": {
+    "ok": 1,
+    "draws": 64,
+    "batch": 8,
+    "outputs": 8191,
+    "mismatches": 0,
+    "max_ulps": 0
+   },
+   "adjoint_o2_vs_fd": {
+    "ok": 1,
+    "worst": 9.65184e-10,
+    "at_output": 240,
+    "knot": 6,
+    "h": 1e-06,
+    "gate": 1e-06,
+    "entries": 2030
+   },
+   "adjoint_o2_vs_dual": {
+    "ok": 1,
+    "worst": 2.24916e-15,
+    "at_output": 2042,
+    "knot": 14,
+    "gate": 1e-12,
+    "entries": 2030
+   },
+   "ift_vs_dual": {
+    "ok": 1,
+    "worst": 3.03433e-15,
+    "at_output": 1153,
+    "quote": 19,
+    "gate": 1e-12,
+    "entries": 3570,
+    "rows": 51
+   },
+   "ift_vs_bump": {
+    "ok": 1,
+    "worst": 5.09301e-08,
+    "at_output": 8190,
+    "quote": 39,
+    "gate": 1e-06,
+    "entries": 120,
+    "below_floor": 5,
+    "pairs": 50
+   },
+   "scenario_lanes": {
+    "ok": 1,
+    "lanes": 32,
+    "output_mismatches": 0,
+    "state_mismatches": 0,
+    "first_mismatching_lane": -1
+   },
+   "optimality_lanes": {
+    "ok": 1,
+    "worst": 1.23544e-13,
+    "gate": 1e-12,
+    "lanes": 32,
+    "blocks": 4
+   },
+   "optimality": {
+    "ok": 1,
+    "worst": 1.23544e-13,
+    "gate": 1e-12,
+    "blocks": 4
+   },
+   "recovery": {
+    "ok": 1,
+    "worst": 4.56267e-14,
+    "gate": 1e-12
+   },
+   "one_tape": {
+    "ok": 1,
+    "outputs": 8191,
+    "groups": 3,
+    "inputs": 148,
+    "free": 70,
+    "blocks": 4,
+    "nodes": 517036
+   }
+  }
+ },
+ "structure": {
+  "domains": 67,
+  "scan_domains": 5,
+  "chains": 1107,
+  "scan_rows": 255959,
+  "values": 423235,
+  "df_domains": [
+   {
+    "domain": 3,
+    "shape": "exp(mul(@0,$0))",
+    "rows": 177
+   },
+   {
+    "domain": 5,
+    "shape": "exp(mul(neg(@0),$0))",
+    "rows": 16917
+   }
+  ]
+ },
+ "record": {
+  "record_line": "build 0.000 s; dependencies 0.234 s; calibrate 0.982 s; book 2.271 s; passes 7.618 s; export 0.006 s; record total 11.417 s; nodes raw 27459283 -> after passes 517036; df memo entries 17086; inputs 148, outputs 8191",
+  "nodes_raw": 27459283,
+  "nodes_after_passes": 517036,
+  "inputs": 148,
+  "outputs": 8191
+ },
+ "benchmarks_ms": {
+  "BM_Record/iterations:1": {
+   "median": 7848.566969973035,
+   "min": 7758.564580930397,
+   "p90": 7908.69114222005,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "nodes": 517036,
+    "nodes_raw": 27459283
+   }
+  },
+  "BM_Build/iterations:2": {
+   "median": 1021.2551502627321,
+   "min": 1005.6940384674817,
+   "p90": 1031.4039255026728,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "domains": 67,
+    "values": 423235
+   }
+  },
+  "BM_Run/1": {
+   "median": 18.173198841395788,
+   "min": 17.77296511863824,
+   "p90": 18.651837381185032,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "B": 1,
+    "jacobians": 4,
+    "residual_evals": 16,
+    "solves": 4
+   }
+  },
+  "BM_Run/8": {
+   "median": 130.60521375155076,
+   "min": 129.0757079841569,
+   "p90": 131.41339900903404,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "B": 8,
+    "jacobians": 32,
+    "residual_evals": 249,
+    "solves": 32
+   }
+  },
+  "BM_Run/64": {
+   "median": 1038.7075114995241,
+   "min": 1033.8850121479481,
+   "p90": 1041.9560289010406,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "B": 64,
+    "jacobians": 256,
+    "residual_evals": 2152,
+    "solves": 256
+   }
+  },
+  "BM_Adjoint/1": {
+   "median": 32.63524718931876,
+   "min": 32.13875601068139,
+   "p90": 32.76496700709686,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "B": 1,
+    "solves": 4
+   }
+  },
+  "BM_Adjoint/8": {
+   "median": 48.34610759280622,
+   "min": 47.8630003441746,
+   "p90": 48.72489732224494,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "B": 8,
+    "solves": 4
+   }
+  },
+  "BM_Adjoint/64": {
+   "median": 280.6500220904127,
+   "min": 275.7478530984372,
+   "p90": 281.84918593615294,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "B": 64,
+    "solves": 4
+   }
+  },
+  "BM_Calibrate/0": {
+   "median": 54.96020740829408,
+   "min": 54.549905424937606,
+   "p90": 55.19669959321618,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "blocks": 4,
+    "jacobians": 16,
+    "policy": 0
+   }
+  },
+  "BM_Calibrate/1": {
+   "median": 15.036983715713417,
+   "min": 14.968268830623282,
+   "p90": 15.186362789551678,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "blocks": 4,
+    "jacobians": 4,
+    "policy": 1
+   }
+  },
+  "BM_Evaluate/1/8": {
+   "median": 1.5655296624445632,
+   "min": 1.5214198612342666,
+   "p90": 1.5947560327096357,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "B": 1,
+    "domains": 67,
+    "fused_rows": 25707,
+    "lane_tile": 8,
+    "values": 423235
+   }
+  },
+  "BM_Evaluate/1/1": {
+   "median": 1.5218997038437765,
+   "min": 1.4989350881242292,
+   "p90": 1.5455643872817906,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "B": 1,
+    "domains": 67,
+    "fused_rows": 42624,
+    "lane_tile": 1,
+    "values": 423235
+   }
+  },
+  "BM_Evaluate/8/8": {
+   "median": 6.552828337758953,
+   "min": 6.495349509858115,
+   "p90": 6.590795042643021,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "B": 8,
+    "domains": 67,
+    "fused_rows": 25707,
+    "lane_tile": 8,
+    "values": 423235
+   }
+  },
+  "BM_Evaluate/64/8": {
+   "median": 52.86870668642223,
+   "min": 52.29010018520057,
+   "p90": 53.6009204108268,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "B": 64,
+    "domains": 67,
+    "fused_rows": 25707,
+    "lane_tile": 8,
+    "values": 423235
+   }
+  },
+  "BM_Evaluate/64/32": {
+   "median": 52.07828730344772,
+   "min": 51.778549794107676,
+   "p90": 52.48449598439038,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "B": 64,
+    "domains": 67,
+    "fused_rows": 42885,
+    "lane_tile": 32,
+    "values": 423235
+   }
+  },
+  "BM_Evaluate/64/64": {
+   "median": 57.12895130272955,
+   "min": 56.797161186113954,
+   "p90": 57.54169779829681,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "B": 64,
+    "domains": 67,
+    "fused_rows": 42885,
+    "lane_tile": 64,
+    "values": 423235
+   }
+  },
+  "BM_ForwardLadder": {
+   "median": 1383.9547419920564,
+   "min": 1369.1904831212014,
+   "p90": 1397.2032081801444,
+   "unit": "ms",
+   "n": 20,
+   "counters": {
+    "quotes": 70,
+    "trades": 2000
+   }
+  }
+ },
+ "coverage": {
+  "B1_L8": {
+   "summary_by_kind": {
+    "plain": {
+     "domains": 30,
+     "rows": 97134,
+     "profile_us": 221.1308
+    },
+    "reduction": {
+     "domains": 18,
+     "rows": 44198,
+     "profile_us": 182.74639999999997
+    },
+    "scan": {
+     "domains": 5,
+     "rows": 255959,
+     "profile_us": 1199.8111999999999
+    },
+    "fused": {
+     "domains": 14,
+     "rows": 25944,
+     "profile_us": 4.872000000000001
+    }
+   },
+   "profile_runs_used": 100,
+   "domains": [
+    {
+     "domain": 0,
+     "shape": "input",
+     "rows": 148,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "78 of its rows are outputs; gathered by 5 domains {d1 d7 d12 d57 d66}: the inliner needs exactly one consumer",
+     "profile_us": 0.522
+    },
+    {
+     "domain": 1,
+     "shape": "neg(@0)",
+     "rows": 70,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "inlinable into d3, but row fusion is off at lane tile 8 (row_fusion_pays: L = 1 or L >= 16)",
+     "profile_us": 0.35960000000000003
+    },
+    {
+     "domain": 2,
+     "shape": "const($0)",
+     "rows": 511,
+     "kind": "plain",
+     "treatment": "2 tile(s)",
+     "reason": "read by scan domain(s) {d10} (a scan is never fused or inlined into)",
+     "profile_us": 0.7192000000000001
+    },
+    {
+     "domain": 3,
+     "shape": "exp(mul(@0,$0))",
+     "rows": 177,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "gathered by 7 domains {d6 d8 d26 d32 d37 d42 d45}: the inliner needs exactly one consumer",
+     "profile_us": 1.8096
+    },
+    {
+     "domain": 4,
+     "shape": "affine(#0;%0)",
+     "rows": 16917,
+     "kind": "reduction",
+     "treatment": "33834 members, all gathered",
+     "reason": null,
+     "profile_us": 38.5468
+    },
+    {
+     "domain": 5,
+     "shape": "exp(mul(neg(@0),$0))",
+     "rows": 16917,
+     "kind": "plain",
+     "treatment": "67 tile(s)",
+     "reason": "gathered by 9 domains {d6 d8 d16 d26 d32 d37 d42 d45 d55}: the inliner needs exactly one consumer",
+     "profile_us": 103.6692
+    },
+    {
+     "domain": 6,
+     "shape": "div(sub(div(@0,@1),#0),$0)",
+     "rows": 17083,
+     "kind": "plain",
+     "treatment": "67 tile(s)",
+     "reason": "gathered by 3 domains {d7 d8 d12}: the inliner needs exactly one consumer",
+     "profile_us": 42.01519999999999
+    },
+    {
+     "domain": 7,
+     "shape": "sub(@0,@1)",
+     "rows": 4,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "4 of its rows are outputs",
+     "profile_us": 0.24359999999999998
+    },
+    {
+     "domain": 8,
+     "shape": "mul(@0,$0)",
+     "rows": 34685,
+     "kind": "plain",
+     "treatment": "136 tile(s)",
+     "reason": "226 of its rows are outputs; read by scan domain(s) {d13} (a scan is never fused or inlined into); gathered by 8 domains {d16 d29 d30 d33 d43 d53 d58 d66}: the inliner needs exactly one consumer",
+     "profile_us": 38.465599999999995
+    },
+    {
+     "domain": 9,
+     "shape": "sum(%0)",
+     "rows": 17076,
+     "kind": "reduction",
+     "treatment": "91930 members, all gathered",
+     "reason": null,
+     "profile_us": 66.8972
+    },
+    {
+     "domain": 10,
+     "shape": "mul(^,@0)",
+     "rows": 255687,
+     "kind": "scan",
+     "treatment": "scan: 1102 chain(s), 262 wave(s) in 1126 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 1193.7676
+    },
+    {
+     "domain": 11,
+     "shape": "div(sub(@0,#0),$0)",
+     "rows": 1138,
+     "kind": "fused",
+     "treatment": "fused into {d35} (evaluated per reduction block, not materialised; 8 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 0.5451999999999999
+    },
+    {
+     "domain": 12,
+     "shape": "sub(@1,sub(#1,div(@0,#0)))",
+     "rows": 16,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "16 of its rows are outputs",
+     "profile_us": 0.5684
+    },
+    {
+     "domain": 13,
+     "shape": "sum(^,@0)",
+     "rows": 8,
+     "kind": "scan",
+     "treatment": "scan: 2 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 0.8467999999999999
+    },
+    {
+     "domain": 14,
+     "shape": "mul(@0,#0)",
+     "rows": 1,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "read by scan domain(s) {d15} (a scan is never fused or inlined into)",
+     "profile_us": 0.24359999999999998
+    },
+    {
+     "domain": 15,
+     "shape": "mul(^,@0)",
+     "rows": 256,
+     "kind": "scan",
+     "treatment": "scan: 1 chain(s), 256 wave(s) in 256 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 4.651599999999999
+    },
+    {
+     "domain": 16,
+     "shape": "mul(@0,@1)",
+     "rows": 120,
+     "kind": "fused",
+     "treatment": "fused into {d17 d27 d35 d38 d39 d47 d48 d49 d56} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.24359999999999998
+    },
+    {
+     "domain": 17,
+     "shape": "sum(%0)",
+     "rows": 7,
+     "kind": "reduction",
+     "treatment": "12 of 30 members evaluated in the block from {d16 (operands in member order, epilogue)}, 18 gathered",
+     "reason": null,
+     "profile_us": 0.9048
+    },
+    {
+     "domain": 18,
+     "shape": "div(@0,$0)",
+     "rows": 213,
+     "kind": "fused",
+     "treatment": "fused into {d27} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.1508
+    },
+    {
+     "domain": 19,
+     "shape": "mul(@0,@1)",
+     "rows": 102,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "gathered by 2 domains {d20 d21}: the inliner needs exactly one consumer",
+     "profile_us": 0.58
+    },
+    {
+     "domain": 20,
+     "shape": "div(sub(@0,#0),$0)",
+     "rows": 10,
+     "kind": "fused",
+     "treatment": "fused into {d38} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.0928
+    },
+    {
+     "domain": 21,
+     "shape": "mul(@0,@1)",
+     "rows": 94,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "gathered by 2 domains {d22 d32}: the inliner needs exactly one consumer",
+     "profile_us": 0.2668
+    },
+    {
+     "domain": 22,
+     "shape": "div(sub(@0,#0),$0)",
+     "rows": 88,
+     "kind": "fused",
+     "treatment": "fused into {d39} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.0696
+    },
+    {
+     "domain": 23,
+     "shape": "div(sub(#0,#1),#2)",
+     "rows": 1,
+     "kind": "fused",
+     "treatment": "fused into {d24} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.20879999999999999
+    },
+    {
+     "domain": 24,
+     "shape": "sum(%0)",
+     "rows": 6639,
+     "kind": "reduction",
+     "treatment": "1 of 13278 members evaluated in the block from {d23 (operands in member order, epilogue)}, 13277 gathered",
+     "reason": null,
+     "profile_us": 10.671999999999999
+    },
+    {
+     "domain": 25,
+     "shape": "mul(@0,$0)",
+     "rows": 15358,
+     "kind": "plain",
+     "treatment": "60 tile(s)",
+     "reason": "its only reader d26 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
+     "profile_us": 13.8504
+    },
+    {
+     "domain": 26,
+     "shape": "mul(@0,@1)",
+     "rows": 15358,
+     "kind": "fused",
+     "treatment": "fused into {d27 d38 d39 d47 d48 d49 d56} (evaluated per reduction block, not materialised; 30 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 0.6844
+    },
+    {
+     "domain": 27,
+     "shape": "sum(%0)",
+     "rows": 1025,
+     "kind": "reduction",
+     "treatment": "15494 of 15723 members evaluated in the block from {d26 (operands in member order, epilogue) d18 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 229 gathered",
+     "reason": null,
+     "profile_us": 22.5156
+    },
+    {
+     "domain": 28,
+     "shape": "sum(^,@0,@1)",
+     "rows": 4,
+     "kind": "scan",
+     "treatment": "scan: 1 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 0.348
+    },
+    {
+     "domain": 29,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 605,
+     "kind": "plain",
+     "treatment": "3 tile(s)",
+     "reason": "605 of its rows are outputs; gathered by d36 and also a member of reduction(s) {d56}",
+     "profile_us": 1.6935999999999998
+    },
+    {
+     "domain": 30,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 11,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "11 of its rows are outputs; gathered by d31 and also a member of reduction(s) {d56}",
+     "profile_us": 0.19720000000000001
+    },
+    {
+     "domain": 31,
+     "shape": "mul(@0,$0)",
+     "rows": 1406,
+     "kind": "plain",
+     "treatment": "6 tile(s)",
+     "reason": "11 of its rows are outputs; gathered by d32 and also a member of reduction(s) {d59 d61}",
+     "profile_us": 1.682
+    },
+    {
+     "domain": 32,
+     "shape": "mul(@0,@1)",
+     "rows": 1401,
+     "kind": "fused",
+     "treatment": "fused into {d39 d47} (evaluated per reduction block, not materialised; 26 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 0.4524
+    },
+    {
+     "domain": 33,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 20,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "40 of its rows are outputs",
+     "profile_us": 0.22039999999999998
+    },
+    {
+     "domain": 34,
+     "shape": "div(@0,#0)",
+     "rows": 2,
+     "kind": "fused",
+     "treatment": "fused into {d35} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.08120000000000001
+    },
+    {
+     "domain": 35,
+     "shape": "sum(%0)",
+     "rows": 1137,
+     "kind": "reduction",
+     "treatment": "1136 of 2287 members evaluated in the block from {d11 (operands in member order, epilogue) d34 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 1151 gathered",
+     "reason": null,
+     "profile_us": 6.67
+    },
+    {
+     "domain": 36,
+     "shape": "mul(@0,$0)",
+     "rows": 6989,
+     "kind": "plain",
+     "treatment": "28 tile(s)",
+     "reason": "605 of its rows are outputs; gathered by d37 and also a member of reduction(s) {d59 d61}",
+     "profile_us": 7.5748
+    },
+    {
+     "domain": 37,
+     "shape": "mul(@0,@1)",
+     "rows": 6384,
+     "kind": "fused",
+     "treatment": "fused into {d47 d48 d49 d56 d59 d61 d62 d63 d64 d65} (evaluated per reduction block, not materialised; 149 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 1.7052
+    },
+    {
+     "domain": 38,
+     "shape": "sum(%0)",
+     "rows": 16,
+     "kind": "reduction",
+     "treatment": "22 of 59 members evaluated in the block from {d20 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 37 gathered",
+     "reason": null,
+     "profile_us": 0.5916
+    },
+    {
+     "domain": 39,
+     "shape": "sum(%0)",
+     "rows": 271,
+     "kind": "reduction",
+     "treatment": "1461 of 1575 members evaluated in the block from {d32 (operands in member order, epilogue) d22 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 114 gathered",
+     "reason": null,
+     "profile_us": 3.5496
+    },
+    {
+     "domain": 40,
+     "shape": "sum(^,@0)",
+     "rows": 4,
+     "kind": "scan",
+     "treatment": "scan: 1 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 0.19720000000000001
+    },
+    {
+     "domain": 41,
+     "shape": "mul(@0,$0)",
+     "rows": 13,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "its only reader d42 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
+     "profile_us": 0.1392
+    },
+    {
+     "domain": 42,
+     "shape": "mul(@0,@1)",
+     "rows": 13,
+     "kind": "fused",
+     "treatment": "fused into {d48 d49 d56 d62} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.0696
+    },
+    {
+     "domain": 43,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 313,
+     "kind": "plain",
+     "treatment": "2 tile(s)",
+     "reason": "589 of its rows are outputs; gathered by d52 and also a member of reduction(s) {d56 d59 d61}",
+     "profile_us": 1.0324
+    },
+    {
+     "domain": 44,
+     "shape": "mul(@0,$0)",
+     "rows": 1203,
+     "kind": "plain",
+     "treatment": "5 tile(s)",
+     "reason": "its only reader d45 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
+     "profile_us": 1.5428
+    },
+    {
+     "domain": 45,
+     "shape": "mul(@0,@1)",
+     "rows": 1203,
+     "kind": "fused",
+     "treatment": "fused into {d49 d56} (evaluated per reduction block, not materialised; 22 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 0.348
+    },
+    {
+     "domain": 46,
+     "shape": "div(sub(@0,#0),$0)",
+     "rows": 6,
+     "kind": "fused",
+     "treatment": "fused into {d47} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.0464
+    },
+    {
+     "domain": 47,
+     "shape": "sum(%0)",
+     "rows": 769,
+     "kind": "reduction",
+     "treatment": "4998 of 5045 members evaluated in the block from {d37 (operands in member order, epilogue) d26 (operands in member order, epilogue) d46 (operands in member order, epilogue) d32 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 47 gathered",
+     "reason": null,
+     "profile_us": 8.526
+    },
+    {
+     "domain": 48,
+     "shape": "sum(%0)",
+     "rows": 10,
+     "kind": "reduction",
+     "treatment": "86 of 117 members evaluated in the block from {d37 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 31 gathered",
+     "reason": null,
+     "profile_us": 0.9976
+    },
+    {
+     "domain": 49,
+     "shape": "sum(%0)",
+     "rows": 269,
+     "kind": "reduction",
+     "treatment": "2314 of 2365 members evaluated in the block from {d37 (operands in member order, epilogue) d45 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 51 gathered",
+     "reason": null,
+     "profile_us": 6.0552
+    },
+    {
+     "domain": 50,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 755,
+     "kind": "plain",
+     "treatment": "3 tile(s)",
+     "reason": "1249 of its rows are outputs; gathered by d51 and also a member of reduction(s) {d56 d59 d61}",
+     "profile_us": 1.2528
+    },
+    {
+     "domain": 51,
+     "shape": "mul(@0,#0)",
+     "rows": 261,
+     "kind": "plain",
+     "treatment": "2 tile(s)",
+     "reason": "261 of its rows are outputs",
+     "profile_us": 0.32480000000000003
+    },
+    {
+     "domain": 52,
+     "shape": "mul(@0,$0)",
+     "rows": 44,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "37 of its rows are outputs; gathered by d55 and also a member of reduction(s) {d59 d61}",
+     "profile_us": 0.1508
+    },
+    {
+     "domain": 53,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 26,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "50 of its rows are outputs; gathered by d54 and also a member of reduction(s) {d56 d59 d61}",
+     "profile_us": 0.33640000000000003
+    },
+    {
+     "domain": 54,
+     "shape": "mul(@0,#0)",
+     "rows": 2,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "2 of its rows are outputs",
+     "profile_us": 0.0928
+    },
+    {
+     "domain": 55,
+     "shape": "mul(@0,@1)",
+     "rows": 7,
+     "kind": "fused",
+     "treatment": "fused into {d56} (evaluated per reduction block, not materialised; 2 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 0.174
+    },
+    {
+     "domain": 56,
+     "shape": "sum(%0)",
+     "rows": 11,
+     "kind": "reduction",
+     "treatment": "143 of 1069 members evaluated in the block from {d37 (operands in member order, epilogue) d45 (operands in member order, epilogue) d55 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 926 gathered",
+     "reason": null,
+     "profile_us": 3.7120000000000006
+    },
+    {
+     "domain": 57,
+     "shape": "sub(div(sub(@0,@1),@2),@3)",
+     "rows": 9,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "9 of its rows are outputs",
+     "profile_us": 0.3016
+    },
+    {
+     "domain": 58,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 265,
+     "kind": "plain",
+     "treatment": "2 tile(s)",
+     "reason": "530 of its rows are outputs",
+     "profile_us": 0.7772
+    },
+    {
+     "domain": 59,
+     "shape": "sum(%0)",
+     "rows": 37,
+     "kind": "reduction",
+     "treatment": "6 of 1756 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1750 gathered",
+     "reason": null,
+     "profile_us": 3.8047999999999997
+    },
+    {
+     "domain": 60,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 5,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "10 of its rows are outputs",
+     "profile_us": 0.10439999999999999
+    },
+    {
+     "domain": 61,
+     "shape": "sum(%0)",
+     "rows": 9,
+     "kind": "reduction",
+     "treatment": "7 of 3345 members evaluated in the block from {d37 (operands in member order, epilogue)}, 3338 gathered",
+     "reason": null,
+     "profile_us": 8.6072
+    },
+    {
+     "domain": 62,
+     "shape": "sum(%0)",
+     "rows": 2,
+     "kind": "reduction",
+     "treatment": "13 of 15 members evaluated in the block from {d37 (operands in member order, epilogue) d42 (operands in member order, epilogue)}, 2 gathered",
+     "reason": null,
+     "profile_us": 0.2668
+    },
+    {
+     "domain": 63,
+     "shape": "sum(%0)",
+     "rows": 1,
+     "kind": "reduction",
+     "treatment": "5 of 6 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered",
+     "reason": null,
+     "profile_us": 0.1392
+    },
+    {
+     "domain": 64,
+     "shape": "sum(%0)",
+     "rows": 1,
+     "kind": "reduction",
+     "treatment": "5 of 6 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered",
+     "reason": null,
+     "profile_us": 0.1392
+    },
+    {
+     "domain": 65,
+     "shape": "sum(%0)",
+     "rows": 1,
+     "kind": "reduction",
+     "treatment": "5 of 6 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered",
+     "reason": null,
+     "profile_us": 0.1508
+    },
+    {
+     "domain": 66,
+     "shape": "sub(div(@0,@1),@2)",
+     "rows": 41,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "41 of its rows are outputs",
+     "profile_us": 0.39440000000000003
+    }
+   ]
+  },
+  "B64_L8": {
+   "summary_by_kind": {
+    "plain": {
+     "domains": 30,
+     "rows": 97134,
+     "profile_us": 10852.4032
+    },
+    "reduction": {
+     "domains": 18,
+     "rows": 44198,
+     "profile_us": 4794.094399999999
+    },
+    "scan": {
+     "domains": 5,
+     "rows": 255959,
+     "profile_us": 36174.727600000006
+    },
+    "fused": {
+     "domains": 14,
+     "rows": 25944,
+     "profile_us": 82.9632
+    }
+   },
+   "profile_runs_used": 100,
+   "domains": [
+    {
+     "domain": 0,
+     "shape": "input",
+     "rows": 148,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "78 of its rows are outputs; gathered by 5 domains {d1 d7 d12 d57 d66}: the inliner needs exactly one consumer",
+     "profile_us": 38.106
+    },
+    {
+     "domain": 1,
+     "shape": "neg(@0)",
+     "rows": 70,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "inlinable into d3, but row fusion is off at lane tile 8 (row_fusion_pays: L = 1 or L >= 16)",
+     "profile_us": 6.322
+    },
+    {
+     "domain": 2,
+     "shape": "const($0)",
+     "rows": 511,
+     "kind": "plain",
+     "treatment": "2 tile(s)",
+     "reason": "read by scan domain(s) {d10} (a scan is never fused or inlined into)",
+     "profile_us": 16.8664
+    },
+    {
+     "domain": 3,
+     "shape": "exp(mul(@0,$0))",
+     "rows": 177,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "gathered by 7 domains {d6 d8 d26 d32 d37 d42 d45}: the inliner needs exactly one consumer",
+     "profile_us": 81.58279999999999
+    },
+    {
+     "domain": 4,
+     "shape": "affine(#0;%0)",
+     "rows": 16917,
+     "kind": "reduction",
+     "treatment": "33834 members, all gathered",
+     "reason": null,
+     "profile_us": 853.5512000000001
+    },
+    {
+     "domain": 5,
+     "shape": "exp(mul(neg(@0),$0))",
+     "rows": 16917,
+     "kind": "plain",
+     "treatment": "67 tile(s)",
+     "reason": "gathered by 9 domains {d6 d8 d16 d26 d32 d37 d42 d45 d55}: the inliner needs exactly one consumer",
+     "profile_us": 6600.4348
+    },
+    {
+     "domain": 6,
+     "shape": "div(sub(div(@0,@1),#0),$0)",
+     "rows": 17083,
+     "kind": "plain",
+     "treatment": "67 tile(s)",
+     "reason": "gathered by 3 domains {d7 d8 d12}: the inliner needs exactly one consumer",
+     "profile_us": 1289.5604
+    },
+    {
+     "domain": 7,
+     "shape": "sub(@0,@1)",
+     "rows": 4,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "4 of its rows are outputs",
+     "profile_us": 3.306
+    },
+    {
+     "domain": 8,
+     "shape": "mul(@0,$0)",
+     "rows": 34685,
+     "kind": "plain",
+     "treatment": "136 tile(s)",
+     "reason": "226 of its rows are outputs; read by scan domain(s) {d13} (a scan is never fused or inlined into); gathered by 8 domains {d16 d29 d30 d33 d43 d53 d58 d66}: the inliner needs exactly one consumer",
+     "profile_us": 1598.0740000000003
+    },
+    {
+     "domain": 9,
+     "shape": "sum(%0)",
+     "rows": 17076,
+     "kind": "reduction",
+     "treatment": "91930 members, all gathered",
+     "reason": null,
+     "profile_us": 1818.88
+    },
+    {
+     "domain": 10,
+     "shape": "mul(^,@0)",
+     "rows": 255687,
+     "kind": "scan",
+     "treatment": "scan: 1102 chain(s), 262 wave(s) in 1126 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 36099.2464
+    },
+    {
+     "domain": 11,
+     "shape": "div(sub(@0,#0),$0)",
+     "rows": 1138,
+     "kind": "fused",
+     "treatment": "fused into {d35} (evaluated per reduction block, not materialised; 8 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 6.8208
+    },
+    {
+     "domain": 12,
+     "shape": "sub(@1,sub(#1,div(@0,#0)))",
+     "rows": 16,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "16 of its rows are outputs",
+     "profile_us": 10.556
+    },
+    {
+     "domain": 13,
+     "shape": "sum(^,@0)",
+     "rows": 8,
+     "kind": "scan",
+     "treatment": "scan: 2 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 6.983199999999999
+    },
+    {
+     "domain": 14,
+     "shape": "mul(@0,#0)",
+     "rows": 1,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "read by scan domain(s) {d15} (a scan is never fused or inlined into)",
+     "profile_us": 3.2132
+    },
+    {
+     "domain": 15,
+     "shape": "mul(^,@0)",
+     "rows": 256,
+     "kind": "scan",
+     "treatment": "scan: 1 chain(s), 256 wave(s) in 256 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 59.0788
+    },
+    {
+     "domain": 16,
+     "shape": "mul(@0,@1)",
+     "rows": 120,
+     "kind": "fused",
+     "treatment": "fused into {d17 d27 d35 d38 d39 d47 d48 d49 d56} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 1.16
+    },
+    {
+     "domain": 17,
+     "shape": "sum(%0)",
+     "rows": 7,
+     "kind": "reduction",
+     "treatment": "12 of 30 members evaluated in the block from {d16 (operands in member order, epilogue)}, 18 gathered",
+     "reason": null,
+     "profile_us": 13.873600000000001
+    },
+    {
+     "domain": 18,
+     "shape": "div(@0,$0)",
+     "rows": 213,
+     "kind": "fused",
+     "treatment": "fused into {d27} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.8236
+    },
+    {
+     "domain": 19,
+     "shape": "mul(@0,@1)",
+     "rows": 102,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "gathered by 2 domains {d20 d21}: the inliner needs exactly one consumer",
+     "profile_us": 11.750800000000002
+    },
+    {
+     "domain": 20,
+     "shape": "div(sub(@0,#0),$0)",
+     "rows": 10,
+     "kind": "fused",
+     "treatment": "fused into {d38} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.5451999999999999
+    },
+    {
+     "domain": 21,
+     "shape": "mul(@0,@1)",
+     "rows": 94,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "gathered by 2 domains {d22 d32}: the inliner needs exactly one consumer",
+     "profile_us": 6.1248000000000005
+    },
+    {
+     "domain": 22,
+     "shape": "div(sub(@0,#0),$0)",
+     "rows": 88,
+     "kind": "fused",
+     "treatment": "fused into {d39} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.4059999999999999
+    },
+    {
+     "domain": 23,
+     "shape": "div(sub(#0,#1),#2)",
+     "rows": 1,
+     "kind": "fused",
+     "treatment": "fused into {d24} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 1.8792000000000002
+    },
+    {
+     "domain": 24,
+     "shape": "sum(%0)",
+     "rows": 6639,
+     "kind": "reduction",
+     "treatment": "1 of 13278 members evaluated in the block from {d23 (operands in member order, epilogue)}, 13277 gathered",
+     "reason": null,
+     "profile_us": 323.6168
+    },
+    {
+     "domain": 25,
+     "shape": "mul(@0,$0)",
+     "rows": 15358,
+     "kind": "plain",
+     "treatment": "60 tile(s)",
+     "reason": "its only reader d26 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
+     "profile_us": 599.3952
+    },
+    {
+     "domain": 26,
+     "shape": "mul(@0,@1)",
+     "rows": 15358,
+     "kind": "fused",
+     "treatment": "fused into {d27 d38 d39 d47 d48 d49 d56} (evaluated per reduction block, not materialised; 30 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 18.316399999999998
+    },
+    {
+     "domain": 27,
+     "shape": "sum(%0)",
+     "rows": 1025,
+     "kind": "reduction",
+     "treatment": "15494 of 15723 members evaluated in the block from {d26 (operands in member order, epilogue) d18 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 229 gathered",
+     "reason": null,
+     "profile_us": 685.8384
+    },
+    {
+     "domain": 28,
+     "shape": "sum(^,@0,@1)",
+     "rows": 4,
+     "kind": "scan",
+     "treatment": "scan: 1 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 6.032
+    },
+    {
+     "domain": 29,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 605,
+     "kind": "plain",
+     "treatment": "3 tile(s)",
+     "reason": "605 of its rows are outputs; gathered by d36 and also a member of reduction(s) {d56}",
+     "profile_us": 55.157999999999994
+    },
+    {
+     "domain": 30,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 11,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "11 of its rows are outputs; gathered by d31 and also a member of reduction(s) {d56}",
+     "profile_us": 3.5147999999999997
+    },
+    {
+     "domain": 31,
+     "shape": "mul(@0,$0)",
+     "rows": 1406,
+     "kind": "plain",
+     "treatment": "6 tile(s)",
+     "reason": "11 of its rows are outputs; gathered by d32 and also a member of reduction(s) {d59 d61}",
+     "profile_us": 54.7984
+    },
+    {
+     "domain": 32,
+     "shape": "mul(@0,@1)",
+     "rows": 1401,
+     "kind": "fused",
+     "treatment": "fused into {d39 d47} (evaluated per reduction block, not materialised; 26 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 8.004000000000001
+    },
+    {
+     "domain": 33,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 20,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "40 of its rows are outputs",
+     "profile_us": 3.3871999999999995
+    },
+    {
+     "domain": 34,
+     "shape": "div(@0,#0)",
+     "rows": 2,
+     "kind": "fused",
+     "treatment": "fused into {d35} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 1.0208
+    },
+    {
+     "domain": 35,
+     "shape": "sum(%0)",
+     "rows": 1137,
+     "kind": "reduction",
+     "treatment": "1136 of 2287 members evaluated in the block from {d11 (operands in member order, epilogue) d34 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 1151 gathered",
+     "reason": null,
+     "profile_us": 242.44
+    },
+    {
+     "domain": 36,
+     "shape": "mul(@0,$0)",
+     "rows": 6989,
+     "kind": "plain",
+     "treatment": "28 tile(s)",
+     "reason": "605 of its rows are outputs; gathered by d37 and also a member of reduction(s) {d59 d61}",
+     "profile_us": 264.7004
+    },
+    {
+     "domain": 37,
+     "shape": "mul(@0,@1)",
+     "rows": 6384,
+     "kind": "fused",
+     "treatment": "fused into {d47 d48 d49 d56 d59 d61 d62 d63 d64 d65} (evaluated per reduction block, not materialised; 149 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 32.6192
+    },
+    {
+     "domain": 38,
+     "shape": "sum(%0)",
+     "rows": 16,
+     "kind": "reduction",
+     "treatment": "22 of 59 members evaluated in the block from {d20 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 37 gathered",
+     "reason": null,
+     "profile_us": 15.37
+    },
+    {
+     "domain": 39,
+     "shape": "sum(%0)",
+     "rows": 271,
+     "kind": "reduction",
+     "treatment": "1461 of 1575 members evaluated in the block from {d32 (operands in member order, epilogue) d22 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 114 gathered",
+     "reason": null,
+     "profile_us": 125.6744
+    },
+    {
+     "domain": 40,
+     "shape": "sum(^,@0)",
+     "rows": 4,
+     "kind": "scan",
+     "treatment": "scan: 1 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 3.3871999999999995
+    },
+    {
+     "domain": 41,
+     "shape": "mul(@0,$0)",
+     "rows": 13,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "its only reader d42 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
+     "profile_us": 1.8444
+    },
+    {
+     "domain": 42,
+     "shape": "mul(@0,@1)",
+     "rows": 13,
+     "kind": "fused",
+     "treatment": "fused into {d48 d49 d56 d62} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.9048
+    },
+    {
+     "domain": 43,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 313,
+     "kind": "plain",
+     "treatment": "2 tile(s)",
+     "reason": "589 of its rows are outputs; gathered by d52 and also a member of reduction(s) {d56 d59 d61}",
+     "profile_us": 28.4896
+    },
+    {
+     "domain": 44,
+     "shape": "mul(@0,$0)",
+     "rows": 1203,
+     "kind": "plain",
+     "treatment": "5 tile(s)",
+     "reason": "its only reader d45 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
+     "profile_us": 51.504
+    },
+    {
+     "domain": 45,
+     "shape": "mul(@0,@1)",
+     "rows": 1203,
+     "kind": "fused",
+     "treatment": "fused into {d49 d56} (evaluated per reduction block, not materialised; 22 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 7.226800000000001
+    },
+    {
+     "domain": 46,
+     "shape": "div(sub(@0,#0),$0)",
+     "rows": 6,
+     "kind": "fused",
+     "treatment": "fused into {d47} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.522
+    },
+    {
+     "domain": 47,
+     "shape": "sum(%0)",
+     "rows": 769,
+     "kind": "reduction",
+     "treatment": "4998 of 5045 members evaluated in the block from {d37 (operands in member order, epilogue) d26 (operands in member order, epilogue) d46 (operands in member order, epilogue) d32 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 47 gathered",
+     "reason": null,
+     "profile_us": 306.0428
+    },
+    {
+     "domain": 48,
+     "shape": "sum(%0)",
+     "rows": 10,
+     "kind": "reduction",
+     "treatment": "86 of 117 members evaluated in the block from {d37 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 31 gathered",
+     "reason": null,
+     "profile_us": 21.5412
+    },
+    {
+     "domain": 49,
+     "shape": "sum(%0)",
+     "rows": 269,
+     "kind": "reduction",
+     "treatment": "2314 of 2365 members evaluated in the block from {d37 (operands in member order, epilogue) d45 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 51 gathered",
+     "reason": null,
+     "profile_us": 152.3428
+    },
+    {
+     "domain": 50,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 755,
+     "kind": "plain",
+     "treatment": "3 tile(s)",
+     "reason": "1249 of its rows are outputs; gathered by d51 and also a member of reduction(s) {d56 d59 d61}",
+     "profile_us": 63.162000000000006
+    },
+    {
+     "domain": 51,
+     "shape": "mul(@0,#0)",
+     "rows": 261,
+     "kind": "plain",
+     "treatment": "2 tile(s)",
+     "reason": "261 of its rows are outputs",
+     "profile_us": 12.713600000000001
+    },
+    {
+     "domain": 52,
+     "shape": "mul(@0,$0)",
+     "rows": 44,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "37 of its rows are outputs; gathered by d55 and also a member of reduction(s) {d59 d61}",
+     "profile_us": 3.5379999999999994
+    },
+    {
+     "domain": 53,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 26,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "50 of its rows are outputs; gathered by d54 and also a member of reduction(s) {d56 d59 d61}",
+     "profile_us": 4.2688
+    },
+    {
+     "domain": 54,
+     "shape": "mul(@0,#0)",
+     "rows": 2,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "2 of its rows are outputs",
+     "profile_us": 1.6007999999999998
+    },
+    {
+     "domain": 55,
+     "shape": "mul(@0,@1)",
+     "rows": 7,
+     "kind": "fused",
+     "treatment": "fused into {d56} (evaluated per reduction block, not materialised; 2 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 2.7144
+    },
+    {
+     "domain": 56,
+     "shape": "sum(%0)",
+     "rows": 11,
+     "kind": "reduction",
+     "treatment": "143 of 1069 members evaluated in the block from {d37 (operands in member order, epilogue) d45 (operands in member order, epilogue) d55 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 926 gathered",
+     "reason": null,
+     "profile_us": 71.5488
+    },
+    {
+     "domain": 57,
+     "shape": "sub(div(sub(@0,@1),@2),@3)",
+     "rows": 9,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "9 of its rows are outputs",
+     "profile_us": 6.936800000000001
+    },
+    {
+     "domain": 58,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 265,
+     "kind": "plain",
+     "treatment": "2 tile(s)",
+     "reason": "530 of its rows are outputs",
+     "profile_us": 21.17
+    },
+    {
+     "domain": 59,
+     "shape": "sum(%0)",
+     "rows": 37,
+     "kind": "reduction",
+     "treatment": "6 of 1756 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1750 gathered",
+     "reason": null,
+     "profile_us": 59.5428
+    },
+    {
+     "domain": 60,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 5,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "10 of its rows are outputs",
+     "profile_us": 2.2852
+    },
+    {
+     "domain": 61,
+     "shape": "sum(%0)",
+     "rows": 9,
+     "kind": "reduction",
+     "treatment": "7 of 3345 members evaluated in the block from {d37 (operands in member order, epilogue)}, 3338 gathered",
+     "reason": null,
+     "profile_us": 87.9744
+    },
+    {
+     "domain": 62,
+     "shape": "sum(%0)",
+     "rows": 2,
+     "kind": "reduction",
+     "treatment": "13 of 15 members evaluated in the block from {d37 (operands in member order, epilogue) d42 (operands in member order, epilogue)}, 2 gathered",
+     "reason": null,
+     "profile_us": 6.2292
+    },
+    {
+     "domain": 63,
+     "shape": "sum(%0)",
+     "rows": 1,
+     "kind": "reduction",
+     "treatment": "5 of 6 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered",
+     "reason": null,
+     "profile_us": 3.7815999999999996
+    },
+    {
+     "domain": 64,
+     "shape": "sum(%0)",
+     "rows": 1,
+     "kind": "reduction",
+     "treatment": "5 of 6 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered",
+     "reason": null,
+     "profile_us": 3.1204
+    },
+    {
+     "domain": 65,
+     "shape": "sum(%0)",
+     "rows": 1,
+     "kind": "reduction",
+     "treatment": "5 of 6 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered",
+     "reason": null,
+     "profile_us": 2.7260000000000004
+    },
+    {
+     "domain": 66,
+     "shape": "sub(div(@0,@1),@2)",
+     "rows": 41,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "41 of its rows are outputs",
+     "profile_us": 8.0388
+    }
+   ]
+  },
+  "B64_L32": {
+   "summary_by_kind": {
+    "plain": {
+     "domains": 29,
+     "rows": 96873,
+     "profile_us": 11655.749599999997
+    },
+    "inlined": {
+     "domains": 1,
+     "rows": 16917,
+     "profile_us": 0.2668
+    },
+    "reduction": {
+     "domains": 17,
+     "rows": 27281,
+     "profile_us": 4597.079999999999
+    },
+    "scan": {
+     "domains": 5,
+     "rows": 255959,
+     "profile_us": 35068.110799999995
+    },
+    "fused": {
+     "domains": 15,
+     "rows": 26205,
+     "profile_us": 60.8188
+    }
+   },
+   "profile_runs_used": 100,
+   "domains": [
+    {
+     "domain": 0,
+     "shape": "input",
+     "rows": 148,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "78 of its rows are outputs; gathered by 5 domains {d1 d7 d12 d57 d66}: the inliner needs exactly one consumer",
+     "profile_us": 17.782799999999998
+    },
+    {
+     "domain": 1,
+     "shape": "neg(@0)",
+     "rows": 70,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "gathered 177 times for 70 rows by d3: 2.53 reads per producer row exceeds the inliner's 1.25 (it would recompute the producer)",
+     "profile_us": 4.1876
+    },
+    {
+     "domain": 2,
+     "shape": "const($0)",
+     "rows": 511,
+     "kind": "plain",
+     "treatment": "2 tile(s)",
+     "reason": "read by scan domain(s) {d10} (a scan is never fused or inlined into)",
+     "profile_us": 20.868399999999998
+    },
+    {
+     "domain": 3,
+     "shape": "exp(mul(@0,$0))",
+     "rows": 177,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "gathered by 7 domains {d6 d8 d26 d32 d37 d42 d45}: the inliner needs exactly one consumer",
+     "profile_us": 75.6552
+    },
+    {
+     "domain": 4,
+     "shape": "affine(#0;%0)",
+     "rows": 16917,
+     "kind": "inlined",
+     "treatment": "inlined into d5 (evaluated per consumer tile for the rows it gathers, not materialised): whole-domain affine",
+     "reason": null,
+     "profile_us": 0.2668
+    },
+    {
+     "domain": 5,
+     "shape": "exp(mul(neg(@0),$0))",
+     "rows": 16917,
+     "kind": "plain",
+     "treatment": "; inlines {d4} per tile",
+     "reason": "gathered by 9 domains {d6 d8 d16 d26 d32 d37 d42 d45 d55}: the inliner needs exactly one consumer",
+     "profile_us": 6313.8452
+    },
+    {
+     "domain": 6,
+     "shape": "div(sub(div(@0,@1),#0),$0)",
+     "rows": 17083,
+     "kind": "plain",
+     "treatment": "67 tile(s)",
+     "reason": "gathered by 3 domains {d7 d8 d12}: the inliner needs exactly one consumer",
+     "profile_us": 1604.6744
+    },
+    {
+     "domain": 7,
+     "shape": "sub(@0,@1)",
+     "rows": 4,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "4 of its rows are outputs",
+     "profile_us": 2.03
+    },
+    {
+     "domain": 8,
+     "shape": "mul(@0,$0)",
+     "rows": 34685,
+     "kind": "plain",
+     "treatment": "136 tile(s)",
+     "reason": "226 of its rows are outputs; read by scan domain(s) {d13} (a scan is never fused or inlined into); gathered by 8 domains {d16 d29 d30 d33 d43 d53 d58 d66}: the inliner needs exactly one consumer",
+     "profile_us": 2045.08
+    },
+    {
+     "domain": 9,
+     "shape": "sum(%0)",
+     "rows": 17076,
+     "kind": "reduction",
+     "treatment": "91930 members, all gathered",
+     "reason": null,
+     "profile_us": 2450.7204
+    },
+    {
+     "domain": 10,
+     "shape": "mul(^,@0)",
+     "rows": 255687,
+     "kind": "scan",
+     "treatment": "scan: 1102 chain(s), 262 wave(s) in 1126 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 35032.197199999995
+    },
+    {
+     "domain": 11,
+     "shape": "div(sub(@0,#0),$0)",
+     "rows": 1138,
+     "kind": "fused",
+     "treatment": "fused into {d35} (evaluated per reduction block, not materialised; 8 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 3.3176
+    },
+    {
+     "domain": 12,
+     "shape": "sub(@1,sub(#1,div(@0,#0)))",
+     "rows": 16,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "16 of its rows are outputs",
+     "profile_us": 5.312799999999999
+    },
+    {
+     "domain": 13,
+     "shape": "sum(^,@0)",
+     "rows": 8,
+     "kind": "scan",
+     "treatment": "scan: 2 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 4.0484
+    },
+    {
+     "domain": 14,
+     "shape": "mul(@0,#0)",
+     "rows": 1,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "read by scan domain(s) {d15} (a scan is never fused or inlined into)",
+     "profile_us": 1.2876000000000003
+    },
+    {
+     "domain": 15,
+     "shape": "mul(^,@0)",
+     "rows": 256,
+     "kind": "scan",
+     "treatment": "scan: 1 chain(s), 256 wave(s) in 256 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 28.3736
+    },
+    {
+     "domain": 16,
+     "shape": "mul(@0,@1)",
+     "rows": 120,
+     "kind": "fused",
+     "treatment": "fused into {d17 d27 d35 d38 d39 d47 d48 d49 d56} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.33640000000000003
+    },
+    {
+     "domain": 17,
+     "shape": "sum(%0)",
+     "rows": 7,
+     "kind": "reduction",
+     "treatment": "12 of 30 members evaluated in the block from {d16 (operands in member order, epilogue)}, 18 gathered",
+     "reason": null,
+     "profile_us": 6.4612
+    },
+    {
+     "domain": 18,
+     "shape": "div(@0,$0)",
+     "rows": 213,
+     "kind": "fused",
+     "treatment": "fused into {d27} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.39440000000000003
+    },
+    {
+     "domain": 19,
+     "shape": "mul(@0,@1)",
+     "rows": 102,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "gathered by 2 domains {d20 d21}: the inliner needs exactly one consumer",
+     "profile_us": 14.511600000000001
+    },
+    {
+     "domain": 20,
+     "shape": "div(sub(@0,#0),$0)",
+     "rows": 10,
+     "kind": "fused",
+     "treatment": "fused into {d38} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.2784
+    },
+    {
+     "domain": 21,
+     "shape": "mul(@0,@1)",
+     "rows": 94,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "gathered by 2 domains {d22 d32}: the inliner needs exactly one consumer",
+     "profile_us": 6.728
+    },
+    {
+     "domain": 22,
+     "shape": "div(sub(@0,#0),$0)",
+     "rows": 88,
+     "kind": "fused",
+     "treatment": "fused into {d39} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.22039999999999998
+    },
+    {
+     "domain": 23,
+     "shape": "div(sub(#0,#1),#2)",
+     "rows": 1,
+     "kind": "fused",
+     "treatment": "fused into {d24} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.7076
+    },
+    {
+     "domain": 24,
+     "shape": "sum(%0)",
+     "rows": 6639,
+     "kind": "reduction",
+     "treatment": "1 of 13278 members evaluated in the block from {d23 (operands in member order, epilogue)}, 13277 gathered",
+     "reason": null,
+     "profile_us": 378.74
+    },
+    {
+     "domain": 25,
+     "shape": "mul(@0,$0)",
+     "rows": 15358,
+     "kind": "plain",
+     "treatment": "60 tile(s)",
+     "reason": "its only reader d26 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
+     "profile_us": 859.2468000000001
+    },
+    {
+     "domain": 26,
+     "shape": "mul(@0,@1)",
+     "rows": 15358,
+     "kind": "fused",
+     "treatment": "fused into {d27 d38 d39 d47 d48 d49 d56} (evaluated per reduction block, not materialised; 30 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 10.091999999999999
+    },
+    {
+     "domain": 27,
+     "shape": "sum(%0)",
+     "rows": 1025,
+     "kind": "reduction",
+     "treatment": "15494 of 15723 members evaluated in the block from {d26 (operands in member order, epilogue) d18 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 229 gathered",
+     "reason": null,
+     "profile_us": 738.9083999999999
+    },
+    {
+     "domain": 28,
+     "shape": "sum(^,@0,@1)",
+     "rows": 4,
+     "kind": "scan",
+     "treatment": "scan: 1 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 2.4476
+    },
+    {
+     "domain": 29,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 605,
+     "kind": "plain",
+     "treatment": "3 tile(s)",
+     "reason": "605 of its rows are outputs; gathered by d36 and also a member of reduction(s) {d56}",
+     "profile_us": 64.13640000000001
+    },
+    {
+     "domain": 30,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 11,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "11 of its rows are outputs; gathered by d31 and also a member of reduction(s) {d56}",
+     "profile_us": 2.2968
+    },
+    {
+     "domain": 31,
+     "shape": "mul(@0,$0)",
+     "rows": 1406,
+     "kind": "plain",
+     "treatment": "6 tile(s)",
+     "reason": "11 of its rows are outputs; gathered by d32 and also a member of reduction(s) {d59 d61}",
+     "profile_us": 63.8812
+    },
+    {
+     "domain": 32,
+     "shape": "mul(@0,@1)",
+     "rows": 1401,
+     "kind": "fused",
+     "treatment": "fused into {d39 d47} (evaluated per reduction block, not materialised; 26 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 6.148
+    },
+    {
+     "domain": 33,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 20,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "40 of its rows are outputs",
+     "profile_us": 3.5147999999999997
+    },
+    {
+     "domain": 34,
+     "shape": "div(@0,#0)",
+     "rows": 2,
+     "kind": "fused",
+     "treatment": "fused into {d35} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.2552
+    },
+    {
+     "domain": 35,
+     "shape": "sum(%0)",
+     "rows": 1137,
+     "kind": "reduction",
+     "treatment": "1136 of 2287 members evaluated in the block from {d11 (operands in member order, epilogue) d34 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 1151 gathered",
+     "reason": null,
+     "profile_us": 213.19639999999998
+    },
+    {
+     "domain": 36,
+     "shape": "mul(@0,$0)",
+     "rows": 6989,
+     "kind": "plain",
+     "treatment": "28 tile(s)",
+     "reason": "605 of its rows are outputs; gathered by d37 and also a member of reduction(s) {d59 d61}",
+     "profile_us": 326.2964
+    },
+    {
+     "domain": 37,
+     "shape": "mul(@0,@1)",
+     "rows": 6384,
+     "kind": "fused",
+     "treatment": "fused into {d47 d48 d49 d56 d59 d61 d62 d63 d64 d65} (evaluated per reduction block, not materialised; 149 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 32.781600000000005
+    },
+    {
+     "domain": 38,
+     "shape": "sum(%0)",
+     "rows": 16,
+     "kind": "reduction",
+     "treatment": "22 of 59 members evaluated in the block from {d20 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 37 gathered",
+     "reason": null,
+     "profile_us": 8.0968
+    },
+    {
+     "domain": 39,
+     "shape": "sum(%0)",
+     "rows": 271,
+     "kind": "reduction",
+     "treatment": "1461 of 1575 members evaluated in the block from {d32 (operands in member order, epilogue) d22 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 114 gathered",
+     "reason": null,
+     "profile_us": 102.32359999999998
+    },
+    {
+     "domain": 40,
+     "shape": "sum(^,@0)",
+     "rows": 4,
+     "kind": "scan",
+     "treatment": "scan: 1 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+     "reason": null,
+     "profile_us": 1.044
+    },
+    {
+     "domain": 41,
+     "shape": "mul(@0,$0)",
+     "rows": 13,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "its only reader d42 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
+     "profile_us": 1.0092
+    },
+    {
+     "domain": 42,
+     "shape": "mul(@0,@1)",
+     "rows": 13,
+     "kind": "fused",
+     "treatment": "fused into {d48 d49 d56 d62} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.3132
+    },
+    {
+     "domain": 43,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 313,
+     "kind": "plain",
+     "treatment": "2 tile(s)",
+     "reason": "589 of its rows are outputs; gathered by d52 and also a member of reduction(s) {d56 d59 d61}",
+     "profile_us": 41.6092
+    },
+    {
+     "domain": 44,
+     "shape": "mul(@0,$0)",
+     "rows": 1203,
+     "kind": "plain",
+     "treatment": "5 tile(s)",
+     "reason": "its only reader d45 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
+     "profile_us": 52.6176
+    },
+    {
+     "domain": 45,
+     "shape": "mul(@0,@1)",
+     "rows": 1203,
+     "kind": "fused",
+     "treatment": "fused into {d49 d56} (evaluated per reduction block, not materialised; 22 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 4.4079999999999995
+    },
+    {
+     "domain": 46,
+     "shape": "div(sub(@0,#0),$0)",
+     "rows": 6,
+     "kind": "fused",
+     "treatment": "fused into {d47} (evaluated per reduction block, not materialised)",
+     "reason": null,
+     "profile_us": 0.29
+    },
+    {
+     "domain": 47,
+     "shape": "sum(%0)",
+     "rows": 769,
+     "kind": "reduction",
+     "treatment": "4998 of 5045 members evaluated in the block from {d37 (operands in member order, epilogue) d26 (operands in member order, epilogue) d46 (operands in member order, epilogue) d32 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 47 gathered",
+     "reason": null,
+     "profile_us": 328.45399999999995
+    },
+    {
+     "domain": 48,
+     "shape": "sum(%0)",
+     "rows": 10,
+     "kind": "reduction",
+     "treatment": "86 of 117 members evaluated in the block from {d37 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 31 gathered",
+     "reason": null,
+     "profile_us": 10.706800000000001
+    },
+    {
+     "domain": 49,
+     "shape": "sum(%0)",
+     "rows": 269,
+     "kind": "reduction",
+     "treatment": "2314 of 2365 members evaluated in the block from {d37 (operands in member order, epilogue) d45 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 51 gathered",
+     "reason": null,
+     "profile_us": 130.03599999999997
+    },
+    {
+     "domain": 50,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 755,
+     "kind": "plain",
+     "treatment": "3 tile(s)",
+     "reason": "1249 of its rows are outputs; gathered by d51 and also a member of reduction(s) {d56 d59 d61}",
+     "profile_us": 82.302
+    },
+    {
+     "domain": 51,
+     "shape": "mul(@0,#0)",
+     "rows": 261,
+     "kind": "fused",
+     "treatment": "fused into {d59 d61} (evaluated per reduction block, not materialised; 261 output rows written from the reduction blocks)",
+     "reason": null,
+     "profile_us": 0.3132
+    },
+    {
+     "domain": 52,
+     "shape": "mul(@0,$0)",
+     "rows": 44,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "37 of its rows are outputs; gathered by d55 and also a member of reduction(s) {d59 d61}",
+     "profile_us": 3.5379999999999994
+    },
+    {
+     "domain": 53,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 26,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "50 of its rows are outputs; gathered by d54 and also a member of reduction(s) {d56 d59 d61}",
+     "profile_us": 4.3732
+    },
+    {
+     "domain": 54,
+     "shape": "mul(@0,#0)",
+     "rows": 2,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "2 of its rows are outputs",
+     "profile_us": 0.58
+    },
+    {
+     "domain": 55,
+     "shape": "mul(@0,@1)",
+     "rows": 7,
+     "kind": "fused",
+     "treatment": "fused into {d56} (evaluated per reduction block, not materialised; 2 rows read elsewhere kept in 1 tile(s))",
+     "reason": null,
+     "profile_us": 0.9628
+    },
+    {
+     "domain": 56,
+     "shape": "sum(%0)",
+     "rows": 11,
+     "kind": "reduction",
+     "treatment": "143 of 1069 members evaluated in the block from {d37 (operands in member order, epilogue) d45 (operands in member order, epilogue) d55 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 926 gathered",
+     "reason": null,
+     "profile_us": 37.99
+    },
+    {
+     "domain": 57,
+     "shape": "sub(div(sub(@0,@1),@2),@3)",
+     "rows": 9,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "9 of its rows are outputs",
+     "profile_us": 3.364
+    },
+    {
+     "domain": 58,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 265,
+     "kind": "plain",
+     "treatment": "2 tile(s)",
+     "reason": "530 of its rows are outputs",
+     "profile_us": 26.378399999999996
+    },
+    {
+     "domain": 59,
+     "shape": "sum(%0)",
+     "rows": 37,
+     "kind": "reduction",
+     "treatment": "241 of 1756 members evaluated in the block from {d37 (operands in member order, epilogue) d51 (operands in member order, epilogue)}, 1515 gathered",
+     "reason": null,
+     "profile_us": 109.63159999999999
+    },
+    {
+     "domain": 60,
+     "shape": "mul($0,sub(@0,@1))",
+     "rows": 5,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "10 of its rows are outputs",
+     "profile_us": 0.8236
+    },
+    {
+     "domain": 61,
+     "shape": "sum(%0)",
+     "rows": 9,
+     "kind": "reduction",
+     "treatment": "294 of 3345 members evaluated in the block from {d37 (operands in member order, epilogue) d51 (operands in member order, epilogue)}, 3051 gathered",
+     "reason": null,
+     "profile_us": 75.2724
+    },
+    {
+     "domain": 62,
+     "shape": "sum(%0)",
+     "rows": 2,
+     "kind": "reduction",
+     "treatment": "13 of 15 members evaluated in the block from {d37 (operands in member order, epilogue) d42 (operands in member order, epilogue)}, 2 gathered",
+     "reason": null,
+     "profile_us": 2.8188
+    },
+    {
+     "domain": 63,
+     "shape": "sum(%0)",
+     "rows": 1,
+     "kind": "reduction",
+     "treatment": "5 of 6 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered",
+     "reason": null,
+     "profile_us": 1.2876000000000003
+    },
+    {
+     "domain": 64,
+     "shape": "sum(%0)",
+     "rows": 1,
+     "kind": "reduction",
+     "treatment": "5 of 6 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered",
+     "reason": null,
+     "profile_us": 1.2876000000000003
+    },
+    {
+     "domain": 65,
+     "shape": "sum(%0)",
+     "rows": 1,
+     "kind": "reduction",
+     "treatment": "5 of 6 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered",
+     "reason": null,
+     "profile_us": 1.1484
+    },
+    {
+     "domain": 66,
+     "shape": "sub(div(@0,@1),@2)",
+     "rows": 41,
+     "kind": "plain",
+     "treatment": "1 tile(s)",
+     "reason": "41 of its rows are outputs",
+     "profile_us": 7.8184000000000005
+    }
+   ]
+  }
+ }
+}

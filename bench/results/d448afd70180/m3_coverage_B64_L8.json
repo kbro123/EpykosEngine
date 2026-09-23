@@ -1,0 +1,2752 @@
+{
+ "format": "epykos-exec-coverage 1",
+ "profile_runs": 116,
+ "profile_runs_used": 100,
+ "domains": [
+  {
+   "domain": 0,
+   "shape": "input",
+   "rows": 148,
+   "level": 0,
+   "reads": [],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "input -> values",
+   "facts": {
+    "shape": "input",
+    "rows": 148,
+    "level": 0,
+    "scan": false,
+    "chains": 0,
+    "last_op": "input",
+    "steps": 1,
+    "reads": [],
+    "gather_readers": [
+     1,
+     7,
+     12,
+     57,
+     66
+    ],
+    "segment_readers": [
+     4
+    ],
+    "scan_readers": [],
+    "output_rows": 78,
+    "gather_refs": 140
+   },
+   "reason": "78 of its rows are outputs; gathered by 5 domains {d1 d7 d12 d57 d66}: the inliner needs exactly one consumer",
+   "profile_us": 38.106
+  },
+  {
+   "domain": 1,
+   "shape": "neg(@0)",
+   "rows": 70,
+   "level": 0,
+   "reads": [
+    0
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "neg(gat) -> values",
+   "facts": {
+    "shape": "neg(@0)",
+    "rows": 70,
+    "level": 0,
+    "scan": false,
+    "chains": 0,
+    "last_op": "neg",
+    "steps": 1,
+    "reads": [
+     0
+    ],
+    "gather_readers": [
+     3
+    ],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 177
+   },
+   "reason": "inlinable into d3, but row fusion is off at lane tile 8 (row_fusion_pays: L = 1 or L >= 16)",
+   "profile_us": 6.322
+  },
+  {
+   "domain": 2,
+   "shape": "const($0)",
+   "rows": 511,
+   "level": 0,
+   "reads": [],
+   "kind": "plain",
+   "treatment": "2 tile(s)",
+   "steps": "const(col) -> values",
+   "facts": {
+    "shape": "const($0)",
+    "rows": 511,
+    "level": 0,
+    "scan": false,
+    "chains": 0,
+    "last_op": "const",
+    "steps": 1,
+    "reads": [],
+    "gather_readers": [
+     10
+    ],
+    "segment_readers": [
+     9,
+     24,
+     27,
+     35,
+     38,
+     39,
+     47
+    ],
+    "scan_readers": [
+     10
+    ],
+    "output_rows": 0,
+    "gather_refs": 1102
+   },
+   "reason": "read by scan domain(s) {d10} (a scan is never fused or inlined into)",
+   "profile_us": 16.8664
+  },
+  {
+   "domain": 3,
+   "shape": "exp(mul(@0,$0))",
+   "rows": 177,
+   "level": 0,
+   "reads": [
+    1
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "mul(gat,col) -> s0; exp(vec) -> values",
+   "facts": {
+    "shape": "exp(mul(@0,$0))",
+    "rows": 177,
+    "level": 0,
+    "scan": false,
+    "chains": 0,
+    "last_op": "exp",
+    "steps": 2,
+    "reads": [
+     1
+    ],
+    "gather_readers": [
+     6,
+     8,
+     26,
+     32,
+     37,
+     42,
+     45
+    ],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 7918
+   },
+   "reason": "gathered by 7 domains {d6 d8 d26 d32 d37 d42 d45}: the inliner needs exactly one consumer",
+   "profile_us": 81.58279999999999
+  },
+  {
+   "domain": 4,
+   "shape": "affine(#0;%0)",
+   "rows": 16917,
+   "level": 0,
+   "reads": [
+    0
+   ],
+   "kind": "reduction",
+   "treatment": "33834 members, all gathered",
+   "steps": "",
+   "facts": {
+    "shape": "affine(#0;%0)",
+    "rows": 16917,
+    "level": 0,
+    "scan": false,
+    "chains": 0,
+    "last_op": "affine",
+    "steps": 1,
+    "reads": [
+     0
+    ],
+    "gather_readers": [
+     5
+    ],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 16917
+   },
+   "reason": null,
+   "profile_us": 853.5512000000001
+  },
+  {
+   "domain": 5,
+   "shape": "exp(mul(neg(@0),$0))",
+   "rows": 16917,
+   "level": 0,
+   "reads": [
+    4
+   ],
+   "kind": "plain",
+   "treatment": "67 tile(s)",
+   "steps": "mul(neg(gat),col) -> s1; exp(vec) -> values",
+   "facts": {
+    "shape": "exp(mul(neg(@0),$0))",
+    "rows": 16917,
+    "level": 0,
+    "scan": false,
+    "chains": 0,
+    "last_op": "exp",
+    "steps": 3,
+    "reads": [
+     4
+    ],
+    "gather_readers": [
+     6,
+     8,
+     16,
+     26,
+     32,
+     37,
+     42,
+     45,
+     55
+    ],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 62518
+   },
+   "reason": "gathered by 9 domains {d6 d8 d16 d26 d32 d37 d42 d45 d55}: the inliner needs exactly one consumer",
+   "profile_us": 6600.4348
+  },
+  {
+   "domain": 6,
+   "shape": "div(sub(div(@0,@1),#0),$0)",
+   "rows": 17083,
+   "level": 0,
+   "reads": [
+    3,
+    5
+   ],
+   "kind": "plain",
+   "treatment": "67 tile(s)",
+   "steps": "sub(div(gat,gat),lit) -> s1; div(vec,col) -> values",
+   "facts": {
+    "shape": "div(sub(div(@0,@1),#0),$0)",
+    "rows": 17083,
+    "level": 0,
+    "scan": false,
+    "chains": 0,
+    "last_op": "div",
+    "steps": 3,
+    "reads": [
+     3,
+     5
+    ],
+    "gather_readers": [
+     7,
+     8,
+     12
+    ],
+    "segment_readers": [
+     24
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 22907
+   },
+   "reason": "gathered by 3 domains {d7 d8 d12}: the inliner needs exactly one consumer",
+   "profile_us": 1289.5604
+  },
+  {
+   "domain": 7,
+   "shape": "sub(@0,@1)",
+   "rows": 4,
+   "level": 0,
+   "reads": [
+    0,
+    6
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "sub(gat,gat) -> values",
+   "facts": {
+    "shape": "sub(@0,@1)",
+    "rows": 4,
+    "level": 0,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sub",
+    "steps": 1,
+    "reads": [
+     0,
+     6
+    ],
+    "gather_readers": [],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 4,
+    "gather_refs": 0
+   },
+   "reason": "4 of its rows are outputs",
+   "profile_us": 3.306
+  },
+  {
+   "domain": 8,
+   "shape": "mul(@0,$0)",
+   "rows": 34685,
+   "level": 0,
+   "reads": [
+    3,
+    5,
+    6
+   ],
+   "kind": "plain",
+   "treatment": "136 tile(s)",
+   "steps": "mul(gat,col) -> values",
+   "facts": {
+    "shape": "mul(@0,$0)",
+    "rows": 34685,
+    "level": 0,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     3,
+     5,
+     6
+    ],
+    "gather_readers": [
+     13,
+     16,
+     29,
+     30,
+     33,
+     43,
+     53,
+     58,
+     66
+    ],
+    "segment_readers": [
+     9,
+     17,
+     27,
+     35,
+     38,
+     39,
+     47,
+     48,
+     49,
+     56
+    ],
+    "scan_readers": [
+     13
+    ],
+    "output_rows": 226,
+    "gather_refs": 366
+   },
+   "reason": "226 of its rows are outputs; read by scan domain(s) {d13} (a scan is never fused or inlined into); gathered by 8 domains {d16 d29 d30 d33 d43 d53 d58 d66}: the inliner needs exactly one consumer",
+   "profile_us": 1598.0740000000003
+  },
+  {
+   "domain": 9,
+   "shape": "sum(%0)",
+   "rows": 17076,
+   "level": 1,
+   "reads": [
+    2,
+    8
+   ],
+   "kind": "reduction",
+   "treatment": "91930 members, all gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 17076,
+    "level": 1,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     2,
+     8
+    ],
+    "gather_readers": [
+     10,
+     14,
+     15,
+     18,
+     19,
+     21,
+     29,
+     32,
+     43,
+     50,
+     53,
+     57,
+     58,
+     60,
+     66
+    ],
+    "segment_readers": [
+     17
+    ],
+    "scan_readers": [
+     10,
+     15
+    ],
+    "output_rows": 1562,
+    "gather_refs": 257924
+   },
+   "reason": null,
+   "profile_us": 1818.88
+  },
+  {
+   "domain": 10,
+   "shape": "mul(^,@0)",
+   "rows": 255687,
+   "level": 2,
+   "reads": [
+    2,
+    9,
+    10
+   ],
+   "kind": "scan",
+   "treatment": "scan: 1102 chain(s), 262 wave(s) in 1126 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+   "steps": "mul(gat,gat) -> values",
+   "facts": {
+    "shape": "mul(^,@0)",
+    "rows": 255687,
+    "level": 2,
+    "scan": true,
+    "chains": 1102,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     2,
+     9,
+     10
+    ],
+    "gather_readers": [
+     11,
+     19
+    ],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 1240
+   },
+   "reason": null,
+   "profile_us": 36099.2464
+  },
+  {
+   "domain": 11,
+   "shape": "div(sub(@0,#0),$0)",
+   "rows": 1138,
+   "level": 3,
+   "reads": [
+    10
+   ],
+   "kind": "fused",
+   "treatment": "fused into {d35} (evaluated per reduction block, not materialised; 8 rows read elsewhere kept in 1 tile(s))",
+   "steps": "div(sub(gat,lit),col) -> member",
+   "facts": {
+    "shape": "div(sub(@0,#0),$0)",
+    "rows": 1138,
+    "level": 3,
+    "scan": false,
+    "chains": 0,
+    "last_op": "div",
+    "steps": 2,
+    "reads": [
+     10
+    ],
+    "gather_readers": [
+     12
+    ],
+    "segment_readers": [
+     35
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 8
+   },
+   "reason": null,
+   "profile_us": 6.8208
+  },
+  {
+   "domain": 12,
+   "shape": "sub(@1,sub(#1,div(@0,#0)))",
+   "rows": 16,
+   "level": 0,
+   "reads": [
+    0,
+    6,
+    11
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "sub(lit,div(gat,lit)) -> s1; sub(gat,vec) -> values",
+   "facts": {
+    "shape": "sub(@1,sub(#1,div(@0,#0)))",
+    "rows": 16,
+    "level": 0,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sub",
+    "steps": 3,
+    "reads": [
+     0,
+     6,
+     11
+    ],
+    "gather_readers": [],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 16,
+    "gather_refs": 0
+   },
+   "reason": "16 of its rows are outputs",
+   "profile_us": 10.556
+  },
+  {
+   "domain": 13,
+   "shape": "sum(^,@0)",
+   "rows": 8,
+   "level": 1,
+   "reads": [
+    8,
+    13
+   ],
+   "kind": "scan",
+   "treatment": "scan: 2 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+   "steps": "sum:add(gat,gat) -> values",
+   "facts": {
+    "shape": "sum(^,@0)",
+    "rows": 8,
+    "level": 1,
+    "scan": true,
+    "chains": 2,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     8,
+     13
+    ],
+    "gather_readers": [
+     66
+    ],
+    "segment_readers": [
+     17
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 8
+   },
+   "reason": null,
+   "profile_us": 6.983199999999999
+  },
+  {
+   "domain": 14,
+   "shape": "mul(@0,#0)",
+   "rows": 1,
+   "level": 2,
+   "reads": [
+    9
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "mul(gat,lit) -> values",
+   "facts": {
+    "shape": "mul(@0,#0)",
+    "rows": 1,
+    "level": 2,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     9
+    ],
+    "gather_readers": [
+     15
+    ],
+    "segment_readers": [],
+    "scan_readers": [
+     15
+    ],
+    "output_rows": 0,
+    "gather_refs": 1
+   },
+   "reason": "read by scan domain(s) {d15} (a scan is never fused or inlined into)",
+   "profile_us": 3.2132
+  },
+  {
+   "domain": 15,
+   "shape": "mul(^,@0)",
+   "rows": 256,
+   "level": 3,
+   "reads": [
+    9,
+    14,
+    15
+   ],
+   "kind": "scan",
+   "treatment": "scan: 1 chain(s), 256 wave(s) in 256 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+   "steps": "mul(gat,gat) -> values",
+   "facts": {
+    "shape": "mul(^,@0)",
+    "rows": 256,
+    "level": 3,
+    "scan": true,
+    "chains": 1,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     9,
+     14,
+     15
+    ],
+    "gather_readers": [
+     20
+    ],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 1
+   },
+   "reason": null,
+   "profile_us": 59.0788
+  },
+  {
+   "domain": 16,
+   "shape": "mul(@0,@1)",
+   "rows": 120,
+   "level": 1,
+   "reads": [
+    5,
+    8
+   ],
+   "kind": "fused",
+   "treatment": "fused into {d17 d27 d35 d38 d39 d47 d48 d49 d56} (evaluated per reduction block, not materialised)",
+   "steps": "mul(gat,gat) -> member",
+   "facts": {
+    "shape": "mul(@0,@1)",
+    "rows": 120,
+    "level": 1,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     5,
+     8
+    ],
+    "gather_readers": [],
+    "segment_readers": [
+     17,
+     27,
+     35,
+     38,
+     39,
+     47,
+     48,
+     49,
+     56
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 0
+   },
+   "reason": null,
+   "profile_us": 1.16
+  },
+  {
+   "domain": 17,
+   "shape": "sum(%0)",
+   "rows": 7,
+   "level": 2,
+   "reads": [
+    8,
+    9,
+    13,
+    16
+   ],
+   "kind": "reduction",
+   "treatment": "12 of 30 members evaluated in the block from {d16 (operands in member order, epilogue)}, 18 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 7,
+    "level": 2,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     8,
+     9,
+     13,
+     16
+    ],
+    "gather_readers": [
+     34,
+     57,
+     66
+    ],
+    "segment_readers": [
+     27
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 7
+   },
+   "reason": null,
+   "profile_us": 13.873600000000001
+  },
+  {
+   "domain": 18,
+   "shape": "div(@0,$0)",
+   "rows": 213,
+   "level": 2,
+   "reads": [
+    9
+   ],
+   "kind": "fused",
+   "treatment": "fused into {d27} (evaluated per reduction block, not materialised)",
+   "steps": "div(gat,col) -> member",
+   "facts": {
+    "shape": "div(@0,$0)",
+    "rows": 213,
+    "level": 2,
+    "scan": false,
+    "chains": 0,
+    "last_op": "div",
+    "steps": 1,
+    "reads": [
+     9
+    ],
+    "gather_readers": [],
+    "segment_readers": [
+     27
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 0
+   },
+   "reason": null,
+   "profile_us": 0.8236
+  },
+  {
+   "domain": 19,
+   "shape": "mul(@0,@1)",
+   "rows": 102,
+   "level": 3,
+   "reads": [
+    9,
+    10
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "mul(gat,gat) -> values",
+   "facts": {
+    "shape": "mul(@0,@1)",
+    "rows": 102,
+    "level": 3,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     9,
+     10
+    ],
+    "gather_readers": [
+     20,
+     21
+    ],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 103
+   },
+   "reason": "gathered by 2 domains {d20 d21}: the inliner needs exactly one consumer",
+   "profile_us": 11.750800000000002
+  },
+  {
+   "domain": 20,
+   "shape": "div(sub(@0,#0),$0)",
+   "rows": 10,
+   "level": 4,
+   "reads": [
+    15,
+    19
+   ],
+   "kind": "fused",
+   "treatment": "fused into {d38} (evaluated per reduction block, not materialised)",
+   "steps": "div(sub(gat,lit),col) -> member",
+   "facts": {
+    "shape": "div(sub(@0,#0),$0)",
+    "rows": 10,
+    "level": 4,
+    "scan": false,
+    "chains": 0,
+    "last_op": "div",
+    "steps": 2,
+    "reads": [
+     15,
+     19
+    ],
+    "gather_readers": [],
+    "segment_readers": [
+     38
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 0
+   },
+   "reason": null,
+   "profile_us": 0.5451999999999999
+  },
+  {
+   "domain": 21,
+   "shape": "mul(@0,@1)",
+   "rows": 94,
+   "level": 4,
+   "reads": [
+    9,
+    19
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "mul(gat,gat) -> values",
+   "facts": {
+    "shape": "mul(@0,@1)",
+    "rows": 94,
+    "level": 4,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     9,
+     19
+    ],
+    "gather_readers": [
+     22,
+     32
+    ],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 94
+   },
+   "reason": "gathered by 2 domains {d22 d32}: the inliner needs exactly one consumer",
+   "profile_us": 6.1248000000000005
+  },
+  {
+   "domain": 22,
+   "shape": "div(sub(@0,#0),$0)",
+   "rows": 88,
+   "level": 5,
+   "reads": [
+    21
+   ],
+   "kind": "fused",
+   "treatment": "fused into {d39} (evaluated per reduction block, not materialised)",
+   "steps": "div(sub(gat,lit),col) -> member",
+   "facts": {
+    "shape": "div(sub(@0,#0),$0)",
+    "rows": 88,
+    "level": 5,
+    "scan": false,
+    "chains": 0,
+    "last_op": "div",
+    "steps": 2,
+    "reads": [
+     21
+    ],
+    "gather_readers": [],
+    "segment_readers": [
+     39
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 0
+   },
+   "reason": null,
+   "profile_us": 0.4059999999999999
+  },
+  {
+   "domain": 23,
+   "shape": "div(sub(#0,#1),#2)",
+   "rows": 1,
+   "level": 0,
+   "reads": [],
+   "kind": "fused",
+   "treatment": "fused into {d24} (evaluated per reduction block, not materialised)",
+   "steps": "sub(lit,lit) -> s0; div(vec,lit) -> member",
+   "facts": {
+    "shape": "div(sub(#0,#1),#2)",
+    "rows": 1,
+    "level": 0,
+    "scan": false,
+    "chains": 0,
+    "last_op": "div",
+    "steps": 2,
+    "reads": [],
+    "gather_readers": [],
+    "segment_readers": [
+     24
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 0
+   },
+   "reason": null,
+   "profile_us": 1.8792000000000002
+  },
+  {
+   "domain": 24,
+   "shape": "sum(%0)",
+   "rows": 6639,
+   "level": 0,
+   "reads": [
+    2,
+    6,
+    23
+   ],
+   "kind": "reduction",
+   "treatment": "1 of 13278 members evaluated in the block from {d23 (operands in member order, epilogue)}, 13277 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 6639,
+    "level": 0,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     2,
+     6,
+     23
+    ],
+    "gather_readers": [
+     25
+    ],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 15358
+   },
+   "reason": null,
+   "profile_us": 323.6168
+  },
+  {
+   "domain": 25,
+   "shape": "mul(@0,$0)",
+   "rows": 15358,
+   "level": 1,
+   "reads": [
+    24
+   ],
+   "kind": "plain",
+   "treatment": "60 tile(s)",
+   "steps": "mul(gat,col) -> values",
+   "facts": {
+    "shape": "mul(@0,$0)",
+    "rows": 15358,
+    "level": 1,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     24
+    ],
+    "gather_readers": [
+     26
+    ],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 15358
+   },
+   "reason": "its only reader d26 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
+   "profile_us": 599.3952
+  },
+  {
+   "domain": 26,
+   "shape": "mul(@0,@1)",
+   "rows": 15358,
+   "level": 2,
+   "reads": [
+    3,
+    5,
+    25
+   ],
+   "kind": "fused",
+   "treatment": "fused into {d27 d38 d39 d47 d48 d49 d56} (evaluated per reduction block, not materialised; 30 rows read elsewhere kept in 1 tile(s))",
+   "steps": "mul(gat,gat) -> member",
+   "facts": {
+    "shape": "mul(@0,@1)",
+    "rows": 15358,
+    "level": 2,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     3,
+     5,
+     25
+    ],
+    "gather_readers": [
+     28,
+     29,
+     30
+    ],
+    "segment_readers": [
+     27,
+     38,
+     39,
+     47,
+     48,
+     49,
+     56
+    ],
+    "scan_readers": [
+     28
+    ],
+    "output_rows": 22,
+    "gather_refs": 30
+   },
+   "reason": null,
+   "profile_us": 18.316399999999998
+  },
+  {
+   "domain": 27,
+   "shape": "sum(%0)",
+   "rows": 1025,
+   "level": 3,
+   "reads": [
+    2,
+    8,
+    16,
+    17,
+    18,
+    26
+   ],
+   "kind": "reduction",
+   "treatment": "15494 of 15723 members evaluated in the block from {d26 (operands in member order, epilogue) d18 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 229 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 1025,
+    "level": 3,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     2,
+     8,
+     16,
+     17,
+     18,
+     26
+    ],
+    "gather_readers": [
+     28,
+     29,
+     31,
+     57,
+     66
+    ],
+    "segment_readers": [
+     35
+    ],
+    "scan_readers": [
+     28
+    ],
+    "output_rows": 806,
+    "gather_refs": 2208
+   },
+   "reason": null,
+   "profile_us": 685.8384
+  },
+  {
+   "domain": 28,
+   "shape": "sum(^,@0,@1)",
+   "rows": 4,
+   "level": 4,
+   "reads": [
+    26,
+    27,
+    28
+   ],
+   "kind": "scan",
+   "treatment": "scan: 1 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+   "steps": "sum:add(gat,gat) -> s0; sum:add(vec,gat) -> values",
+   "facts": {
+    "shape": "sum(^,@0,@1)",
+    "rows": 4,
+    "level": 4,
+    "scan": true,
+    "chains": 1,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     26,
+     27,
+     28
+    ],
+    "gather_readers": [
+     57,
+     66
+    ],
+    "segment_readers": [
+     38
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 7
+   },
+   "reason": null,
+   "profile_us": 6.032
+  },
+  {
+   "domain": 29,
+   "shape": "mul($0,sub(@0,@1))",
+   "rows": 605,
+   "level": 4,
+   "reads": [
+    8,
+    9,
+    26,
+    27
+   ],
+   "kind": "plain",
+   "treatment": "3 tile(s)",
+   "steps": "mul(sub(gat,gat),col) -> values",
+   "facts": {
+    "shape": "mul($0,sub(@0,@1))",
+    "rows": 605,
+    "level": 4,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 2,
+    "reads": [
+     8,
+     9,
+     26,
+     27
+    ],
+    "gather_readers": [
+     36
+    ],
+    "segment_readers": [
+     56
+    ],
+    "scan_readers": [],
+    "output_rows": 605,
+    "gather_refs": 605
+   },
+   "reason": "605 of its rows are outputs; gathered by d36 and also a member of reduction(s) {d56}",
+   "profile_us": 55.157999999999994
+  },
+  {
+   "domain": 30,
+   "shape": "mul($0,sub(@0,@1))",
+   "rows": 11,
+   "level": 3,
+   "reads": [
+    8,
+    26
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "mul(sub(gat,gat),col) -> values",
+   "facts": {
+    "shape": "mul($0,sub(@0,@1))",
+    "rows": 11,
+    "level": 3,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 2,
+    "reads": [
+     8,
+     26
+    ],
+    "gather_readers": [
+     31
+    ],
+    "segment_readers": [
+     56
+    ],
+    "scan_readers": [],
+    "output_rows": 11,
+    "gather_refs": 11
+   },
+   "reason": "11 of its rows are outputs; gathered by d31 and also a member of reduction(s) {d56}",
+   "profile_us": 3.5147999999999997
+  },
+  {
+   "domain": 31,
+   "shape": "mul(@0,$0)",
+   "rows": 1406,
+   "level": 4,
+   "reads": [
+    27,
+    30
+   ],
+   "kind": "plain",
+   "treatment": "6 tile(s)",
+   "steps": "mul(gat,col) -> values",
+   "facts": {
+    "shape": "mul(@0,$0)",
+    "rows": 1406,
+    "level": 4,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     27,
+     30
+    ],
+    "gather_readers": [
+     32
+    ],
+    "segment_readers": [
+     59,
+     61
+    ],
+    "scan_readers": [],
+    "output_rows": 11,
+    "gather_refs": 1395
+   },
+   "reason": "11 of its rows are outputs; gathered by d32 and also a member of reduction(s) {d59 d61}",
+   "profile_us": 54.7984
+  },
+  {
+   "domain": 32,
+   "shape": "mul(@0,@1)",
+   "rows": 1401,
+   "level": 5,
+   "reads": [
+    3,
+    5,
+    9,
+    21,
+    31
+   ],
+   "kind": "fused",
+   "treatment": "fused into {d39 d47} (evaluated per reduction block, not materialised; 26 rows read elsewhere kept in 1 tile(s))",
+   "steps": "mul(gat,gat) -> member",
+   "facts": {
+    "shape": "mul(@0,@1)",
+    "rows": 1401,
+    "level": 5,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     3,
+     5,
+     9,
+     21,
+     31
+    ],
+    "gather_readers": [
+     33,
+     46
+    ],
+    "segment_readers": [
+     39,
+     47
+    ],
+    "scan_readers": [],
+    "output_rows": 20,
+    "gather_refs": 26
+   },
+   "reason": null,
+   "profile_us": 8.004000000000001
+  },
+  {
+   "domain": 33,
+   "shape": "mul($0,sub(@0,@1))",
+   "rows": 20,
+   "level": 6,
+   "reads": [
+    8,
+    32
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "mul(sub(gat,gat),col) -> values",
+   "facts": {
+    "shape": "mul($0,sub(@0,@1))",
+    "rows": 20,
+    "level": 6,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 2,
+    "reads": [
+     8,
+     32
+    ],
+    "gather_readers": [],
+    "segment_readers": [
+     59,
+     61
+    ],
+    "scan_readers": [],
+    "output_rows": 40,
+    "gather_refs": 0
+   },
+   "reason": "40 of its rows are outputs",
+   "profile_us": 3.3871999999999995
+  },
+  {
+   "domain": 34,
+   "shape": "div(@0,#0)",
+   "rows": 2,
+   "level": 3,
+   "reads": [
+    17
+   ],
+   "kind": "fused",
+   "treatment": "fused into {d35} (evaluated per reduction block, not materialised)",
+   "steps": "div(gat,lit) -> member",
+   "facts": {
+    "shape": "div(@0,#0)",
+    "rows": 2,
+    "level": 3,
+    "scan": false,
+    "chains": 0,
+    "last_op": "div",
+    "steps": 1,
+    "reads": [
+     17
+    ],
+    "gather_readers": [],
+    "segment_readers": [
+     35
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 0
+   },
+   "reason": null,
+   "profile_us": 1.0208
+  },
+  {
+   "domain": 35,
+   "shape": "sum(%0)",
+   "rows": 1137,
+   "level": 4,
+   "reads": [
+    2,
+    8,
+    11,
+    16,
+    27,
+    34
+   ],
+   "kind": "reduction",
+   "treatment": "1136 of 2287 members evaluated in the block from {d11 (operands in member order, epilogue) d34 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 1151 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 1137,
+    "level": 4,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     2,
+     8,
+     11,
+     16,
+     27,
+     34
+    ],
+    "gather_readers": [
+     36,
+     57,
+     66
+    ],
+    "segment_readers": [
+     38
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 6389
+   },
+   "reason": null,
+   "profile_us": 242.44
+  },
+  {
+   "domain": 36,
+   "shape": "mul(@0,$0)",
+   "rows": 6989,
+   "level": 5,
+   "reads": [
+    29,
+    35
+   ],
+   "kind": "plain",
+   "treatment": "28 tile(s)",
+   "steps": "mul(gat,col) -> values",
+   "facts": {
+    "shape": "mul(@0,$0)",
+    "rows": 6989,
+    "level": 5,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     29,
+     35
+    ],
+    "gather_readers": [
+     37
+    ],
+    "segment_readers": [
+     59,
+     61
+    ],
+    "scan_readers": [],
+    "output_rows": 605,
+    "gather_refs": 6384
+   },
+   "reason": "605 of its rows are outputs; gathered by d37 and also a member of reduction(s) {d59 d61}",
+   "profile_us": 264.7004
+  },
+  {
+   "domain": 37,
+   "shape": "mul(@0,@1)",
+   "rows": 6384,
+   "level": 6,
+   "reads": [
+    3,
+    5,
+    36
+   ],
+   "kind": "fused",
+   "treatment": "fused into {d47 d48 d49 d56 d59 d61 d62 d63 d64 d65} (evaluated per reduction block, not materialised; 149 rows read elsewhere kept in 1 tile(s))",
+   "steps": "mul(gat,gat) -> member",
+   "facts": {
+    "shape": "mul(@0,@1)",
+    "rows": 6384,
+    "level": 6,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     3,
+     5,
+     36
+    ],
+    "gather_readers": [
+     40,
+     43,
+     66
+    ],
+    "segment_readers": [
+     47,
+     48,
+     49,
+     56,
+     59,
+     61,
+     62,
+     63,
+     64,
+     65
+    ],
+    "scan_readers": [
+     40
+    ],
+    "output_rows": 136,
+    "gather_refs": 150
+   },
+   "reason": null,
+   "profile_us": 32.6192
+  },
+  {
+   "domain": 38,
+   "shape": "sum(%0)",
+   "rows": 16,
+   "level": 5,
+   "reads": [
+    2,
+    8,
+    16,
+    20,
+    26,
+    28,
+    35
+   ],
+   "kind": "reduction",
+   "treatment": "22 of 59 members evaluated in the block from {d20 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 37 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 16,
+    "level": 5,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     2,
+     8,
+     16,
+     20,
+     26,
+     28,
+     35
+    ],
+    "gather_readers": [
+     41,
+     57,
+     66
+    ],
+    "segment_readers": [
+     39
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 20
+   },
+   "reason": null,
+   "profile_us": 15.37
+  },
+  {
+   "domain": 39,
+   "shape": "sum(%0)",
+   "rows": 271,
+   "level": 6,
+   "reads": [
+    2,
+    8,
+    16,
+    22,
+    26,
+    32,
+    38
+   ],
+   "kind": "reduction",
+   "treatment": "1461 of 1575 members evaluated in the block from {d32 (operands in member order, epilogue) d22 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 114 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 271,
+    "level": 6,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     2,
+     8,
+     16,
+     22,
+     26,
+     32,
+     38
+    ],
+    "gather_readers": [
+     43,
+     44,
+     57,
+     66
+    ],
+    "segment_readers": [
+     47
+    ],
+    "scan_readers": [],
+    "output_rows": 177,
+    "gather_refs": 1387
+   },
+   "reason": null,
+   "profile_us": 125.6744
+  },
+  {
+   "domain": 40,
+   "shape": "sum(^,@0)",
+   "rows": 4,
+   "level": 7,
+   "reads": [
+    37,
+    40
+   ],
+   "kind": "scan",
+   "treatment": "scan: 1 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes)",
+   "steps": "sum:add(gat,gat) -> values",
+   "facts": {
+    "shape": "sum(^,@0)",
+    "rows": 4,
+    "level": 7,
+    "scan": true,
+    "chains": 1,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     37,
+     40
+    ],
+    "gather_readers": [
+     66
+    ],
+    "segment_readers": [
+     48
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 4
+   },
+   "reason": null,
+   "profile_us": 3.3871999999999995
+  },
+  {
+   "domain": 41,
+   "shape": "mul(@0,$0)",
+   "rows": 13,
+   "level": 6,
+   "reads": [
+    38
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "mul(gat,col) -> values",
+   "facts": {
+    "shape": "mul(@0,$0)",
+    "rows": 13,
+    "level": 6,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     38
+    ],
+    "gather_readers": [
+     42
+    ],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 13
+   },
+   "reason": "its only reader d42 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
+   "profile_us": 1.8444
+  },
+  {
+   "domain": 42,
+   "shape": "mul(@0,@1)",
+   "rows": 13,
+   "level": 7,
+   "reads": [
+    3,
+    5,
+    41
+   ],
+   "kind": "fused",
+   "treatment": "fused into {d48 d49 d56 d62} (evaluated per reduction block, not materialised)",
+   "steps": "mul(gat,gat) -> member",
+   "facts": {
+    "shape": "mul(@0,@1)",
+    "rows": 13,
+    "level": 7,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     3,
+     5,
+     41
+    ],
+    "gather_readers": [],
+    "segment_readers": [
+     48,
+     49,
+     56,
+     62
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 0
+   },
+   "reason": null,
+   "profile_us": 0.9048
+  },
+  {
+   "domain": 43,
+   "shape": "mul($0,sub(@0,@1))",
+   "rows": 313,
+   "level": 7,
+   "reads": [
+    8,
+    9,
+    37,
+    39
+   ],
+   "kind": "plain",
+   "treatment": "2 tile(s)",
+   "steps": "mul(sub(gat,gat),col) -> values",
+   "facts": {
+    "shape": "mul($0,sub(@0,@1))",
+    "rows": 313,
+    "level": 7,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 2,
+    "reads": [
+     8,
+     9,
+     37,
+     39
+    ],
+    "gather_readers": [
+     52
+    ],
+    "segment_readers": [
+     56,
+     59,
+     61
+    ],
+    "scan_readers": [],
+    "output_rows": 589,
+    "gather_refs": 37
+   },
+   "reason": "589 of its rows are outputs; gathered by d52 and also a member of reduction(s) {d56 d59 d61}",
+   "profile_us": 28.4896
+  },
+  {
+   "domain": 44,
+   "shape": "mul(@0,$0)",
+   "rows": 1203,
+   "level": 7,
+   "reads": [
+    39
+   ],
+   "kind": "plain",
+   "treatment": "5 tile(s)",
+   "steps": "mul(gat,col) -> values",
+   "facts": {
+    "shape": "mul(@0,$0)",
+    "rows": 1203,
+    "level": 7,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     39
+    ],
+    "gather_readers": [
+     45
+    ],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 1203
+   },
+   "reason": "its only reader d45 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
+   "profile_us": 51.504
+  },
+  {
+   "domain": 45,
+   "shape": "mul(@0,@1)",
+   "rows": 1203,
+   "level": 8,
+   "reads": [
+    3,
+    5,
+    44
+   ],
+   "kind": "fused",
+   "treatment": "fused into {d49 d56} (evaluated per reduction block, not materialised; 22 rows read elsewhere kept in 1 tile(s))",
+   "steps": "mul(gat,gat) -> member",
+   "facts": {
+    "shape": "mul(@0,@1)",
+    "rows": 1203,
+    "level": 8,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     3,
+     5,
+     44
+    ],
+    "gather_readers": [
+     53
+    ],
+    "segment_readers": [
+     49,
+     56
+    ],
+    "scan_readers": [],
+    "output_rows": 22,
+    "gather_refs": 22
+   },
+   "reason": null,
+   "profile_us": 7.226800000000001
+  },
+  {
+   "domain": 46,
+   "shape": "div(sub(@0,#0),$0)",
+   "rows": 6,
+   "level": 6,
+   "reads": [
+    32
+   ],
+   "kind": "fused",
+   "treatment": "fused into {d47} (evaluated per reduction block, not materialised)",
+   "steps": "div(sub(gat,lit),col) -> member",
+   "facts": {
+    "shape": "div(sub(@0,#0),$0)",
+    "rows": 6,
+    "level": 6,
+    "scan": false,
+    "chains": 0,
+    "last_op": "div",
+    "steps": 2,
+    "reads": [
+     32
+    ],
+    "gather_readers": [],
+    "segment_readers": [
+     47
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 0
+   },
+   "reason": null,
+   "profile_us": 0.522
+  },
+  {
+   "domain": 47,
+   "shape": "sum(%0)",
+   "rows": 769,
+   "level": 7,
+   "reads": [
+    2,
+    8,
+    16,
+    26,
+    32,
+    37,
+    39,
+    46
+   ],
+   "kind": "reduction",
+   "treatment": "4998 of 5045 members evaluated in the block from {d37 (operands in member order, epilogue) d26 (operands in member order, epilogue) d46 (operands in member order, epilogue) d32 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 47 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 769,
+    "level": 7,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     2,
+     8,
+     16,
+     26,
+     32,
+     37,
+     39,
+     46
+    ],
+    "gather_readers": [
+     50,
+     52,
+     57,
+     66
+    ],
+    "segment_readers": [
+     48
+    ],
+    "scan_readers": [],
+    "output_rows": 755,
+    "gather_refs": 771
+   },
+   "reason": null,
+   "profile_us": 306.0428
+  },
+  {
+   "domain": 48,
+   "shape": "sum(%0)",
+   "rows": 10,
+   "level": 8,
+   "reads": [
+    8,
+    16,
+    26,
+    37,
+    40,
+    42,
+    47
+   ],
+   "kind": "reduction",
+   "treatment": "86 of 117 members evaluated in the block from {d37 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 31 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 10,
+    "level": 8,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     8,
+     16,
+     26,
+     37,
+     40,
+     42,
+     47
+    ],
+    "gather_readers": [
+     53,
+     57,
+     66
+    ],
+    "segment_readers": [
+     49
+    ],
+    "scan_readers": [],
+    "output_rows": 4,
+    "gather_refs": 11
+   },
+   "reason": null,
+   "profile_us": 21.5412
+  },
+  {
+   "domain": 49,
+   "shape": "sum(%0)",
+   "rows": 269,
+   "level": 9,
+   "reads": [
+    8,
+    16,
+    26,
+    37,
+    42,
+    45,
+    48
+   ],
+   "kind": "reduction",
+   "treatment": "2314 of 2365 members evaluated in the block from {d37 (operands in member order, epilogue) d45 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 51 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 269,
+    "level": 9,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     8,
+     16,
+     26,
+     37,
+     42,
+     45,
+     48
+    ],
+    "gather_readers": [
+     57,
+     58,
+     66
+    ],
+    "segment_readers": [
+     56
+    ],
+    "scan_readers": [],
+    "output_rows": 263,
+    "gather_refs": 270
+   },
+   "reason": null,
+   "profile_us": 152.3428
+  },
+  {
+   "domain": 50,
+   "shape": "mul($0,sub(@0,@1))",
+   "rows": 755,
+   "level": 8,
+   "reads": [
+    9,
+    47
+   ],
+   "kind": "plain",
+   "treatment": "3 tile(s)",
+   "steps": "mul(sub(gat,gat),col) -> values",
+   "facts": {
+    "shape": "mul($0,sub(@0,@1))",
+    "rows": 755,
+    "level": 8,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 2,
+    "reads": [
+     9,
+     47
+    ],
+    "gather_readers": [
+     51
+    ],
+    "segment_readers": [
+     56,
+     59,
+     61
+    ],
+    "scan_readers": [],
+    "output_rows": 1249,
+    "gather_refs": 261
+   },
+   "reason": "1249 of its rows are outputs; gathered by d51 and also a member of reduction(s) {d56 d59 d61}",
+   "profile_us": 63.162000000000006
+  },
+  {
+   "domain": 51,
+   "shape": "mul(@0,#0)",
+   "rows": 261,
+   "level": 9,
+   "reads": [
+    50
+   ],
+   "kind": "plain",
+   "treatment": "2 tile(s)",
+   "steps": "mul(gat,lit) -> values",
+   "facts": {
+    "shape": "mul(@0,#0)",
+    "rows": 261,
+    "level": 9,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     50
+    ],
+    "gather_readers": [],
+    "segment_readers": [
+     59,
+     61
+    ],
+    "scan_readers": [],
+    "output_rows": 261,
+    "gather_refs": 0
+   },
+   "reason": "261 of its rows are outputs",
+   "profile_us": 12.713600000000001
+  },
+  {
+   "domain": 52,
+   "shape": "mul(@0,$0)",
+   "rows": 44,
+   "level": 8,
+   "reads": [
+    43,
+    47
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "mul(gat,col) -> values",
+   "facts": {
+    "shape": "mul(@0,$0)",
+    "rows": 44,
+    "level": 8,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     43,
+     47
+    ],
+    "gather_readers": [
+     55
+    ],
+    "segment_readers": [
+     59,
+     61
+    ],
+    "scan_readers": [],
+    "output_rows": 37,
+    "gather_refs": 7
+   },
+   "reason": "37 of its rows are outputs; gathered by d55 and also a member of reduction(s) {d59 d61}",
+   "profile_us": 3.5379999999999994
+  },
+  {
+   "domain": 53,
+   "shape": "mul($0,sub(@0,@1))",
+   "rows": 26,
+   "level": 9,
+   "reads": [
+    8,
+    9,
+    45,
+    48
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "mul(sub(gat,gat),col) -> values",
+   "facts": {
+    "shape": "mul($0,sub(@0,@1))",
+    "rows": 26,
+    "level": 9,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 2,
+    "reads": [
+     8,
+     9,
+     45,
+     48
+    ],
+    "gather_readers": [
+     54
+    ],
+    "segment_readers": [
+     56,
+     59,
+     61
+    ],
+    "scan_readers": [],
+    "output_rows": 50,
+    "gather_refs": 2
+   },
+   "reason": "50 of its rows are outputs; gathered by d54 and also a member of reduction(s) {d56 d59 d61}",
+   "profile_us": 4.2688
+  },
+  {
+   "domain": 54,
+   "shape": "mul(@0,#0)",
+   "rows": 2,
+   "level": 10,
+   "reads": [
+    53
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "mul(gat,lit) -> values",
+   "facts": {
+    "shape": "mul(@0,#0)",
+    "rows": 2,
+    "level": 10,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     53
+    ],
+    "gather_readers": [],
+    "segment_readers": [
+     59,
+     61
+    ],
+    "scan_readers": [],
+    "output_rows": 2,
+    "gather_refs": 0
+   },
+   "reason": "2 of its rows are outputs",
+   "profile_us": 1.6007999999999998
+  },
+  {
+   "domain": 55,
+   "shape": "mul(@0,@1)",
+   "rows": 7,
+   "level": 9,
+   "reads": [
+    5,
+    52
+   ],
+   "kind": "fused",
+   "treatment": "fused into {d56} (evaluated per reduction block, not materialised; 2 rows read elsewhere kept in 1 tile(s))",
+   "steps": "mul(gat,gat) -> member",
+   "facts": {
+    "shape": "mul(@0,@1)",
+    "rows": 7,
+    "level": 9,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 1,
+    "reads": [
+     5,
+     52
+    ],
+    "gather_readers": [
+     58
+    ],
+    "segment_readers": [
+     56
+    ],
+    "scan_readers": [],
+    "output_rows": 2,
+    "gather_refs": 2
+   },
+   "reason": null,
+   "profile_us": 2.7144
+  },
+  {
+   "domain": 56,
+   "shape": "sum(%0)",
+   "rows": 11,
+   "level": 10,
+   "reads": [
+    8,
+    16,
+    26,
+    29,
+    30,
+    37,
+    42,
+    43,
+    45,
+    49,
+    50,
+    53,
+    55
+   ],
+   "kind": "reduction",
+   "treatment": "143 of 1069 members evaluated in the block from {d37 (operands in member order, epilogue) d45 (operands in member order, epilogue) d55 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 926 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 11,
+    "level": 10,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     8,
+     16,
+     26,
+     29,
+     30,
+     37,
+     42,
+     43,
+     45,
+     49,
+     50,
+     53,
+     55
+    ],
+    "gather_readers": [
+     57,
+     60,
+     66
+    ],
+    "segment_readers": [
+     59
+    ],
+    "scan_readers": [],
+    "output_rows": 6,
+    "gather_refs": 11
+   },
+   "reason": null,
+   "profile_us": 71.5488
+  },
+  {
+   "domain": 57,
+   "shape": "sub(div(sub(@0,@1),@2),@3)",
+   "rows": 9,
+   "level": 0,
+   "reads": [
+    0,
+    9,
+    17,
+    27,
+    28,
+    35,
+    38,
+    39,
+    47,
+    48,
+    49,
+    56
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "div(sub(gat,gat),gat) -> s1; sub(vec,gat) -> values",
+   "facts": {
+    "shape": "sub(div(sub(@0,@1),@2),@3)",
+    "rows": 9,
+    "level": 0,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sub",
+    "steps": 3,
+    "reads": [
+     0,
+     9,
+     17,
+     27,
+     28,
+     35,
+     38,
+     39,
+     47,
+     48,
+     49,
+     56
+    ],
+    "gather_readers": [],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 9,
+    "gather_refs": 0
+   },
+   "reason": "9 of its rows are outputs",
+   "profile_us": 6.936800000000001
+  },
+  {
+   "domain": 58,
+   "shape": "mul($0,sub(@0,@1))",
+   "rows": 265,
+   "level": 10,
+   "reads": [
+    8,
+    9,
+    49,
+    55
+   ],
+   "kind": "plain",
+   "treatment": "2 tile(s)",
+   "steps": "mul(sub(gat,gat),col) -> values",
+   "facts": {
+    "shape": "mul($0,sub(@0,@1))",
+    "rows": 265,
+    "level": 10,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 2,
+    "reads": [
+     8,
+     9,
+     49,
+     55
+    ],
+    "gather_readers": [],
+    "segment_readers": [
+     59,
+     61
+    ],
+    "scan_readers": [],
+    "output_rows": 530,
+    "gather_refs": 0
+   },
+   "reason": "530 of its rows are outputs",
+   "profile_us": 21.17
+  },
+  {
+   "domain": 59,
+   "shape": "sum(%0)",
+   "rows": 37,
+   "level": 11,
+   "reads": [
+    31,
+    33,
+    36,
+    37,
+    43,
+    50,
+    51,
+    52,
+    53,
+    54,
+    56,
+    58
+   ],
+   "kind": "reduction",
+   "treatment": "6 of 1756 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1750 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 37,
+    "level": 11,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     31,
+     33,
+     36,
+     37,
+     43,
+     50,
+     51,
+     52,
+     53,
+     54,
+     56,
+     58
+    ],
+    "gather_readers": [
+     66
+    ],
+    "segment_readers": [
+     61
+    ],
+    "scan_readers": [],
+    "output_rows": 35,
+    "gather_refs": 2
+   },
+   "reason": null,
+   "profile_us": 59.5428
+  },
+  {
+   "domain": 60,
+   "shape": "mul($0,sub(@0,@1))",
+   "rows": 5,
+   "level": 11,
+   "reads": [
+    9,
+    56
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "mul(sub(gat,gat),col) -> values",
+   "facts": {
+    "shape": "mul($0,sub(@0,@1))",
+    "rows": 5,
+    "level": 11,
+    "scan": false,
+    "chains": 0,
+    "last_op": "mul",
+    "steps": 2,
+    "reads": [
+     9,
+     56
+    ],
+    "gather_readers": [],
+    "segment_readers": [
+     61
+    ],
+    "scan_readers": [],
+    "output_rows": 10,
+    "gather_refs": 0
+   },
+   "reason": "10 of its rows are outputs",
+   "profile_us": 2.2852
+  },
+  {
+   "domain": 61,
+   "shape": "sum(%0)",
+   "rows": 9,
+   "level": 12,
+   "reads": [
+    31,
+    33,
+    36,
+    37,
+    43,
+    50,
+    51,
+    52,
+    53,
+    54,
+    58,
+    59,
+    60
+   ],
+   "kind": "reduction",
+   "treatment": "7 of 3345 members evaluated in the block from {d37 (operands in member order, epilogue)}, 3338 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 9,
+    "level": 12,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     31,
+     33,
+     36,
+     37,
+     43,
+     50,
+     51,
+     52,
+     53,
+     54,
+     58,
+     59,
+     60
+    ],
+    "gather_readers": [
+     66
+    ],
+    "segment_readers": [
+     62
+    ],
+    "scan_readers": [],
+    "output_rows": 7,
+    "gather_refs": 2
+   },
+   "reason": null,
+   "profile_us": 87.9744
+  },
+  {
+   "domain": 62,
+   "shape": "sum(%0)",
+   "rows": 2,
+   "level": 13,
+   "reads": [
+    37,
+    42,
+    61
+   ],
+   "kind": "reduction",
+   "treatment": "13 of 15 members evaluated in the block from {d37 (operands in member order, epilogue) d42 (operands in member order, epilogue)}, 2 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 2,
+    "level": 13,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     37,
+     42,
+     61
+    ],
+    "gather_readers": [
+     66
+    ],
+    "segment_readers": [
+     63
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 2
+   },
+   "reason": null,
+   "profile_us": 6.2292
+  },
+  {
+   "domain": 63,
+   "shape": "sum(%0)",
+   "rows": 1,
+   "level": 14,
+   "reads": [
+    37,
+    62
+   ],
+   "kind": "reduction",
+   "treatment": "5 of 6 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 1,
+    "level": 14,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     37,
+     62
+    ],
+    "gather_readers": [
+     66
+    ],
+    "segment_readers": [
+     64
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 1
+   },
+   "reason": null,
+   "profile_us": 3.7815999999999996
+  },
+  {
+   "domain": 64,
+   "shape": "sum(%0)",
+   "rows": 1,
+   "level": 15,
+   "reads": [
+    37,
+    63
+   ],
+   "kind": "reduction",
+   "treatment": "5 of 6 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 1,
+    "level": 15,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     37,
+     63
+    ],
+    "gather_readers": [
+     66
+    ],
+    "segment_readers": [
+     65
+    ],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 1
+   },
+   "reason": null,
+   "profile_us": 3.1204
+  },
+  {
+   "domain": 65,
+   "shape": "sum(%0)",
+   "rows": 1,
+   "level": 16,
+   "reads": [
+    37,
+    64
+   ],
+   "kind": "reduction",
+   "treatment": "5 of 6 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered",
+   "steps": "",
+   "facts": {
+    "shape": "sum(%0)",
+    "rows": 1,
+    "level": 16,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sum",
+    "steps": 1,
+    "reads": [
+     37,
+     64
+    ],
+    "gather_readers": [
+     66
+    ],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 0,
+    "gather_refs": 1
+   },
+   "reason": null,
+   "profile_us": 2.7260000000000004
+  },
+  {
+   "domain": 66,
+   "shape": "sub(div(@0,@1),@2)",
+   "rows": 41,
+   "level": 0,
+   "reads": [
+    0,
+    8,
+    9,
+    13,
+    17,
+    27,
+    28,
+    35,
+    37,
+    38,
+    39,
+    40,
+    47,
+    48,
+    49,
+    56,
+    59,
+    61,
+    62,
+    63,
+    64,
+    65
+   ],
+   "kind": "plain",
+   "treatment": "1 tile(s)",
+   "steps": "sub(div(gat,gat),gat) -> values",
+   "facts": {
+    "shape": "sub(div(@0,@1),@2)",
+    "rows": 41,
+    "level": 0,
+    "scan": false,
+    "chains": 0,
+    "last_op": "sub",
+    "steps": 2,
+    "reads": [
+     0,
+     8,
+     9,
+     13,
+     17,
+     27,
+     28,
+     35,
+     37,
+     38,
+     39,
+     40,
+     47,
+     48,
+     49,
+     56,
+     59,
+     61,
+     62,
+     63,
+     64,
+     65
+    ],
+    "gather_readers": [],
+    "segment_readers": [],
+    "scan_readers": [],
+    "output_rows": 41,
+    "gather_refs": 0
+   },
+   "reason": "41 of its rows are outputs",
+   "profile_us": 8.0388
+  }
+ ]
+}

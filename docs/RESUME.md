@@ -9,7 +9,7 @@ This is the launch brief for the M1–M5 run and the handoff for the morning. Ag
 ## 1. Rules for every agent
 - **No SwapEngine (D11).** Do not open `../SwapEngine` or any other checkout. Everything is written from these docs.
 - Maths once, templated on `Scalar`; recording discipline as in `CLAUDE.md`; verification before features (D10).
-- Fixtures come from the seed in `WORKLOADS.md`; no data files, except definitions under `blueprints/` (D29:
+- Fixtures come from the seed in `WORKLOADS.md`; no data files, except definitions under `blueprints/` (D36:
   conventions registry, calendar rule lists, curve definitions, instrument blueprints as JSON; mechanics in code).
 - Dependencies are fixed by D12: Eigen (double side only), GoogleTest, Google Benchmark, nothing else.
 - Numbers: fingerprinted (`scripts/fingerprint.sh`), load-checked, flags stated; estimates labelled (D9, D13).
@@ -79,7 +79,7 @@ Order: P0 → {P1, P2, P5} → P3 → P4 → P6 → P7. Kill path: > 2× ⇒ up 
 | Q5 perf gate tooling | baselines per fingerprint, self-regression 1.25×, absolute targets, report | M1 numbers become the baseline |
 | Q6 review | adversarial review of Q3/Q4 | findings fixed or filed |
 
-### Re-plan (2026-09-23, D28): from here the fixture is the desk problem (`docs/PROBLEM.md`)
+### Re-plan (2026-09-23, D35): from here the fixture is the desk problem (`docs/PROBLEM.md`)
 M1 and M2 stand as written. M3–M6 below supersede the island tables first written here.
 
 ### M3 — groundwork and the Stage A tape (`PROBLEM.md` §4 Stage A, §5, §6)

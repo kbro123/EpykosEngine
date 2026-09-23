@@ -394,16 +394,6 @@ the M1 gates (FD and linearity; vs forward mode) and by the near-miss gate (afte
 recording gather 0 is the identity index, where `wrong_transpose` is a no-op), `select_wrong_arm` and
 `recip_rule_sign` by the near-miss gate alone. The harness table is in `RESUME.md` §5 (M2/Q4b).
 
-## D28 — The desk problem is the fixture; milestones re-sequenced (2026-09-23)
-Supersedes the M3–M5 milestone definitions of `ROADMAP.md` as first written (rewrites on the M1 book, curves as a
-separate fixture, MC as a separate fixture). Optimising stages in isolation bakes in boundaries that hide the
-cross-stage reuse the engine exists to exploit. From M3 onward the fixture is the desk problem of `docs/PROBLEM.md`:
-outputs O1–O6 produced by one recording per stage, with real instruments, real conventions and every interpolation
-type. Order: M3 groundwork and the Stage A tape (USD + EUR), M4 optimise the totality (rewrites, cost model,
-equality saturation, catalogue), M5 Stages B and C with streaming, M6 Monte Carlo, MX the SwapEngine comparison.
-Owner choices: Stage A is USD + EUR; futures without convexity, stated; 1,000 fully recalibrated scenarios; O5
-includes CVA delta. M2 is unaffected.
-
 ## D34 — A baseline is keyed by the run name bench/run.sh derives from the binary (2026-09-23)
 Refines D29 (M2/m2-fix, from the M2 review of the gates). `baseline.json` entries are keyed by the run name, and
 `bench/run.sh` names a run after its binary (`<target>_bench` → `<target>`) unless `--name` overrides it, so an entry
@@ -423,7 +413,17 @@ with identical medians (perf commit, before → after in the message); `tests/sc
 rule on the committed results (every baseline run keyed by its derived name, its file present under that name and
 gated) and on synthetic JSON (the refusal names the ad hoc entry; `--accept` records the arguments).
 
-## D29 — Definitions are data; mechanics are code (2026-09-23)
+## D35 — The desk problem is the fixture; milestones re-sequenced (2026-09-23)
+Supersedes the M3–M5 milestone definitions of `ROADMAP.md` as first written (rewrites on the M1 book, curves as a
+separate fixture, MC as a separate fixture). Optimising stages in isolation bakes in boundaries that hide the
+cross-stage reuse the engine exists to exploit. From M3 onward the fixture is the desk problem of `docs/PROBLEM.md`:
+outputs O1–O6 produced by one recording per stage, with real instruments, real conventions and every interpolation
+type. Order: M3 groundwork and the Stage A tape (USD + EUR), M4 optimise the totality (rewrites, cost model,
+equality saturation, catalogue), M5 Stages B and C with streaming, M6 Monte Carlo, MX the SwapEngine comparison.
+Owner choices: Stage A is USD + EUR; futures without convexity, stated; 1,000 fully recalibrated scenarios; O5
+includes CVA delta. M2 is unaffected.
+
+## D36 — Definitions are data; mechanics are code (2026-09-23)
 Conventions (calendar rule lists, day counts, roll rules, lags, observation windows, index definitions), curve
 definitions (scheme, variable, regions, knot tenors, calibration instrument sets) and instrument blueprints (legs as
 lists of coupon rows with a coupon-kind tag and parameters) are **data**, in JSON files under `blueprints/`, read by

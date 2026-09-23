@@ -30,7 +30,7 @@ of `docs/PROBLEM.md` (see `docs/RESUME.md` §3). Nothing merges to `main` withou
 - **Performance claims are measured**, per machine+toolchain fingerprint, never compared across fingerprints; state load
   and flags alongside any number. Estimates are labelled as estimates.
 - **Fixtures are generated from the seed in `docs/WORKLOADS.md`.** No data files in the repo, except definitions:
-  conventions, curve definitions and instrument blueprints are JSON under `blueprints/` (D29).
+  conventions, curve definitions and instrument blueprints are JSON under `blueprints/` (D36).
 - **Dependencies are fixed by D12.** Adding one needs a decision entry.
 - **Keep the docs current:** a change to the op set, the pipeline or a milestone updates `docs/DESIGN.md` /
   `docs/ROADMAP.md` in the same commit.

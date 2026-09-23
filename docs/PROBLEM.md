@@ -1,6 +1,6 @@
 # EpykosEngine — The desk problem (the total tape)
 
-Status: **agreed by the owner (2026-09-23; D28)**. This replaces the island fixtures of M3–M5 as the
+Status: **agreed by the owner (2026-09-23; D35)**. This replaces the island fixtures of M3–M5 as the
 thing every later milestone builds, verifies and optimises. `WORKLOADS.md` §M1/§M2 stay as the kill-test and
 verification fixtures; everything from M3 onward is a stage of this problem.
 
@@ -31,7 +31,7 @@ A stage passes only when every output it claims is produced by the **same record
 ## 3. Realism checklist (what "real instruments" means here)
 
 Every item below is *structure*: computed at table-build time from conventions and calendars, never a branch on a
-`Scalar`. Definitions are data (D29): conventions, curve definitions and instrument blueprints live in JSON under
+`Scalar`. Definitions are data (D36): conventions, curve definitions and instrument blueprints live in JSON under
 `blueprints/`; the rule kinds and coupon mechanics are code. Each is exercised by at least one instrument in the stage that introduces it.
 
 - compounded-in-arrears RFR coupons (SOFR, €STR, SONIA, TONA) with **observation shift / lookback** and **lockout**;
@@ -100,7 +100,7 @@ rediscovers M1's three kill-path fusions unaided, finds at least one cross-stage
 cannot express, and every extracted program passes §6 at its declared class. Performance is gated against
 ourselves (D9); the M1 hand kernel and bump-and-recalibrate risk are informational rows.
 
-## 8. Milestones (D28; supersedes ROADMAP M3–M5 as first written)
+## 8. Milestones (D35; supersedes ROADMAP M3–M5 as first written)
 
 - **M3 — groundwork and the Stage A tape**: conventions layer with sources, real instruments, all schemes and
   composites, scan domains (compounding written naturally records as a recurrence), the implicit node with

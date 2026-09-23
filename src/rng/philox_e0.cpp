@@ -1,11 +1,12 @@
 // Floating-point draws of the Philox stream and the AS241 inverse normal CDF.
 //
-// Fixture bits must not depend on the build preset, so this TU is compiled without floating-point
-// contraction on clang whatever the preset (GCC in ISO mode, -std=c++20, never contracts unless
-// asked). The pragma precedes every include so it also governs anything inlined from headers.
-#if defined(__clang__)
-#pragma clang fp contract(off)
+// Fixture bits must not depend on the build preset or the compiler, so this is an E0 TU
+// (src/**/*_e0.cpp, root CMakeLists.txt): compiled with -ffp-contract=off in every preset on
+// every compiler, which also governs anything inlined from headers (D13, D25).
+#ifndef EPYKOS_FP_CONTRACT_OFF
+#error "philox_e0.cpp must be compiled with -ffp-contract=off (see the *_e0.cpp rule in CMakeLists.txt)"
 #endif
+
 
 #include "epykos/rng/philox.hpp"
 

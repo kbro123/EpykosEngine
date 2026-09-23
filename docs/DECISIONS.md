@@ -157,3 +157,24 @@ a tape other than the one it was recorded on — under a nested `Tape::Scope`, o
 `std::out_of_range`) for an id the tape does not hold. Before this entry a value from tape B used under tape A's
 scope was silently recorded as A's node with the same id (wrong graph, wrong taint, no exception); M2+ nests
 recordings (implicit nodes), which is where that would have bitten. Taint still lives in the node table.
+
+## D25 — Reference TUs are pinned by build convention, on both compilers (2026-09-23)
+Refines D13 (M1/P7 review). The reference TUs of D13 — the fixture generators (`src/maths/m1/book_e0.cpp`,
+`src/rng/philox_e0.cpp`), the hand-fused reference (`src/hand/m1_hand_kernel_e0.cpp`) and the interpreter kernels
+(`src/exec/kernels_l*_e0.cpp`) — are named `src/**/*_e0.cpp`, and the root CMake gives every such source
+`-ffp-contract=off` and `EPYKOS_FP_CONTRACT_OFF=1` in every preset (the TU `#error`s without the define), the same
+convention as `tests/**/*_e0_test.cpp`. Until this entry they were pinned with `#pragma clang fp contract(off)`
+under `#if defined(__clang__)` and a comment claiming GCC in ISO C++ mode does not contract. That claim is false:
+GCC's ISO-mode `-ffp-contract=off` default applies to C only, and `g++ -std=c++20 -O3 -march=x86-64-v3` contracts
+across statements. Consequences before the fix: GitHub Actions was red on every push to `integrate/m1-m5` from P2
+(2026-09-22T22:13Z) to P6 attempt 4 — under GCC 13 release the E0 gates `exec_m1_interp_e0_test`,
+`hand_m1_hand_e0_test` and `exec_interp_test` failed at rounding level (the kernels, the hand kernel and the book
+generator contracted), and `tape_replay_e0_test` failed under both GCC presets for an unrelated reason (argument
+evaluation order); nothing in this repository's "23/23 under both presets" lines was measured on GCC. Also:
+`tests/exec/interp_test.cpp` became `interp_e0_test.cpp` (its replay and evaluator are header templates that must
+not contract either), and `tests/maths/m1_fixture_e0_test.cpp` recomputes the book generator's arithmetic in a
+contraction-free TU and checks it bitwise, with literal digests for the libm-independent parts of the fixture, so a
+fixture that diverges across compilers is caught rather than reported as "bit-identical across presets" from one
+machine. libm-dependent bits (exp/log: notionals, par rates, fixed rates, the oracle) are printed as digests, never
+asserted against a literal. CI status is now part of the M1 evidence (P6 README, RESUME progress lines).
+

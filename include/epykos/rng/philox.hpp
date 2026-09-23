@@ -12,7 +12,9 @@
 //   u       = ((w0 << 21) | (w1 >> 11)) · 2^-53          // 53 random bits, u ∈ [0, 1)
 //
 // The block function is integer-only and lives here inline; the floating-point draws are compiled
-// once, in src/rng/philox.cpp, so every TU of a build sees the same fixture bits.
+// once, in src/rng/philox_e0.cpp (an E0 TU: -ffp-contract=off in every preset, D25), so every TU
+// of a build, and every compiler, sees the same fixture bits.
+
 #pragma once
 
 #include <array>

@@ -1,11 +1,14 @@
 // The M1 book generator, batch, par rate and CSV dump (docs/WORKLOADS.md §M1).
 //
-// Fixture bits must not depend on the build preset, so this TU is compiled without floating-point
-// contraction on clang whatever the preset (GCC in ISO mode never contracts unless asked). The
-// pragma precedes every include so it also governs the templates instantiated here.
-#if defined(__clang__)
-#pragma clang fp contract(off)
+// Fixture bits must not depend on the build preset or the compiler, so this is an E0 TU
+// (src/**/*_e0.cpp, root CMakeLists.txt): compiled with -ffp-contract=off in every preset on
+// every compiler, which also governs the templates instantiated here (D13, D25). The test
+// maths_m1_fixture_e0_test recomputes the arithmetic of this TU in a contraction-free TU and
+// checks it bitwise.
+#ifndef EPYKOS_FP_CONTRACT_OFF
+#error "book_e0.cpp must be compiled with -ffp-contract=off (see the *_e0.cpp rule in CMakeLists.txt)"
 #endif
+
 
 #include "epykos/maths/m1/book.hpp"
 

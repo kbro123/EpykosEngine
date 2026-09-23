@@ -44,8 +44,11 @@ Adding code needs no CMake edits (all globs are `CONFIGURE_DEPENDS`): headers un
 under `src/**/*.cpp` compile into the library `epykos`; `tests/**/<name>_test.cpp` becomes the gtest executable and
 ctest entry `<subdir>_<name>_test`; `bench/**/<name>_bench.cpp` becomes a Google Benchmark executable (built, never
 run by ctest or CI). **Tests named `*_e0_test.cpp` are compiled with `-ffp-contract=off` in every preset** (label
-`e0`, `ctest -L e0`): that is how E0 gates get the reference flags. Only that TU is contraction-free; an E0 gate that
-also crosses into code compiled in `src/` runs under the reference preset.
+`e0`, `ctest -L e0`): that is how E0 gates get the reference flags. **Library sources named `src/**/*_e0.cpp` are
+pinned the same way in every preset** (fixture generators, the hand-fused reference, the interpreter kernels; D25) —
+a clang pragma is not enough, GCC contracts in C++ even in ISO mode. An E0 gate that crosses into any other code
+compiled in `src/` runs under the reference preset.
+
 
 ## Commits
 `type(scope): summary`, type ∈ `feat|perf|fix|test|bench|refactor|build|docs|chore`. `perf` commits include measured

@@ -45,9 +45,10 @@
 //                         against price_book<double> compiled with -ffp-contract=off. This is the
 //                         structural check that the tables are exactly right; it is not the fast
 //                         kernel. It forces shared_reciprocal = false and exp = std_exp.
-// This TU is compiled without floating-point contraction whatever the preset (like the book
-// generator), so its bits do not depend on the compiler's contraction choices: the only fused
-// operations are the explicit std::fma calls of the fused mode.
+// Its source is an E0 TU (src/hand/m1_hand_kernel_e0.cpp: -ffp-contract=off in every preset on
+// every compiler, like the book generator; D25), so its bits do not depend on the compiler's
+// contraction choices: the only fused operations are the explicit std::fma calls of the fused mode.
+
 //
 // eval_batch(B) is bitwise equal to B calls of eval on the corresponding lanes: every lane runs
 // the same IEEE operations in the same order; vectorisation never reassociates.

@@ -131,6 +131,21 @@ list(FILTER EPYKOS_HEADERS EXCLUDE REGEX "/\\.[^/]*$")
 
 add_library(epykos STATIC ${EPYKOS_SOURCES} ${EPYKOS_HEADERS})
 add_library(epykos::epykos ALIAS epykos)
+
+# E0 sources (D13, D25): every src/**/*_e0.cpp is compiled with -ffp-contract=off in EVERY preset,
+# on both compilers, and sees EPYKOS_FP_CONTRACT_OFF=1 (the TU #errors without it). Their bits
+# therefore never depend on the preset or on the compiler's contraction default: GCC contracts
+# multiply-adds in C++ even with -std=c++20 (its ISO-mode -ffp-contract=off default is for C
+# only), clang within a statement. They are the fixture generators (book, RNG draws), the
+# hand-fused reference kernel and the interpreter kernels. Same convention as tests/**/*_e0_test.cpp.
+set(EPYKOS_E0_SOURCES ${EPYKOS_SOURCES})
+list(FILTER EPYKOS_E0_SOURCES INCLUDE REGEX "_e0\\.cpp$")
+set_source_files_properties(${EPYKOS_E0_SOURCES} PROPERTIES
+  COMPILE_OPTIONS "-ffp-contract=off"
+  COMPILE_DEFINITIONS "EPYKOS_FP_CONTRACT_OFF=1")
+list(LENGTH EPYKOS_E0_SOURCES _n_e0)
+message(STATUS "EpykosEngine: ${_n_e0} E0 source(s) pinned to -ffp-contract=off")
+
 target_include_directories(epykos PUBLIC "${CMAKE_SOURCE_DIR}/include")
 target_compile_features(epykos PUBLIC cxx_std_20)
 target_link_libraries(epykos

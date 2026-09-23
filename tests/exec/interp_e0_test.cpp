@@ -2,6 +2,12 @@
 // P2's mini book; fma, log, sqrt, recip through a small recording; the per-row Sum fallback and
 // the Const domain through a hand-built program), option validation, describe(), and the E1
 // exp_poly mode against std::exp. The bit-identity gate on the M1 book is m1_interp_e0_test.cpp.
+//
+// An _e0_test.cpp TU (-ffp-contract=off in every preset): the replay and the IR evaluator it
+// compares the interpreter against bitwise are header templates instantiated here, and the
+// kernels are E0 TUs of libepykos, so the comparison holds on both compilers under both presets
+// (under GCC's default contraction the replay's Affine fold fused and the test failed, D25).
+
 #include <gtest/gtest.h>
 
 #include <array>

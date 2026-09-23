@@ -1,11 +1,12 @@
 // The hand-fused M1 reference kernel (M1/P5). See the header for the design.
 //
-// Contraction is off in this TU whatever the preset, so the reference-arithmetic mode is bitwise
-// the contraction-free oracle and the fused mode's only fused operations are its explicit
-// std::fma calls (GCC in ISO mode never contracts unless asked; the pragma covers clang).
-#if defined(__clang__)
-#pragma clang fp contract(off)
+// An E0 TU (src/**/*_e0.cpp, root CMakeLists.txt): compiled with -ffp-contract=off in every
+// preset on every compiler, so the reference-arithmetic mode is bitwise the contraction-free
+// oracle and the fused mode's only fused operations are its explicit std::fma calls (D13, D25).
+#ifndef EPYKOS_FP_CONTRACT_OFF
+#error "m1_hand_kernel_e0.cpp must be compiled with -ffp-contract=off (see the *_e0.cpp rule in CMakeLists.txt)"
 #endif
+
 
 #include "epykos/hand/m1_hand_kernel.hpp"
 

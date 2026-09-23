@@ -1,0 +1,164 @@
+{
+  "meta": {
+    "title": "Holiday calendars: US SIFMA (U.S. Government Securities Business Days), SOFR publication days, Federal Reserve, TARGET, and their joints",
+    "description": "Rule INSTANCES (data) interpreted by the rule KINDS in include/epykos/conventions/calendar.hpp (fixed, nth_weekday, easter_offset; observance none | sat_to_fri_sun_to_mon | sun_to_mon | sat_to_fri | next_weekday). Generated for 2020-2080. Every rule cites its source; docs/G4_BUNDLE.md sections USD.1 and EUR.1 hold the research and the 2026/2027 lists these rules were checked against.",
+    "sources": [
+      "SIFMA Holiday Schedule, U.S. recommendations 2026 and 2027 tabs (sifma.org/resources/guides-playbooks/holiday-schedule, read 2026-09-23)",
+      "ISDA, Guidance regarding the publication of SOFR on Good Friday, April 3, 2026 (2026-03-27), citing NY Fed operating policy 260312a",
+      "FRBNY, Additional Information about Reference Rates Administered by the New York Fed (publication on days SIFMA recommends an early close, not on full closes)",
+      "Federal Reserve Financial Services, Holiday Schedules (frbservices.org/about/holiday-schedules): Saturday holidays -> open the preceding Friday; Sunday holidays -> closed the following Monday; 2026 and 2027 lists",
+      "ECB press release 2000-12-14, TARGET closing days from 2002 until further notice: New Year's Day, Good Friday, Easter Monday, 1 May, Christmas Day, 26 December",
+      "Deutsche Bundesbank, Public holidays in Germany in 2026 / TARGET holidays (1 Jan, 3 Apr, 6 Apr, 1 May, 25 Dec, 26 Dec 2026)",
+      "ISDA, Market Practice Note: Effective Dates for SOFR swaps using different Payment/Reset Date calendars (2022-04-08): spot = second day that is both a U.S. Government Securities Business Day and a New York Business Day"
+    ],
+    "imported_from": {
+      "imported_from": "SwapEngine/conventions/conventions.json (D37 data import), meta.sources: OpenGamma Strata codified conventions; CME SOFR futures specs; ISDA RFR Conventions product table (Oct 2021); ARRC xccy recommendations; 31 CFR 356 App. B",
+      "imported_on": "2026-09-23",
+      "imported_key": "calendars.USD, calendars.USD-SOFR, calendars.USD-FED, calendars.EUR, calendars.USD+USD-FED, calendars.EURUSD, calendars.NONE",
+      "cross_check": "partial",
+      "notes": [
+        "Rule sets agree with SwapEngine for every calendar; two representations differ: (1) SwapEngine reproduces SIFMA's 'New Year's Day on a Saturday is not observed on the Friday' through a year-bucketing artefact ('spilled observance is inert'), here it is the explicit observance sun_to_mon on that rule (confirmed by SIFMA's 2027/2028 entry: only an early close on Friday 2027-12-31); (2) SwapEngine's 'except_first_friday' flag on the SIFMA Good Friday rule is the generic skip_if_first_weekday_of_month here.",
+        "SwapEngine's USD-FED Juneteenth from_year 2021 kept (2021-06-19 was a Saturday, not observed under sun_to_mon, so the first observed Federal Reserve Juneteenth is 2022-06-20 either way)."
+      ]
+    }
+  },
+  "calendars": {
+    "USD-SIFMA": {
+      "description": "U.S. Government Securities Business Days: every weekday except a day for which SIFMA recommends that fixed income departments be closed for the entire day (2021 ISDA Definitions). An early close is a business day.",
+      "weekend": [5, 6],
+      "observance": "sat_to_fri_sun_to_mon",
+      "first_year": 2020,
+      "last_year": 2080,
+      "holidays": [
+        {"label": "New Year's Day", "rule": "fixed", "month": 1, "day": 1, "observance": "sun_to_mon",
+         "source": "SIFMA 2026/2027 tabs: Thu 2026-01-01, Fri 2027-01-01 full closes; New Year's Day 2028 (a Saturday) carries only an early close on Fri 2027-12-31, so a Saturday New Year's Day is not observed on the Friday"},
+        {"label": "Martin Luther King Day", "rule": "nth_weekday", "month": 1, "weekday": 0, "n": 3,
+         "source": "SIFMA: Mon 2026-01-19, Mon 2027-01-18"},
+        {"label": "Presidents Day (Washington's Birthday)", "rule": "nth_weekday", "month": 2, "weekday": 0, "n": 3,
+         "source": "SIFMA: Mon 2026-02-16, Mon 2027-02-15"},
+        {"label": "Good Friday (full close unless it is the first Friday of the month: employment-report day, early close 12:00 ET)", "rule": "easter_offset", "days": -2, "skip_if_first_weekday_of_month": true,
+         "source": "SIFMA 2026: Good Friday Fri 2026-04-03 is an EARLY close (12:00 p.m. ET); ISDA 2026-03-27 guidance: 'April 3, 2026 (Good Friday) will be a U.S. Government Securities Business Day as confirmed by SIFMA'. SIFMA 2027: Fri 2027-03-26 full close. The first-Friday rule is the SIFMA practice of 2010, 2015, 2021 and 2026; stated as a simplification of the BLS release calendar (G4_BUNDLE.md USD.1)"},
+        {"label": "Memorial Day", "rule": "nth_weekday", "month": 5, "weekday": 0, "n": -1,
+         "source": "SIFMA: Mon 2026-05-25, Mon 2027-05-31"},
+        {"label": "Juneteenth", "rule": "fixed", "month": 6, "day": 19, "from_year": 2022,
+         "source": "SIFMA Policy on Juneteenth National Holiday (recommended full close from 2022); SIFMA: Fri 2026-06-19; Fri 2027-06-18 (2027-06-19 is a Saturday, observed on the Friday)"},
+        {"label": "Independence Day", "rule": "fixed", "month": 7, "day": 4,
+         "source": "SIFMA: 'U.S. Independence Day (observed)' Fri 2026-07-03 (July 4 a Saturday); Mon 2027-07-05 (July 4 a Sunday)"},
+        {"label": "Labor Day", "rule": "nth_weekday", "month": 9, "weekday": 0, "n": 1,
+         "source": "SIFMA: Mon 2026-09-07, Mon 2027-09-06"},
+        {"label": "Columbus Day", "rule": "nth_weekday", "month": 10, "weekday": 0, "n": 2,
+         "source": "SIFMA: Mon 2026-10-12, Mon 2027-10-11"},
+        {"label": "Veterans Day", "rule": "fixed", "month": 11, "day": 11, "observance": "sun_to_mon",
+         "source": "SIFMA: Wed 2026-11-11, Thu 2027-11-11. Saturday case (next 2028-11-11): not observed on the Friday, per SIFMA's 2023 recommendation (bond markets open Fri 2023-11-10) - UNVERIFIED by fetch, imported from SwapEngine's rule; Sunday -> Monday (2029)"},
+        {"label": "Thanksgiving Day", "rule": "nth_weekday", "month": 11, "weekday": 3, "n": 4,
+         "source": "SIFMA: Thu 2026-11-26, Thu 2027-11-25"},
+        {"label": "Christmas Day", "rule": "fixed", "month": 12, "day": 25,
+         "source": "SIFMA: Fri 2026-12-25; Fri 2027-12-24 (Dec 25 a Saturday, observed on the Friday)"}
+      ],
+      "sources": {
+        "definition": "2021 ISDA Interest Rate Derivatives Definitions, 'U.S. Government Securities Business Day' (quoted in ISDA's 2026-03-27 Good Friday guidance)",
+        "2026_2027_lists": "SIFMA Holiday Schedule, U.S. tabs 2026 and 2027 (G4_BUNDLE.md USD.1 table)",
+        "observance": "SIFMA practice as evidenced by the 2026/2027 entries: Independence Day 2026 Sat -> Fri 2026-07-03; Juneteenth 2027 Sat -> Fri 2027-06-18; Christmas 2027 Sat -> Fri 2027-12-24; Independence Day 2027 Sun -> Mon 2027-07-05; New Year's Day 2028 Sat -> no Friday close"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json calendars.USD", "imported_on": "2026-09-23", "imported_key": "calendars.USD", "cross_check": "agree",
+        "notes": ["Same rule set; observance of New Year's Day made explicit (sun_to_mon) instead of SwapEngine's year-bucketing artefact; 'except_first_friday' -> skip_if_first_weekday_of_month"]}
+    },
+    "USD-SOFR": {
+      "description": "Days for which SOFR is published (the fixing calendar of USD-SOFR): U.S. Government Securities Business Days, except Good Friday, for which the New York Fed does not publish SOFR even when SIFMA recommends only an early close (2026).",
+      "weekend": [5, 6],
+      "observance": "sat_to_fri_sun_to_mon",
+      "first_year": 2020,
+      "last_year": 2080,
+      "holidays": [
+        {"label": "New Year's Day", "rule": "fixed", "month": 1, "day": 1, "observance": "sun_to_mon", "source": "as USD-SIFMA"},
+        {"label": "Martin Luther King Day", "rule": "nth_weekday", "month": 1, "weekday": 0, "n": 3, "source": "as USD-SIFMA"},
+        {"label": "Presidents Day (Washington's Birthday)", "rule": "nth_weekday", "month": 2, "weekday": 0, "n": 3, "source": "as USD-SIFMA"},
+        {"label": "Good Friday (no SOFR publication on or for Good Friday)", "rule": "easter_offset", "days": -2,
+         "source": "ISDA 2026-03-27 guidance section 1: NY Fed operating policy 260312a - 'there will be no publication of SOFR on Friday, April 3, 2026 ... SOFR for Thursday, April 2, 2026 will be published on Monday, April 6, 2026 ... no publication of SOFR for Friday, April 3, 2026'. Earlier early-close Good Fridays (2021-04-02) treated the same: UNVERIFIED by fetch"},
+        {"label": "Memorial Day", "rule": "nth_weekday", "month": 5, "weekday": 0, "n": -1, "source": "as USD-SIFMA"},
+        {"label": "Juneteenth", "rule": "fixed", "month": 6, "day": 19, "from_year": 2022, "source": "as USD-SIFMA"},
+        {"label": "Independence Day", "rule": "fixed", "month": 7, "day": 4, "source": "as USD-SIFMA"},
+        {"label": "Labor Day", "rule": "nth_weekday", "month": 9, "weekday": 0, "n": 1, "source": "as USD-SIFMA"},
+        {"label": "Columbus Day", "rule": "nth_weekday", "month": 10, "weekday": 0, "n": 2, "source": "as USD-SIFMA"},
+        {"label": "Veterans Day", "rule": "fixed", "month": 11, "day": 11, "observance": "sun_to_mon", "source": "as USD-SIFMA"},
+        {"label": "Thanksgiving Day", "rule": "nth_weekday", "month": 11, "weekday": 3, "n": 4, "source": "as USD-SIFMA"},
+        {"label": "Christmas Day", "rule": "fixed", "month": 12, "day": 25, "source": "as USD-SIFMA"}
+      ],
+      "sources": {
+        "publication_days": "FRBNY, Additional Information about Reference Rates: 'typically published every business day, including days for which SIFMA recommends an early close' but 'not published on, or for, days for which SIFMA recommends a full closure'",
+        "good_friday": "ISDA, Guidance regarding the publication of SOFR on Good Friday, April 3, 2026 (2026-03-27), sections 1 and 3.2"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json calendars.USD-SOFR", "imported_on": "2026-09-23", "imported_key": "calendars.USD-SOFR", "cross_check": "agree"}
+    },
+    "USD-FED": {
+      "description": "Federal Reserve Bank holidays (Fedwire closed): the New York Business Days used for SOFR swap payments.",
+      "weekend": [5, 6],
+      "observance": "sun_to_mon",
+      "first_year": 2020,
+      "last_year": 2080,
+      "holidays": [
+        {"label": "New Year's Day", "rule": "fixed", "month": 1, "day": 1, "source": "frbservices.org holiday schedules: 2026-01-01, 2027-01-01"},
+        {"label": "Birthday of Martin Luther King, Jr.", "rule": "nth_weekday", "month": 1, "weekday": 0, "n": 3, "source": "frbservices.org: 2026-01-19, 2027-01-18"},
+        {"label": "Washington's Birthday", "rule": "nth_weekday", "month": 2, "weekday": 0, "n": 3, "source": "frbservices.org: 2026-02-16, 2027-02-15"},
+        {"label": "Memorial Day", "rule": "nth_weekday", "month": 5, "weekday": 0, "n": -1, "source": "frbservices.org: 2026-05-25, 2027-05-31"},
+        {"label": "Juneteenth National Independence Day", "rule": "fixed", "month": 6, "day": 19, "from_year": 2021, "source": "frbservices.org: 2026-06-19; 2027-06-19 is a Saturday ('open the preceding Friday')"},
+        {"label": "Independence Day", "rule": "fixed", "month": 7, "day": 4, "source": "frbservices.org: 2026-07-04 Saturday (open Fri 2026-07-03); 2027-07-04 Sunday (closed Mon 2027-07-05)"},
+        {"label": "Labor Day", "rule": "nth_weekday", "month": 9, "weekday": 0, "n": 1, "source": "frbservices.org: 2026-09-07, 2027-09-06"},
+        {"label": "Columbus Day", "rule": "nth_weekday", "month": 10, "weekday": 0, "n": 2, "source": "frbservices.org: 2026-10-12, 2027-10-11"},
+        {"label": "Veterans Day", "rule": "fixed", "month": 11, "day": 11, "source": "frbservices.org: 2026-11-11, 2027-11-11"},
+        {"label": "Thanksgiving Day", "rule": "nth_weekday", "month": 11, "weekday": 3, "n": 4, "source": "frbservices.org: 2026-11-26, 2027-11-25"},
+        {"label": "Christmas Day", "rule": "fixed", "month": 12, "day": 25, "source": "frbservices.org: 2026-12-25; 2027-12-25 is a Saturday (open Fri 2027-12-24)"}
+      ],
+      "sources": {
+        "observance": "Federal Reserve Financial Services, Holiday Schedules: 'For holidays falling on Saturday, Federal Reserve Banks and Branches will be open the preceding Friday. For holidays falling on Sunday, Federal Reserve Banks and Branches will be closed the following Monday.'",
+        "2026_2027_lists": "frbservices.org/about/holiday-schedules (G4_BUNDLE.md USD.1 table)"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json calendars.USD-FED", "imported_on": "2026-09-23", "imported_key": "calendars.USD-FED", "cross_check": "agree"}
+    },
+    "USD-SOFR-SWAP": {
+      "description": "SOFR swap spot / roll / payment days: a day that is both a U.S. Government Securities Business Day (SIFMA) and a New York Business Day (Federal Reserve). Closed when either is closed.",
+      "join": ["USD-SIFMA", "USD-FED"],
+      "sources": {
+        "spot": "ISDA Market Practice Note 2022-04-08: 'the spot date for a SOFR swap will be the day that is two U.S. Government Securities Business Days and New York Business Days following the Trade Date (i.e. the second day that is both ...)'",
+        "payments": "ISDA MPN 2022-04-08: 'it is common practice for SOFR swaps to use the New York Business Day calendar for payments'; CFTC MAT chart (2023-07-07) USD SOFR OIS: business calendars New York/USNY, fixing calendar US Government Securities/USGS"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json calendars.USD+USD-FED", "imported_on": "2026-09-23", "imported_key": "calendars.USD+USD-FED", "cross_check": "agree", "notes": ["Renamed from USD+USD-FED"]}
+    },
+    "EUR-TARGET": {
+      "description": "TARGET (T2) closing days: the euro settlement calendar and the €STR / EURIBOR fixing calendar. No observance shifts: a holiday on the weekend is simply not a weekday close.",
+      "weekend": [5, 6],
+      "observance": "none",
+      "first_year": 2020,
+      "last_year": 2080,
+      "holidays": [
+        {"label": "New Year's Day", "rule": "fixed", "month": 1, "day": 1, "source": "ECB press release 2000-12-14 (closing days from 2002 until further notice); Bundesbank TARGET holidays 2026: 1 January"},
+        {"label": "Good Friday", "rule": "easter_offset", "days": -2, "source": "ECB 2000-12-14; Bundesbank 2026: 3 April"},
+        {"label": "Easter Monday", "rule": "easter_offset", "days": 1, "source": "ECB 2000-12-14; Bundesbank 2026: 6 April"},
+        {"label": "Labour Day", "rule": "fixed", "month": 5, "day": 1, "source": "ECB 2000-12-14; Bundesbank 2026: 1 May"},
+        {"label": "Christmas Day", "rule": "fixed", "month": 12, "day": 25, "source": "ECB 2000-12-14; Bundesbank 2026: 25 December"},
+        {"label": "Christmas Holiday (26 December)", "rule": "fixed", "month": 12, "day": 26, "source": "ECB 2000-12-14; Bundesbank 2026: 26 December"}
+      ],
+      "sources": {
+        "rule": "ECB press release 2000-12-14: from 2002 'until further notice' TARGET is closed on New Year's Day, Good Friday, Easter Monday, 1 May, Christmas Day and 26 December, plus Saturdays and Sundays",
+        "2026_list": "Deutsche Bundesbank, Public holidays in Germany in 2026, 'TARGET holidays (applies to all TARGET component systems)': 1 Jan, 3 Apr, 6 Apr, 1 May, 25 Dec, 26 Dec",
+        "2027_list": "derived from the ECB rule: Fri 2027-01-01, Fri 2027-03-26, Mon 2027-03-29 (1 May, 25 and 26 December 2027 fall on the weekend) - no published 2027 list fetched (UNVERIFIED as a list; the rule is the ECB's)"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json calendars.EUR", "imported_on": "2026-09-23", "imported_key": "calendars.EUR", "cross_check": "agree", "notes": ["Renamed from EUR"]}
+    },
+    "EURUSD": {
+      "description": "Joint TARGET + US SIFMA calendar for EUR/USD FX and cross-currency dates (USD side = U.S. Government Securities Business Days).",
+      "join": ["USD-SIFMA", "EUR-TARGET"],
+      "sources": {"definition": "SwapEngine desk convention (2026-07); Stage B (M5) will research the xccy calendar - UNVERIFIED here"},
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json calendars.EURUSD", "imported_on": "2026-09-23", "imported_key": "calendars.EURUSD", "cross_check": "not_in_source"}
+    },
+    "NONE": {
+      "description": "Weekends only, no holidays: for synthetic / test problems (must be named explicitly).",
+      "weekend": [5, 6],
+      "observance": "none",
+      "first_year": 2020,
+      "last_year": 2080,
+      "holidays": [],
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json calendars.NONE", "imported_on": "2026-09-23", "imported_key": "calendars.NONE", "cross_check": "agree"}
+    }
+  }
+}

@@ -403,7 +403,7 @@ PassResult affine_collapse(Tape& tape) {
     return false;
   };
 
-  // Single-term scaling (M3/G1, D37). A tainted product Const × atom that some reader SCALES AGAIN
+  // Single-term scaling (M3/G1, D39). A tainted product Const × atom that some reader SCALES AGAIN
   // — a reader Mul(Const, this): the next step of a Thomas sweep with structural reciprocal pivots,
   // a Bessel tangent of scaled secants, a back-substitution — becomes the one-term Affine
   // −0.0 + c·x. Exact: −0.0 + p == p for every double p (+0.0 included: −0.0 + 0.0 = +0.0). Once

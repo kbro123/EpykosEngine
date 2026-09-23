@@ -47,7 +47,8 @@ Benchmarks and the perf gate (D29): `bench/run.sh build/release/bench/<name>_ben
 at 1-minute load > cores/2) and writes `bench/results/<fingerprint-id>/<name>.json` (fingerprint, loads before/after, commit,
 preset, parameters, min/median/p90); `scripts/perf_gate.py <that file>` compares it with `baseline.json` of the same fingerprint
 only (> 1.25× a median fails, exit 1; load, cross-fingerprint or no baseline: refused, exit 2) and with `bench/targets.json`;
-`--accept` moves the baseline — perf commits only, before/after in the message.
+`--accept` moves the baseline — perf commits only, before/after in the message. The baseline is keyed by that `<name>`, the one
+`run.sh` derives from the binary, so the default invocation is what it gates; `--name` runs are exploratory, not gated (D34).
 
 Adding code needs no CMake edits (all globs are `CONFIGURE_DEPENDS`): headers under `include/epykos/**` and sources
 under `src/**/*.cpp` compile into the library `epykos` (`include/epykos/fixtures/` and `src/fixtures/` are test-only

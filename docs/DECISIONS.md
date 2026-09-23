@@ -403,3 +403,22 @@ type. Order: M3 groundwork and the Stage A tape (USD + EUR), M4 optimise the tot
 equality saturation, catalogue), M5 Stages B and C with streaming, M6 Monte Carlo, MX the SwapEngine comparison.
 Owner choices: Stage A is USD + EUR; futures without convexity, stated; 1,000 fully recalibrated scenarios; O5
 includes CVA delta. M2 is unaffected.
+
+## D34 — A baseline is keyed by the run name bench/run.sh derives from the binary (2026-09-23)
+Refines D29 (M2/m2-fix, from the M2 review of the gates). `baseline.json` entries are keyed by the run name, and
+`bench/run.sh` names a run after its binary (`<target>_bench` → `<target>`) unless `--name` overrides it, so an entry
+seeded under an ad hoc name gates only a run that repeats that name: the default invocation is refused (exit 2, no
+baseline), not gated. That is what the M2 gate round had done: the adjoint rows were seeded as run `m2`
+(`bench/results/d448afd70180/m2.json`, perf commit a72f525) while the binary is `adjoint_m1_adjoint_bench`, so
+`bench/run.sh build/release/bench/adjoint_m1_adjoint_bench` followed by the gate was refused and the documented "the
+next adjoint measurement is gated at 1.25x" held only for a measurer who remembered `--name m2` (a milestone name as a
+results key besides, which the layout rule of D28 — layout by library structure — tolerates in file names only). Rule: every run in a `baseline.json`
+is keyed by the derived name of its binary, its committed `<run>.json` carries that name and is gated against the
+entry (a pass or a fail, never a refusal); `--name` is for exploratory runs that are not gated. `--accept` records the
+run's Google Benchmark arguments in the entry, so a baseline seeded from a filtered run states its filter and the rows
+outside it are expected as "new" in a full sweep (reported, never gated, D29). The refusal for a run without a
+baseline names any entry that holds the same binary under another name. Applied: `m2.json` → `adjoint_m1_adjoint.json`
+(the same measurement; `name` re-keyed, its note says so), the baseline entry re-seeded under `adjoint_m1_adjoint`
+with identical medians (perf commit, before → after in the message); `tests/scripts/perf_gate_test.cpp` pins the
+rule on the committed results (every baseline run keyed by its derived name, its file present under that name and
+gated) and on synthetic JSON (the refusal names the ad hoc entry; `--accept` records the arguments).

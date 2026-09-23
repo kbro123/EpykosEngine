@@ -17,6 +17,11 @@ This is the launch brief for the M1–M5 run and the handoff for the morning. Ag
 - Docs: op-set / pipeline / milestone changes update `DESIGN.md` / `ROADMAP.md` in the same commit; new decisions
   append to `DECISIONS.md`; each package appends one line to §5 of this file when it merges.
 - Report honestly: a failed gate is reported as failed with the numbers, never softened.
+- **Layout is by library structure, never by milestone.** Engine code under `include/epykos/<component>/` and
+  `src/<component>/`; seeded fixture books, record helpers and oracles under `include/epykos/fixtures/` and
+  `src/fixtures/` (test-only, not engine API); hand-written reference kernels under `bench/hand/`. Milestone names
+  appear only as fixture names (`fixtures/m1_book.hpp`) and in test/bench file names. M2/Q0 consolidates what M1
+  left under `maths/m1/`, `tape/record_m1.hpp` and `hand/`.
 
 ## 2. Repository layout (fixed by M1/P0)
 ```
@@ -25,7 +30,8 @@ scripts/bootstrap.sh                     fetch pinned third_party with checksums
 scripts/fingerprint.sh                   CPU brand, cores, compiler, flags → id; prints 1-min load
 include/epykos/                          public headers, namespace epykos, macros EPY_*
   scalar/     Rec, RecBool, Dual, scalar traits, select/structural_if
-  maths/      templated pricing maths: calendar, schedules, curve, legs, swaps, book (M1); schemes (M4); models (M5)
+  maths/      templated pricing maths: calendar, schedules; curve/ (schemes, variables, composite); swap/ (legs, swaps); model/ (M5)
+  fixtures/   seeded test books (m1_book), record helpers, oracles - test-only, not engine API
   tape/       node table, opcode enum (one for every pass), CSE/DCE, fold-sum, affine collapse
   ir/         domain IR (plain data, serialisable), signature pass, expander (round-trip)
   exec/       tiled interpreter, tile/batch layout, thread pool (M5)
@@ -33,7 +39,7 @@ include/epykos/                          public headers, namespace epykos, macro
 src/                                     non-template implementation
 src/catalogue/generated/                 committed generated kernels (M3)
 tests/                                   gtest: unit, roundtrip, differential, adjoint, mutation
-bench/                                   Google Benchmark; results in bench/results/<fingerprint>/
+bench/                                   Google Benchmark; results in bench/results/<fingerprint>/; bench/hand/ = hand-fused reference kernels (D9)
 tools/catalogue/                         M3 generator
 third_party/                             gitignored
 .github/workflows/ci.yml                 tests only: ubuntu-latest GCC 13, macos-latest Apple clang

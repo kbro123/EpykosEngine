@@ -13,10 +13,11 @@ using namespace instrument;
 
 namespace {
 
-const char* const sample_blueprints[] = {"USD-SOFR-OIS", "USD-SOFR-OIS-SHIFT2", "USD-SOFR-OIS-SHIFT2-LOCKOUT2", "USD-SOFR-AVG-SWAP",
-                                         "USD-SOFR-ON-DEPOSIT", "USD-SOFR-3M-FUTURE", "USD-SOFR-1M-FUTURE", "EUR-ESTR-OIS",
-                                         "EUR-ESTR-ON-DEPOSIT", "EUR-EURIBOR-3M-DEPOSIT", "EUR-EURIBOR-6M-DEPOSIT", "EUR-EURIBOR-3M-IRS",
-                                         "EUR-EURIBOR-6M-IRS", "EUR-3S6S-BASIS", "EUR-EURIBOR-3M-FUTURE"};
+const char* const sample_blueprints[] = {"USD-SOFR-OIS", "USD-SOFR-OIS-SHIFT2", "USD-SOFR-OIS-SHIFT2-LOCKOUT2", "USD-SOFR-OIS-LOOKBACK2",
+                                         "USD-SOFR-AVG-SWAP", "USD-SOFR-ON-DEPOSIT", "USD-SOFR-3M-FUTURE", "USD-SOFR-1M-FUTURE",
+                                         "EUR-ESTR-OIS", "EUR-ESTR-OIS-LAG1", "EUR-ESTR-ON-DEPOSIT", "EUR-EURIBOR-3M-DEPOSIT",
+                                         "EUR-EURIBOR-6M-DEPOSIT", "EUR-EURIBOR-3M-IRS", "EUR-EURIBOR-6M-IRS", "EUR-3S6S-BASIS",
+                                         "EUR-EURIBOR-3M-FUTURE"};
 const char* const sample_tenors[] = {"1Y", "2Y", "3Y", "5Y", "7Y"};
 
 }  // namespace

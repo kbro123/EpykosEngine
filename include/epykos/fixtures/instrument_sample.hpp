@@ -1,7 +1,8 @@
 // EpykosEngine — the instrument sample (M3/G2; a test-only fixture, D28): five seeded trades of
-// every Stage A blueprint (SOFR OIS plain / shifted / shifted + locked out, SOFR averaging
-// swaps, €STR OIS, EURIBOR 3M and 6M swaps, 3s6s basis swaps, the three deposits, SR3, SR1 and
-// FEU3 futures), two of each seasoned with realised fixings, priced off four linear-zero curves
+// every Stage A blueprint (SOFR OIS plain / shifted / shifted + locked out / lookback, SOFR
+// averaging swaps, €STR OIS plain and its 1-day payment-lag variant (M3-fix), EURIBOR 3M and 6M
+// swaps, 3s6s basis swaps, the three deposits, SR3, SR1 and FEU3 futures), two of each seasoned
+// with realised fixings, priced off four linear-zero curves
 // (USD-SOFR, EUR-ESTR, EUR-EURIBOR-3M, EUR-EURIBOR-6M) on a common 11-knot grid. SYNTHETIC:
 // the trades, quotes and fixings are generated from the seed (D16, D36); the conventions and
 // blueprints are the repository's data.

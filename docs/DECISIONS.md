@@ -433,3 +433,13 @@ averaging coupon, a term-rate coupon) are **code**, templated on `Scalar`, becau
 A trade of a known kind is a row; a new coupon kind or a new op is code, once. `blueprints/` are definitions, not
 fixtures: quotes, fixings and trade populations stay seeded (D16). A payoff language interpreted at record time into
 the op set remains a later item; the record cycle makes it performance-neutral by construction.
+
+## D37 — SwapEngine's harvested market conventions may be used as data (2026-09-23)
+Refines D11 and D21 for one more purpose. The market conventions already harvested in SwapEngine —
+`conventions/conventions.json` and its schema in the SwapEngine checkout (calendars as rule lists with observance
+rules, day counts, indices, products including OIS, IRS, tenor basis, futures, FX forwards and MtM cross-currency
+swaps, FX pairs, central-bank schedules, each with its cited sources) — may be **read and imported as data** into
+`blueprints/`, with provenance recorded (the SwapEngine file, its `meta.sources`, the date). Still no code: nothing
+under `include/`, `src/`, `api/`, `tools/` or `tests/` of SwapEngine is opened. Imported conventions are
+cross-checked against the independent web research of `docs/G4_BUNDLE.md`; a disagreement is recorded, not
+silently resolved either way.

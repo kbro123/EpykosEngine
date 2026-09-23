@@ -27,7 +27,7 @@
 #include <cstdio>
 namespace {
 struct ProfileTable {
-  static constexpr int slots = 64;   // domain id, or slots - 1 for the output copy
+  static constexpr int slots = 4096;   // domain id, or slots - 1 for the output copy (a program with more domains folds the rest into slots - 2)
   double ns[slots] = {};
   long runs = 0;
   ~ProfileTable() {
@@ -36,22 +36,24 @@ struct ProfileTable {
     for (double v : ns) total += v;
     std::fprintf(stderr, "exec profile over %ld runs (us per run):\n", runs);
     for (int i = 0; i < slots; ++i) {
-      if (ns[i] > 0.0) std::fprintf(stderr, "  slot %2d: %9.2f us (%5.1f%%)\n", i, ns[i] / static_cast<double>(runs) / 1e3, 100.0 * ns[i] / total);
+      if (ns[i] > 0.0) std::fprintf(stderr, "  slot %4d: %12.2f us (%5.1f%%)\n", i, ns[i] / static_cast<double>(runs) / 1e3, 100.0 * ns[i] / total);
     }
-    std::fprintf(stderr, "  total  : %9.2f us\n", total / static_cast<double>(runs) / 1e3);
+    std::fprintf(stderr, "  total    : %12.2f us\n", total / static_cast<double>(runs) / 1e3);
   }
 } g_profile;
 struct ProfileScope {
   int slot;
   std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
-  explicit ProfileScope(int s) : slot(s) {}
+  explicit ProfileScope(int s) : slot(s < ProfileTable::slots - 1 ? s : ProfileTable::slots - 2) {}
   ~ProfileScope() { g_profile.ns[slot] += std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count(); }
 };
 }  // namespace
 #define EPYKOS_EXEC_PROFILE_SCOPE(slot) ProfileScope profile_scope_(slot)
+#define EPYKOS_EXEC_PROFILE_OUTPUT_SLOT (ProfileTable::slots - 1)
 #define EPYKOS_EXEC_PROFILE_RUN() ++g_profile.runs
 #else
 #define EPYKOS_EXEC_PROFILE_SCOPE(slot)
+#define EPYKOS_EXEC_PROFILE_OUTPUT_SLOT 0
 #define EPYKOS_EXEC_PROFILE_RUN()
 #endif
 
@@ -1205,7 +1207,7 @@ void Interpreter::run(const double* state, int B, double* out) const {
       }
     }
     {
-      EPYKOS_EXEC_PROFILE_SCOPE(63);
+      EPYKOS_EXEC_PROFILE_SCOPE(EPYKOS_EXEC_PROFILE_OUTPUT_SLOT);
       copy_out(ctx.v, values, im.late_ids.data(), im.late_ords.data(), static_cast<int>(im.late_ids.size()), out, B, b0, L);
     }
   }

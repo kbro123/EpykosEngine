@@ -238,7 +238,7 @@ Correctness gates:
   defects behind `epykos::mutant("<pass>.<defect>")` (`include/epykos/mutation/`), compiled in only by the `mutation`
   preset and selected one per process by `EPYKOS_MUTANT`; `scripts/mutation_test.sh` runs the gates above once per
   registered mutant and fails if any survives — a survivor is a gap in the gates, never a job for a mutant-specific
-  test (D31);
+  test (D32);
 - **external oracles** (QuantLib and others) added per product, test-only.
 
 Performance gates: per machine+toolchain fingerprint; fail on > 1.25× self-regression or an absolute target miss.

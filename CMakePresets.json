@@ -43,7 +43,7 @@
     {
       "name": "mutation",
       "displayName": "mutation: reference flags + EPYKOS_MUTATIONS=ON (scripts/mutation_test.sh)",
-      "description": "The reference build with the registered mutants compiled in; EPYKOS_MUTANT=<name> selects one at run time (D31). Never a gated or measured build.",
+      "description": "The reference build with the registered mutants compiled in; EPYKOS_MUTANT=<name> selects one at run time (D32). Never a gated or measured build.",
       "inherits": "reference",
       "cacheVariables": {
         "EPYKOS_MUTATIONS": "ON"

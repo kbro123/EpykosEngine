@@ -10,7 +10,7 @@
   "os": "Darwin",
   "arch": "x86_64"
  },
- "updated": "2026-09-23T09:12:31+01:00",
+ "updated": "2026-09-23T10:15:16+01:00",
  "note": "accepted baseline per benchmark (medians); updated only by scripts/perf_gate.py --accept in perf commits",
  "runs": {
   "hand_m1_hand": {
@@ -457,6 +457,71 @@
    "commit_full": "b32182a64f3d1653b1e435bae300955b6a305f3a",
    "date": "2026-09-23T08:15:34+01:00",
    "accepted": "2026-09-23T09:12:31+01:00"
+  },
+  "m2": {
+   "benchmarks": {
+    "BM_AdjointEval/tile:128/lane_tile:1": {
+     "median": 416.41153735599937,
+     "unit": "us",
+     "n": 20,
+     "min": 411.21227928280916,
+     "p90": 419.21237860024416,
+     "commit": "8914934",
+     "date": "2026-09-23T10:13:28+01:00"
+    },
+    "BM_AdjointEval/tile:256/lane_tile:1": {
+     "median": 416.2414779314788,
+     "unit": "us",
+     "n": 20,
+     "min": 411.98655347252054,
+     "p90": 418.6532764460631,
+     "commit": "8914934",
+     "date": "2026-09-23T10:13:28+01:00"
+    },
+    "BM_AdjointEval/tile:512/lane_tile:1": {
+     "median": 419.6011493837718,
+     "unit": "us",
+     "n": 20,
+     "min": 415.45545481654636,
+     "p90": 422.1894176341981,
+     "commit": "8914934",
+     "date": "2026-09-23T10:13:28+01:00"
+    },
+    "BM_AdjointEvalBatch/tile:128/lane_tile:8": {
+     "median": 14609.57681564124,
+     "unit": "us",
+     "n": 20,
+     "min": 14415.628999765766,
+     "p90": 14750.545954723892,
+     "commit": "8914934",
+     "date": "2026-09-23T10:13:28+01:00"
+    },
+    "BM_AdjointEvalBatch/tile:256/lane_tile:8": {
+     "median": 15141.095804412746,
+     "unit": "us",
+     "n": 20,
+     "min": 14955.058952586518,
+     "p90": 15288.099452542761,
+     "commit": "8914934",
+     "date": "2026-09-23T10:13:28+01:00"
+    },
+    "BM_AdjointBuild": {
+     "median": 2742.952928464446,
+     "unit": "us",
+     "n": 20,
+     "min": 2472.4704316920706,
+     "p90": 2935.5655889958143,
+     "commit": "8914934",
+     "date": "2026-09-23T10:13:28+01:00"
+    }
+   },
+   "source": "m2.json",
+   "binary": "build/release/bench/adjoint_m1_adjoint_bench",
+   "preset": "release",
+   "commit": "8914934",
+   "commit_full": "891493472f4b43fffb3ab44aa588c121d872af07",
+   "date": "2026-09-23T10:13:28+01:00",
+   "accepted": "2026-09-23T10:15:16+01:00"
   }
  }
 }

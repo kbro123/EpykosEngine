@@ -91,9 +91,9 @@ AdjointPlan build_plan(const Program& p) {
 
   for (size_t d = 0; d < n_dom; ++d) {
     const Domain& dom = p.domains[d];
-    if (dom.recurrent) {
+    if (dom.recurrent && dom.scan < 0) {
       throw std::invalid_argument("adjoint: domain " + std::to_string(d) + " (" + dom.name +
-                                  ") is recurrent (a scan; unsupported until M5)");
+                                  ") is recurrent but not a scan; only scan domains read themselves");
     }
     const Group& g = p.groups[d];
     for (const Step& s : g.steps) {
@@ -105,6 +105,7 @@ AdjointPlan build_plan(const Program& p) {
     AdjointPlan::DomainPlan& dp = plan.domains[d];
     dp.is_input = g.steps.size() == 1 && g.steps[0].op == Op::Input;
     dp.is_const = g.steps.size() == 1 && g.steps[0].op == Op::Const;
+    dp.is_scan = dom.scan >= 0;
   }
 
   // Edge slots: one per (gather, row) and per (segment, row).
@@ -269,10 +270,15 @@ std::string describe(const AdjointPlan& plan, const Program& p) {
        << dp.readers << " reader entries over its rows";
     if (dp.is_input) os << ", Input (writes state_bar)";
     if (dp.is_const) os << ", Const (nothing to reverse)";
+    if (dp.is_scan) {
+      const ir::Scan& sc = p.scans[idx(dom.scan)];
+      os << ", scan of " << sc.chains() << " chain(s) (reverse scan: rows backwards, the carry's edge slot pulled by the previous step)";
+    }
     os << '\n';
     for (size_t k = g.steps.size(); k-- > 0;) {
       const Step& s = g.steps[k];
-      const OpRule rule = adjoint_rule(s.op);
+      OpRule rule = adjoint_rule(s.op);
+      if (ir::is_fixed_sum(s)) rule = OpRule{true, true, s.c.kind != SlotKind::None, "abar += ybar; bbar += ybar; cbar += ybar (fixed-arity Sum)"};
       os << "    step " << k << " " << to_string(s.op) << ": " << rule.formula;
       auto target = [&](const char* name, const Slot& sl, bool receives) {
         if (sl.kind == SlotKind::None) return;

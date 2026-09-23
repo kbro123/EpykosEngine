@@ -60,6 +60,7 @@ struct Ctx {
   // build (mutation::compiled_in is a constexpr false elsewhere, so the checks fold away).
   bool select_wrong_arm = false;  // adjoint.select_wrong_arm: the adjoint goes to the other arm
   bool recip_rule_sign = false;   // adjoint.recip_rule_sign: abar += (ybar*y)*y instead of -=
+  bool scan_forward_order = false;  // adjoint.scan_forward_order: the reverse scan runs forwards
 };
 
 // ---- flat elementwise kernels over N = n·L contiguous elements (row-major, lane innermost).
@@ -240,6 +241,17 @@ struct Lanes {
         break;
       }
       case Op::Sum: {
+        if (ir::is_fixed_sum(s)) {
+          // A scan group's Sum over operand slots: the left fold of the loaded operands.
+          const double* a = operand(c, s.a, k, 0, r0, n, true);
+          const double* b = operand(c, s.b, k, 1, r0, n, true);
+          const double* cc = operand(c, s.c, k, 2, r0, n, true);
+          for (size_t e = 0; e < N; ++e) y[e] = a[e] + b[e];
+          if (cc != nullptr) {
+            for (size_t e = 0; e < N; ++e) y[e] = y[e] + cc[e];
+          }
+          break;
+        }
         const Segment& seg = p.segments[idx(s.a.index)];
         for (int i = 0; i < n; ++i) {
           const std::int32_t lo = seg.offsets[idx(r0 + i)];
@@ -326,6 +338,16 @@ struct Lanes {
       }
       case Op::Sum:
       case Op::Affine: {
+        if (ir::is_fixed_sum(s)) {
+          // Every member of the fold receives the adjoint (a, then b, then c).
+          double* ta = target(c, s.a, r0);
+          double* tb = target(c, s.b, r0);
+          double* tc = target(c, s.c, r0);
+          if (ta) acc_plus(N, ta, yb);
+          if (tb) acc_plus(N, tb, yb);
+          if (tc) acc_plus(N, tc, yb);
+          break;
+        }
         double* t = c.segbar + (idx(c.plan->segment_slot_base[idx(s.a.index)]) + static_cast<size_t>(r0)) * static_cast<size_t>(L);
         acc_plus(N, t, yb);
         break;
@@ -399,8 +421,11 @@ struct Lanes {
       const Group& g = p.groups[d];
       const int last = static_cast<int>(g.steps.size()) - 1;
       double* dom_values = c.values + idx(dom.value_base) * static_cast<size_t>(L);
-      for (int r0 = 0; r0 < dom.rows; r0 += c.tile) {
-        const int n = std::min(c.tile, dom.rows - r0);
+      // A scan's rows read earlier rows of the domain through the carry: one row per tile, in
+      // row order, so that every operand load sees the previous row's value (D37).
+      const int tile = c.plan->domains[d].is_scan ? 1 : c.tile;
+      for (int r0 = 0; r0 < dom.rows; r0 += tile) {
+        const int n = std::min(tile, dom.rows - r0);
         for (int k = 0; k <= last; ++k) {
           double* y = k == last ? dom_values + static_cast<size_t>(r0) * static_cast<size_t>(L)
                                 : c.fs + static_cast<size_t>(k) * c.tile_elems;
@@ -461,8 +486,15 @@ struct Lanes {
       const AdjointPlan::DomainPlan& dp = plan.domains[d];
       const int last = static_cast<int>(g.steps.size()) - 1;
       const double* dom_values = c.values + idx(dom.value_base) * static_cast<size_t>(L);
-      for (int r0 = 0; r0 < dom.rows; r0 += c.tile) {
-        const int n = std::min(c.tile, dom.rows - r0);
+      // The reverse scan (D37): a scan's rows one at a time from the last to the first, so
+      // that row r's pull sees the edge slot (carry, r + 1) its successor's reverse has just
+      // written — the carried adjoint. Rows of other domains are independent and go in tiles.
+      // Mutant adjoint.scan_forward_order: the scan's rows are reversed in row order, so the
+      // carried adjoint arrives after it was pulled.
+      const int n_tiles = dp.is_scan ? dom.rows : (dom.rows + c.tile - 1) / c.tile;
+      for (int ti = 0; ti < n_tiles; ++ti) {
+        const int r0 = dp.is_scan ? ((mutation::compiled_in && c.scan_forward_order) ? ti : dom.rows - 1 - ti) : ti * c.tile;
+        const int n = dp.is_scan ? 1 : std::min(c.tile, dom.rows - r0);
         const size_t N = static_cast<size_t>(n) * static_cast<size_t>(L);
         pull(c, dom, r0, n);
         if (dp.is_const) continue;
@@ -566,6 +598,7 @@ void Adjoint::run(const double* state, int B, const double* out_bar, double* out
   c.B = B;
   c.select_wrong_arm = mutant("adjoint.select_wrong_arm");
   c.recip_rule_sign = mutant("adjoint.recip_rule_sign");
+  c.scan_forward_order = mutant("adjoint.scan_forward_order");
   for (int b0 = 0; b0 < B; b0 += im.Lt) {
     c.b0 = b0;
     c.L = std::min(im.Lt, B - b0);

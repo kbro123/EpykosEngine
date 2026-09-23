@@ -19,7 +19,8 @@
 // Adding a mutant: add the name here, to the registry test's expected list and to the table in
 // docs/WORKLOADS.md §M2, then the guarded line in the pass. A name is "<pass>.<defect>", lower
 // case, dot-separated. A mutant of an op the M1 book does not contain (select, recip) is
-// exercised by the near-miss shapes fixture's gates; the table says which fixture exercises each.
+// exercised by the near-miss shapes fixture's gates, a mutant of the scan machinery (M3/G3) by
+// the scan fixtures' gates; the table says which fixture exercises each.
 #pragma once
 
 #include <cstddef>
@@ -46,6 +47,9 @@ inline constexpr std::string_view registry[] = {
     "implicit.ift_not_transposed",   // Factors::solve_transposed: the IFT multiplier solves F_z lambda = z_bar instead of F_z^T lambda = z_bar
     "implicit.ift_drop_fp",          // Factors::ift_adjoint: the parameter pull p_bar -= F_p^T lambda is skipped (the quotes receive no adjoint)
     "implicit.stale_jacobian",       // BlockSolver::solve: the IFT uses the Jacobian of the last iterate before convergence, not the solution's
+    "expander.scan_carry_from_init", // expand: every step of a scan chain reads the chain's initial value instead of the previous step (no scan on the M1 book: the scan fixtures' round-trip gates)
+    "interpreter.scan_drop_last_wave", // Interpreter::run: the last wave of every scan (the last step of its longest chains) is not evaluated (the scan fixtures' E0 gates)
+    "adjoint.scan_forward_order",    // Adjoint::run: the reverse scan visits the rows forwards, so the carried adjoint arrives after it was pulled (the scan fixtures' adjoint gates)
 };
 inline constexpr std::size_t registry_size = sizeof(registry) / sizeof(registry[0]);
 

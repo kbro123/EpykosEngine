@@ -51,6 +51,20 @@ Tape expand(const Program& p) {
   // index[r]. expander.segment_off_by_one: every segment loses its last member.
   const bool drop_gather = mutant("expander.drop_gather");
   const bool segment_off_by_one = mutant("expander.segment_off_by_one");
+  // expander.scan_carry_from_init: every step of a chain reads the chain's initial value (the
+  // first row's carry) instead of the previous step: the scan is unrolled without its recurrence.
+  const bool scan_carry_from_init = mutant("expander.scan_carry_from_init");
+  std::vector<std::int32_t> carry_gather_of(p.domains.size(), -1);
+  std::vector<std::int32_t> chain_first_of(p.num_values(), -1);  // per scan row: its chain's first row
+  for (const Scan& sc : p.scans) {
+    carry_gather_of[idx(sc.domain)] = sc.carry_gather;
+    const value_id base = p.domains[idx(sc.domain)].value_base;
+    for (std::int32_t ch = 0; ch < sc.chains(); ++ch) {
+      for (std::int32_t r = sc.chain_offsets[idx(ch)]; r < sc.chain_offsets[idx(ch) + 1]; ++r) {
+        chain_first_of[idx(base + r)] = sc.chain_offsets[idx(ch)];
+      }
+    }
+  }
 
   std::vector<node_id> scratch;
   std::vector<node_id> members;
@@ -74,7 +88,10 @@ Tape expand(const Program& p) {
           case SlotKind::Literal:
           case SlotKind::Column: return t.constant(value_of_slot(s));
           case SlotKind::Gather: {
-            const value_id target = (drop_gather && s.index == 0) ? static_cast<value_id>(r) : p.gathers[idx(s.index)].index[idx(r)];
+            value_id target = (drop_gather && s.index == 0) ? static_cast<value_id>(r) : p.gathers[idx(s.index)].index[idx(r)];
+            if (scan_carry_from_init && s.index == carry_gather_of[d] && chain_first_of[idx(self)] >= 0) {
+              target = p.gathers[idx(s.index)].index[idx(chain_first_of[idx(self)])];
+            }
             const node_id n = node_of[idx(target)];
             if (n == invalid_node) fail("gather reads a value that has not been emitted");
             return n;
@@ -99,6 +116,15 @@ Tape expand(const Program& p) {
           }
           case Op::Sum:
           case Op::Affine: {
+            if (is_fixed_sum(s)) {
+              // A scan group's Sum over operand slots: the variadic node it was recorded as.
+              members.clear();
+              members.push_back(operand(s.a));
+              members.push_back(operand(s.b));
+              if (s.c.kind != SlotKind::None) members.push_back(operand(s.c));
+              id = t.variadic(Op::Sum, members);
+              break;
+            }
             const Segment& seg = p.segments[idx(s.a.index)];
             members.clear();
             coefs.clear();

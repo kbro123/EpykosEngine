@@ -5,8 +5,9 @@
 // *_e0_test.cpp TUs, compiled with -ffp-contract=off).
 //
 // Iteration order: domains in Program order; rows in order; steps in order. A gather reads the
-// value space, which holds every earlier domain's rows (and, for a recurrent domain, earlier rows
-// of the same domain). Sum: acc = m_0; acc = acc + m_k. Affine: acc = c_0; p = k·m; acc = acc + p.
+// value space, which holds every earlier domain's rows (and, for a recurrent domain — a scan —
+// earlier rows of the same domain). Sum: acc = m_0; acc = acc + m_k (a fixed-arity Sum folds its
+// operand slots a, b, c the same way). Affine: acc = c_0; p = k·m; acc = acc + p.
 #pragma once
 
 #include <algorithm>
@@ -80,6 +81,13 @@ class Evaluator {
             case Op::CmpGe: res = (fetch(st.a, r, s, inputs, base + r) >= fetch(st.b, r, s, inputs, base + r)) ? 1.0 : 0.0; break;
             case Op::CmpEq: res = (fetch(st.a, r, s, inputs, base + r) == fetch(st.b, r, s, inputs, base + r)) ? 1.0 : 0.0; break;
             case Op::Sum: {
+              if (is_fixed_sum(st)) {
+                double acc = fetch(st.a, r, s, inputs, base + r);
+                acc = acc + fetch(st.b, r, s, inputs, base + r);
+                if (st.c.kind != SlotKind::None) acc = acc + fetch(st.c, r, s, inputs, base + r);
+                res = acc;
+                break;
+              }
               const Segment& seg = p.segments[static_cast<std::size_t>(st.a.index)];
               const std::int32_t lo = seg.offsets[static_cast<std::size_t>(r)];
               const std::int32_t hi = seg.offsets[static_cast<std::size_t>(r) + 1];

@@ -20,13 +20,25 @@
 // id per row); Sum / Affine operands become segments. Const nodes that are themselves Sum
 // members or outputs form the "const" domain (one Const step, one column).
 //
-// Recurrences: a class whose rows read rows of the same class directly is a scan candidate
-// (DESIGN.md §5.6; a `scan` domain is M5 work). Like any class in a cycle it is split by
-// dependency level, and every level-domain carries `Domain::scan_class`; no domain infer()
-// produces reads itself, so `Domain::recurrent` is never set (D22, D23). Classes that reach
-// themselves only through other classes (legs -> swaps -> book) are split the same way, so that
-// every domain is evaluable in one pass; domains are then ordered topologically (ties by first
-// appearance on the tape).
+// Recurrences (DESIGN.md §5.6, D37): before the partition, chains x_{k+1} = f(x_k, ...) are
+// detected without hints — a node whose expression tree, with one node cut out and replaced by
+// a carry token, hashes like the cut node's own tree with its own cut, for three or more steps
+// in a row (the natural product loop acc = acc·(1 + r·τ), a path x_{k+1} = a_k·x_k + b_k). The
+// steps of a chain become boundaries, the cut becomes the carry — a reference like any other,
+// to the previous step or, for the first step, to the initial value (a Const initial value is
+// a row of the const domain) — and the class of the steps is one *scan domain*: recurrent, its
+// rows chain-major, `Program::scans` describing the chains and the carry gather. A Sum on the
+// carry's path (fold_sum's `+` of a·x + b) is a fixed-arity Sum step of the group. An inner
+// running sum (x + a_k with x used once) is a reduction and is left to fold_sum, never a
+// scan; a chain of fewer than three steps is straight-line code.
+//
+// A class that reads itself in any other way — the carry inside an Affine, a step reading a
+// class that reads the scan, a short chain — is split by dependency level like any class in a
+// cycle, and every level-domain carries `Domain::scan_class` with `Domain::recurrent` false
+// (D22, D23). Classes that reach themselves only through other classes (legs -> swaps -> book)
+// are split the same way, so that every domain is evaluable in one pass; domains are then
+// ordered topologically (ties by first appearance on the tape). The M1 book has no chain of any
+// kind: its program is unchanged by the detection (asserted by its tests).
 
 //
 // Reserved ops (Gather … Pin) are rejected with std::invalid_argument; the tape is validated
@@ -49,8 +61,12 @@ struct InferStats {
   std::size_t const_leaves = 0;      // Const nodes that only appear as constant slots
   std::size_t classes = 0;           // signature classes before level splitting
   std::size_t domains = 0;           // after level splitting
-  std::size_t boundary_rounds = 0;   // passes of the sharing rule (1)
+  std::size_t boundary_rounds = 0;   // passes of the sharing rule (1; 2 when chains were found)
   std::size_t class_promoted = 0;    // nodes made boundaries by the sharing rule
+  std::size_t chains = 0;            // chains accepted by the scan detection (D37)
+  std::size_t chain_nodes = 0;       // their steps (rows of scan domains)
+  std::size_t scan_classes = 0;      // classes laid out as scan domains
+  std::size_t scan_rounds = 0;       // inference rounds (1 + retries after a scan class could not be laid out)
 };
 
 Program infer(const Tape& tape, InferStats* stats = nullptr);

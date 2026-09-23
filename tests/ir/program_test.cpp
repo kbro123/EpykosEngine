@@ -201,8 +201,10 @@ TEST(IrProgram, ConstantMembersAndConstantOutputsAreRowsOfTheConstDomain) {
   EXPECT_EQ(bits(out[1]), bits(-1.0));
 }
 
-TEST(IrProgram, DirectRecurrenceIsAScanClassSplitByLevel) {
-  // x_j = x_{j-1} * c_j + d_j, every x_j an output: one class whose rows read their own class.
+TEST(IrProgram, DirectRecurrenceIsAScanDomain) {
+  // x_j = x_{j-1} * c_j + d_j, every x_j an output: a chain of five identical steps, detected
+  // without hints (D37): one recurrent scan domain of five rows whose carry gather reads the
+  // input for the first row and the previous row after that.
   Tape t;
   const int n = 5;
   {
@@ -215,25 +217,88 @@ TEST(IrProgram, DirectRecurrenceIsAScanClassSplitByLevel) {
   }
   ir::InferStats stats;
   const ir::Program p = ir::infer(t, &stats);
-  // The class reads itself, so every level-domain carries scan_class; after the split no domain
-  // reads itself, so none is recurrent (D23) and every domain reads only earlier domains.
-  EXPECT_TRUE(ir::recurrent_domains(p).empty());
-  const std::vector<ir::domain_id> scan = ir::scan_class_domains(p);
-  EXPECT_EQ(scan.size(), static_cast<std::size_t>(n)) << "one level per step";
-  for (ir::domain_id d : scan) {
-    const ir::Domain& dom = p.domains[static_cast<std::size_t>(d)];
-    EXPECT_EQ(dom.rows, 1);
-    EXPECT_TRUE(dom.scan_class);
-    EXPECT_FALSE(dom.recurrent);
-    for (ir::domain_id r : dom.reads) EXPECT_LT(r, d);
-  }
+  EXPECT_EQ(stats.chains, 1u);
+  EXPECT_EQ(stats.chain_nodes, static_cast<std::size_t>(n));
+  EXPECT_EQ(stats.scan_classes, 1u);
+  EXPECT_EQ(stats.scan_rounds, 1u);
+  const std::vector<ir::domain_id> scan = ir::scan_domains(p);
+  ASSERT_EQ(scan.size(), 1u) << ir::to_string(p);
+  EXPECT_EQ(ir::recurrent_domains(p), scan);
+  EXPECT_EQ(ir::scan_class_domains(p), scan);
+  const ir::Domain& dom = p.domains[static_cast<std::size_t>(scan[0])];
+  EXPECT_EQ(dom.rows, n);
+  EXPECT_TRUE(dom.recurrent);
+  EXPECT_TRUE(dom.scan_class);
+  EXPECT_EQ(dom.name, "add(mul(^,$0),$1)@scan");
+  ASSERT_EQ(p.scans.size(), 1u);
+  const ir::Scan& sc = p.scans[0];
+  EXPECT_EQ(sc.domain, scan[0]);
+  EXPECT_EQ(sc.chains(), 1);
+  EXPECT_EQ(sc.chain_offsets, (std::vector<std::int32_t>{0, n}));
+  const ir::Gather& carry = p.gathers[static_cast<std::size_t>(sc.carry_gather)];
+  EXPECT_EQ(carry.index[0], p.inputs[0]);
+  for (int r = 1; r < n; ++r) EXPECT_EQ(carry.index[static_cast<std::size_t>(r)], dom.value_base + r - 1);
   EXPECT_EQ(stats.classes, 2u);
-  EXPECT_EQ(stats.domains, static_cast<std::size_t>(n) + 1);
+  EXPECT_EQ(stats.domains, 2u);
   std::string diff;
   EXPECT_TRUE(ir::roundtrip_identical(t, ir::expand(p), &diff)) << diff;
   const std::vector<double> a = epykos::replay(t, {2.0});
   const std::vector<double> b = ir::evaluate(p, {2.0});
   for (std::size_t k = 0; k < a.size(); ++k) EXPECT_EQ(bits(a[k]), bits(b[k])) << k;
+  // The serialised form carries the scan.
+  const ir::Program q = ir::deserialize(ir::serialize(p));
+  EXPECT_TRUE(q == p);
+  EXPECT_EQ(q.scans, p.scans);
+}
+
+TEST(IrProgram, TwoStepChainsAreNotScans) {
+  // Two identical steps in a row are straight-line code (D37: a chain needs three): x·a·b with
+  // a, b references stays one class of inner nodes, exp(exp(x)) with the inner exp an output
+  // stays a level-split class (D23).
+  Tape t;
+  {
+    Tape::Scope scope(t);
+    for (int r = 0; r < 3; ++r) {
+      const Rec x = make_input(t, 0.5 + r);
+      const Rec a = make_input(t, 1.5 + r);
+      const Rec b = make_input(t, 2.5 + r);
+      register_output(t, x * a * b);
+      const Rec inner = exp(x);
+      register_output(t, inner);
+      register_output(t, exp(inner));
+    }
+  }
+  ir::InferStats stats;
+  const ir::Program p = check(t, "two-step chains");
+  ir::infer(t, &stats);
+  EXPECT_EQ(stats.chains, 0u);
+  EXPECT_TRUE(ir::scan_domains(p).empty()) << ir::to_string(p);
+  EXPECT_TRUE(ir::recurrent_domains(p).empty());
+  EXPECT_EQ(ir::scan_class_domains(p).size(), 2u) << "exp@L0 and exp@L1";
+  EXPECT_GE(find_domain(p, "mul(mul(@0,@1),@2)"), 0) << ir::to_string(p);
+}
+
+TEST(IrProgram, ARunningSumOfInnerValuesIsNotAScan) {
+  // acc = acc + term_k with every partial sum used once is a reduction (fold_sum's Sum), never a
+  // scan: on the raw recording the chain is one add tree, after fold_sum one Sum row.
+  Tape t;
+  {
+    Tape::Scope scope(t);
+    for (int r = 0; r < 2; ++r) {
+      Rec acc = make_input(t, 0.1 + r);
+      for (int k = 1; k <= 6; ++k) acc = acc + exp(make_input(t, 0.01 * k + r));
+      register_output(t, acc);
+    }
+  }
+  ir::InferStats stats;
+  const ir::Program raw = ir::infer(t, &stats);
+  EXPECT_EQ(stats.chains, 0u);
+  EXPECT_TRUE(ir::scan_domains(raw).empty()) << ir::to_string(raw);
+  epykos::standard_passes(t);
+  const ir::Program passed = ir::infer(t, &stats);
+  EXPECT_EQ(stats.chains, 0u);
+  EXPECT_TRUE(ir::scan_domains(passed).empty()) << ir::to_string(passed);
+  EXPECT_GE(find_domain(passed, "sum(%0)"), 0) << ir::to_string(passed);
 }
 
 TEST(IrProgram, IndirectCycleIsSplitByLevelWithoutARecurrence) {
@@ -330,8 +395,44 @@ TEST(IrProgram, SerialisationIsExactOnTheM1Book) {
 }
 
 // A group of more than 24 steps is named "<op>[<steps>]" with no whitespace, so that serialize
-// (one token per name) round-trips: y = sqrt(y * 1.5) fifteen times is one 30-step group.
+// (one token per name) round-trips: five different two-node steps cycled fifteen times is one
+// 30-step group (the cycle is ten nodes long, beyond the depth the scan detection looks for a
+// carry, so it is straight-line code, not a chain: D37; two alternating steps would be a
+// period-two scan).
 TEST(IrProgram, LongGroupNamesSerialiseAndRoundTrip) {
+  Tape t;
+  {
+    Tape::Scope scope(t);
+    for (int row = 0; row < 3; ++row) {
+      Rec y = make_input(t, 1.0 + row);
+      for (int k = 0; k < 15; ++k) {
+        switch (k % 5) {
+          case 0: y = sqrt(y * 1.5); break;
+          case 1: y = log(y / 0.5); break;
+          case 2: y = exp(y * 0.1); break;
+          case 3: y = -(y - 2.0); break;
+          default: y = recip(y * 0.25); break;
+        }
+      }
+      register_output(t, y);
+    }
+  }
+  const ir::Program p = check(t, "long group");  // includes deserialize(serialize(p)) == p
+  const ir::domain_id d = find_domain(p, "recip[30]");
+  ASSERT_GE(d, 0) << ir::to_string(p);
+  EXPECT_EQ(p.groups[static_cast<std::size_t>(d)].steps.size(), 30u);
+  EXPECT_EQ(p.domains[static_cast<std::size_t>(d)].rows, 3);
+  EXPECT_EQ(p.domains[static_cast<std::size_t>(d)].name, "recip[30]");
+  EXPECT_TRUE(ir::scan_domains(p).empty());
+  // A name with whitespace is refused by serialize rather than written as two tokens.
+  ir::Program q = p;
+  q.domains[static_cast<std::size_t>(d)].name = "recip[30 steps]";
+  EXPECT_THROW((void)ir::serialize(q), std::runtime_error);
+}
+
+// The same fifteen steps of one kind form a chain: three chains of fifteen sqrt(y * 1.5) steps
+// (their intermediates used once) are one scan domain of 45 rows, sequential along each chain.
+TEST(IrProgram, RepeatedInnerStepsAreAScan) {
   Tape t;
   {
     Tape::Scope scope(t);
@@ -341,16 +442,20 @@ TEST(IrProgram, LongGroupNamesSerialiseAndRoundTrip) {
       register_output(t, y);
     }
   }
-  const ir::Program p = check(t, "long group");  // includes deserialize(serialize(p)) == p
-  const ir::domain_id d = find_domain(p, "sqrt[30]");
+  ir::InferStats stats;
+  const ir::Program p = check(t, "sqrt chains");
+  ir::infer(t, &stats);
+  EXPECT_EQ(stats.chains, 3u);
+  EXPECT_EQ(stats.chain_nodes, 45u);
+  const ir::domain_id d = find_domain(p, "sqrt(mul(^,#0))");
   ASSERT_GE(d, 0) << ir::to_string(p);
-  EXPECT_EQ(p.groups[static_cast<std::size_t>(d)].steps.size(), 30u);
-  EXPECT_EQ(p.domains[static_cast<std::size_t>(d)].rows, 3);
-  EXPECT_EQ(p.domains[static_cast<std::size_t>(d)].name, "sqrt[30]");
-  // A name with whitespace is refused by serialize rather than written as two tokens.
-  ir::Program q = p;
-  q.domains[static_cast<std::size_t>(d)].name = "sqrt[30 steps]";
-  EXPECT_THROW((void)ir::serialize(q), std::runtime_error);
+  EXPECT_EQ(p.domains[static_cast<std::size_t>(d)].name, "sqrt(mul(^,#0))@scan");
+  EXPECT_EQ(p.domains[static_cast<std::size_t>(d)].rows, 45);
+  ASSERT_EQ(p.scans.size(), 1u);
+  EXPECT_EQ(p.scans[0].chain_offsets, (std::vector<std::int32_t>{0, 15, 30, 45}));
+  const std::vector<double> a = epykos::replay(t, {1.0, 2.0, 3.0});
+  const std::vector<double> b = ir::evaluate(p, {1.0, 2.0, 3.0});
+  for (std::size_t k = 0; k < a.size(); ++k) EXPECT_EQ(bits(a[k]), bits(b[k])) << k;
 }
 
 TEST(IrProgram, ShapeStringsAndSlotKindNames) {

@@ -38,10 +38,12 @@ std::string hex(double v) {
 
 [[noreturn]] void fail(const std::string& what) { throw std::runtime_error("ir: " + what); }
 
-// Per-group names of the slots in order of first use: #k literal, $k column, @k gather, %k segment.
+// Per-group names of the slots in order of first use: #k literal, $k column, @k gather, %k segment,
+// ^ the carry gather of a scan domain.
 struct SlotNames {
   std::map<std::pair<SlotKind, std::int32_t>, std::int32_t> number;
   std::vector<std::pair<SlotKind, std::int32_t>> order;
+  std::int32_t carry = -1;  // the gather index that is the scan's carry, or -1
   void note(const Slot& s) {
     if (s.kind == SlotKind::None || s.kind == SlotKind::Step || s.kind == SlotKind::Input) return;
     const auto key = std::make_pair(s.kind, s.index);
@@ -54,7 +56,9 @@ struct SlotNames {
     switch (s.kind) {
       case SlotKind::Literal: return "#" + std::to_string(number.at({s.kind, s.index}));
       case SlotKind::Column: return "$" + std::to_string(number.at({s.kind, s.index}));
-      case SlotKind::Gather: return "@" + std::to_string(number.at({s.kind, s.index}));
+      case SlotKind::Gather:
+        if (s.index == carry) return "^";
+        return "@" + std::to_string(number.at({s.kind, s.index}));
       case SlotKind::Segment: return "%" + std::to_string(number.at({s.kind, s.index}));
       case SlotKind::Input: return "in";
       default: return "?";
@@ -62,13 +66,15 @@ struct SlotNames {
   }
 };
 
-SlotNames slot_names(const Group& g) {
+SlotNames slot_names(const Group& g, std::int32_t carry = -1) {
   SlotNames names;
-  // Number per kind separately so that each kind starts at 0.
+  names.carry = carry;
+  // Number per kind separately so that each kind starts at 0 (the carry is named, not numbered).
   std::map<SlotKind, std::int32_t> counters;
   for (const Step& s : g.steps) {
     for (const Slot* sl : {&s.a, &s.b, &s.c, &s.konst}) {
       if (sl->kind == SlotKind::None || sl->kind == SlotKind::Step || sl->kind == SlotKind::Input) continue;
+      if (sl->kind == SlotKind::Gather && sl->index == carry) continue;
       const auto key = std::make_pair(sl->kind, sl->index);
       if (names.number.count(key) == 0) {
         names.number.emplace(key, counters[sl->kind]++);
@@ -98,6 +104,7 @@ void render(const Group& g, const SlotNames& names, std::int32_t k, std::string&
       out += ')';
       return;
     case Op::Sum:
+      if (is_fixed_sum(s)) break;  // rendered like a fixed-arity op over its members
       out += "sum(";
       out += names.name(s.a);
       out += ')';
@@ -114,7 +121,7 @@ void render(const Group& g, const SlotNames& names, std::int32_t k, std::string&
   }
   out += to_string(s.op);
   out += '(';
-  const int arity = op_arity(s.op);
+  const int arity = s.op == Op::Sum ? fixed_sum_arity(s) : op_arity(s.op);
   if (arity >= 1) operand(s.a);
   if (arity >= 2) {
     out += ',';
@@ -174,10 +181,26 @@ std::vector<domain_id> scan_class_domains(const Program& p) {
   return out;
 }
 
+std::vector<domain_id> scan_domains(const Program& p) {
+  std::vector<domain_id> out;
+  for (size_t d = 0; d < p.domains.size(); ++d) {
+    if (p.domains[d].scan >= 0) out.push_back(static_cast<domain_id>(d));
+  }
+  return out;
+}
+
+namespace {
+std::int32_t carry_of(const Program& p, domain_id d) {
+  const std::int32_t sc = p.domains[idx(d)].scan;
+  if (sc < 0 || idx(sc) >= p.scans.size()) return -1;
+  return p.scans[idx(sc)].carry_gather;
+}
+}  // namespace
+
 std::string shape_string(const Program& p, domain_id d) {
   const Group& g = p.groups[idx(d)];
   if (g.steps.empty()) return "<empty>";
-  const SlotNames names = slot_names(g);
+  const SlotNames names = slot_names(g, carry_of(p, d));
   if (g.steps.size() > 24) {
     // Long groups are named by their last op and step count. No whitespace: serialize() writes
     // the name as one token.
@@ -241,6 +264,41 @@ void validate(const Program& p) {
       }
     }
   }
+  // Scans: one per scan domain, chain-major rows, the carry gather reading the previous row of
+  // the chain or, for a chain's first row, an earlier domain.
+  for (size_t d = 0; d < n_dom; ++d) {
+    const std::int32_t sc = p.domains[d].scan;
+    if (sc < 0) continue;
+    if (idx(sc) >= p.scans.size()) fail("domain " + std::to_string(d) + " names a scan out of range");
+    if (p.scans[idx(sc)].domain != static_cast<domain_id>(d)) fail("domain " + std::to_string(d) + " names a scan of another domain");
+    if (!p.domains[d].recurrent) fail("scan domain " + std::to_string(d) + " is not recurrent");
+  }
+  for (size_t i = 0; i < p.scans.size(); ++i) {
+    const Scan& sc = p.scans[i];
+    if (sc.domain < 0 || idx(sc.domain) >= n_dom) fail("scan " + std::to_string(i) + " has a bad domain");
+    const Domain& dom = p.domains[idx(sc.domain)];
+    if (dom.scan != static_cast<std::int32_t>(i)) fail("scan " + std::to_string(i) + " is not named by its domain");
+    if (sc.carry_gather < 0 || idx(sc.carry_gather) >= p.gathers.size() || p.gathers[idx(sc.carry_gather)].domain != sc.domain) {
+      fail("scan " + std::to_string(i) + " has a bad carry gather");
+    }
+    if (sc.chain_offsets.size() < 2 || sc.chain_offsets.front() != 0 || sc.chain_offsets.back() != dom.rows) {
+      fail("scan " + std::to_string(i) + " has bad chain offsets");
+    }
+    const Gather& carry = p.gathers[idx(sc.carry_gather)];
+    for (size_t c = 0; c + 1 < sc.chain_offsets.size(); ++c) {
+      const std::int32_t lo = sc.chain_offsets[c], hi = sc.chain_offsets[c + 1];
+      if (hi <= lo) fail("scan " + std::to_string(i) + " chain " + std::to_string(c) + " is empty");
+      if (carry.index[idx(lo)] >= dom.value_base) fail("scan " + std::to_string(i) + " chain " + std::to_string(c) + ": the first row's carry does not read an earlier domain");
+      for (std::int32_t r = lo + 1; r < hi; ++r) {
+        if (carry.index[idx(r)] != dom.value_base + r - 1) fail("scan " + std::to_string(i) + " row " + std::to_string(r) + ": the carry does not read the previous row of its chain");
+      }
+    }
+    bool used = false;
+    for (const Step& st : p.groups[idx(sc.domain)].steps) {
+      for (const Slot* sl : {&st.a, &st.b, &st.c, &st.konst}) used |= sl->kind == SlotKind::Gather && sl->index == sc.carry_gather;
+    }
+    if (!used) fail("scan " + std::to_string(i) + ": no step reads the carry");
+  }
   std::vector<std::int32_t> input_rows(idx(n_values), 0);
   for (size_t k = 0; k < p.inputs.size(); ++k) {
     const value_id v = p.inputs[k];
@@ -295,6 +353,15 @@ void validate(const Program& p) {
       } else if (s.op == Op::Const) {
         if (s.konst.kind != SlotKind::Literal && s.konst.kind != SlotKind::Column) fail(where + ": Const step needs a value slot");
         check(s.konst, true);
+      } else if (is_fixed_sum(s)) {
+        // A Sum over operand slots (scan groups): two or three members in a, b, c.
+        check(s.a, true);
+        check(s.b, true);
+        check(s.c, false);
+        if (s.a.kind == SlotKind::Segment || s.b.kind == SlotKind::Segment || s.c.kind == SlotKind::Segment) {
+          fail(where + ": segment operand on a fixed-arity Sum");
+        }
+        if (s.konst.kind != SlotKind::None) fail(where + ": a fixed-arity Sum has no c_0");
       } else if (s.op == Op::Sum || s.op == Op::Affine) {
         if (s.a.kind != SlotKind::Segment) fail(where + ": variadic step needs a segment");
         check(s.a, true);
@@ -341,10 +408,20 @@ void dump(const Program& p, std::ostream& os) {
     os << "d" << d << " rows=" << dom.rows << " base=" << dom.value_base << " level=" << dom.level;
     if (dom.recurrent) os << " recurrent";
     if (dom.scan_class) os << " scan-class";
+    if (dom.scan >= 0) {
+      const Scan& sc = p.scans[idx(dom.scan)];
+      std::int32_t lo = 0, hi = 0;
+      for (std::int32_t c = 0; c < sc.chains(); ++c) {
+        const std::int32_t len = sc.chain_offsets[idx(c) + 1] - sc.chain_offsets[idx(c)];
+        lo = (c == 0) ? len : std::min(lo, len);
+        hi = std::max(hi, len);
+      }
+      os << " scan(chains=" << sc.chains() << " steps=" << lo << ".." << hi << " carry=gather" << sc.carry_gather << ")";
+    }
     os << " reads={";
     for (size_t i = 0; i < dom.reads.size(); ++i) os << (i ? "," : "") << 'd' << dom.reads[i];
     os << "} steps=" << g.steps.size() << ' ' << dom.name << '\n';
-    const SlotNames names = slot_names(g);
+    const SlotNames names = slot_names(g, carry_of(p, static_cast<domain_id>(d)));
     for (const auto& key : names.order) {
       const Slot sl{key.first, key.second};
       os << "    " << names.name(sl) << " = ";
@@ -438,14 +515,14 @@ void expect(std::istream& is, const char* word) {
 
 std::string serialize(const Program& p) {
   std::ostringstream os;
-  os << "epykos-ir 2\n";
+  os << "epykos-ir 3\n";
   os << "literals " << p.literals.size();
   for (double v : p.literals) os << ' ' << hex(v);
   os << '\n';
   os << "domains " << p.domains.size() << '\n';
   for (const Domain& d : p.domains) {
     os << "domain " << d.rows << ' ' << d.value_base << ' ' << d.level << ' ' << (d.recurrent ? 1 : 0) << ' '
-       << (d.scan_class ? 1 : 0) << ' ' << d.reads.size();
+       << (d.scan_class ? 1 : 0) << ' ' << d.scan << ' ' << d.reads.size();
     for (domain_id r : d.reads) os << ' ' << r;
     // The name is one whitespace-delimited token (deserialize reads it with >>).
     for (char c : d.name) {
@@ -489,6 +566,12 @@ std::string serialize(const Program& p) {
     for (double c : s.coefs) os << ' ' << hex(c);
     os << '\n';
   }
+  os << "scans " << p.scans.size() << '\n';
+  for (const Scan& sc : p.scans) {
+    os << "scan " << sc.domain << ' ' << sc.carry_gather << ' ' << sc.chain_offsets.size();
+    for (std::int32_t o : sc.chain_offsets) os << ' ' << o;
+    os << '\n';
+  }
   os << "inputs " << p.inputs.size();
   for (value_id v : p.inputs) os << ' ' << v;
   os << '\n';
@@ -505,7 +588,7 @@ Program deserialize(const std::string& text) {
   std::istringstream is(text);
   Program p;
   expect(is, "epykos-ir");
-  if (get<int>(is, "version") != 2) fail("deserialize: unsupported version");
+  if (get<int>(is, "version") != 3) fail("deserialize: unsupported version");
   expect(is, "literals");
   {
     const size_t n = get<size_t>(is, "literal count");
@@ -522,6 +605,7 @@ Program deserialize(const std::string& text) {
       d.level = get<std::int32_t>(is, "level");
       d.recurrent = get<int>(is, "recurrent") != 0;
       d.scan_class = get<int>(is, "scan_class") != 0;
+      d.scan = get<std::int32_t>(is, "scan");
       const size_t nr = get<size_t>(is, "reads count");
 
       for (size_t k = 0; k < nr; ++k) d.reads.push_back(get<domain_id>(is, "read"));
@@ -594,6 +678,19 @@ Program deserialize(const std::string& text) {
       expect(is, "coefs");
       for (size_t k = 0; k < nc; ++k) s.coefs.push_back(get_double(is));
       p.segments.push_back(std::move(s));
+    }
+  }
+  expect(is, "scans");
+  {
+    const size_t n = get<size_t>(is, "scan count");
+    for (size_t i = 0; i < n; ++i) {
+      expect(is, "scan");
+      Scan sc;
+      sc.domain = get<domain_id>(is, "scan domain");
+      sc.carry_gather = get<std::int32_t>(is, "scan carry");
+      const size_t no = get<size_t>(is, "chain offset count");
+      for (size_t k = 0; k < no; ++k) sc.chain_offsets.push_back(get<std::int32_t>(is, "chain offset"));
+      p.scans.push_back(std::move(sc));
     }
   }
   expect(is, "inputs");

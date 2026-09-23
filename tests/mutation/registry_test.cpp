@@ -36,8 +36,8 @@ namespace {
 
 // The mutation set as documented in docs/WORKLOADS.md §M2, in the order the harness runs it.
 // Editing the registry in the header without editing this list (or the other way round) fails
-// ListsEveryMutant. The adjoint mutants (M2/Q4b) follow the pass mutants; the implicit-node
-// mutants (M3/G4) are the last three.
+// ListsEveryMutant. The adjoint mutants (M2/Q4b) follow the pass mutants, then the implicit-node
+// mutants (M3/G4), then the scan mutants (M3/G3).
 const std::vector<std::string> documented = {
     "cse.merge_nonequal",
     "fold_sum.wrong_order",
@@ -56,6 +56,9 @@ const std::vector<std::string> documented = {
     "implicit.ift_not_transposed",
     "implicit.ift_drop_fp",
     "implicit.stale_jacobian",
+    "expander.scan_carry_from_init",
+    "interpreter.scan_drop_last_wave",
+    "adjoint.scan_forward_order",
 };
 
 std::vector<std::string> registry_names() {

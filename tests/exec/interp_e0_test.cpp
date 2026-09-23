@@ -264,7 +264,8 @@ TEST(Interp, SameClassChainsSplitByLevelRunBitwise) {
     EXPECT_EQ(ir::scan_class_domains(program).size(), 2u) << ir::to_string(program);
     EXPECT_EQ(check_against_replay(tape, program, {{1.5, 2.5, 3.5}, {-1.0, 0.25, 8.0}}), 0u);
   }
-  // A 5-step recurrence x_j = x_{j-1}*c_j + d_j (every x_j an output): five level-domains of one row.
+  // A 5-step recurrence x_j = x_{j-1}*c_j + d_j (every x_j an output): since M3/G3 (D37) one
+  // scan domain of five rows, evaluated wave by wave; bitwise the replay at every lane tile.
   {
     Tape tape;
     {
@@ -276,13 +277,25 @@ TEST(Interp, SameClassChainsSplitByLevelRunBitwise) {
       }
     }
     const ir::Program program = ir::infer(tape);
-    EXPECT_TRUE(ir::recurrent_domains(program).empty()) << ir::to_string(program);
-    EXPECT_EQ(ir::scan_class_domains(program).size(), 5u) << ir::to_string(program);
+    EXPECT_EQ(ir::scan_domains(program).size(), 1u) << ir::to_string(program);
+    EXPECT_EQ(ir::recurrent_domains(program).size(), 1u) << ir::to_string(program);
+    EXPECT_EQ(ir::scan_class_domains(program).size(), 1u) << ir::to_string(program);
     for (int lane_tile : {1, 3}) {
-      exec::Options o;
-      o.lane_tile = lane_tile;
-      EXPECT_EQ(check_against_replay(tape, program, {{2.0}, {1.5}, {-0.5}}, o), 0u) << "lane_tile " << lane_tile;
+      for (int tile : {1, 2, 256}) {
+        exec::Options o;
+        o.lane_tile = lane_tile;
+        o.tile = tile;
+        EXPECT_EQ(check_against_replay(tape, program, {{2.0}, {1.5}, {-0.5}}, o), 0u) << "lane_tile " << lane_tile << " tile " << tile;
+      }
     }
+  }
+  // A recurrent domain that is not a scan is refused (only scans read themselves).
+  {
+    const fixtures::Book book = fixtures::make_m1_book();
+    const Tape tape = fixtures::record_m1(book);
+    ir::Program program = ir::infer(tape);
+    program.domains.back().recurrent = true;
+    EXPECT_THROW(exec::Interpreter in(program), std::invalid_argument);
   }
 }
 

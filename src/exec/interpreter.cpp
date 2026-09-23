@@ -905,8 +905,37 @@ void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
     table_bytes += g.emit_ordinal.size() * sizeof(std::int32_t);
   }
   if (dom.recurrent) {
-    throw std::invalid_argument("exec: domain " + std::to_string(d) + " (" + dom.name +
-                                ") is recurrent; scan domains are not supported by this interpreter");
+    if (dom.scan < 0) {
+      throw std::invalid_argument("exec: domain " + std::to_string(d) + " (" + dom.name +
+                                  ") is recurrent but not a scan; only scan domains read themselves");
+    }
+    if (g.fused || g.inlined_into >= 0 || !inline_refs[d].empty()) {
+      throw std::logic_error("exec: a scan domain was fused or inlined");
+    }
+    // Waves: a row's wave is one more than the deepest wave it reads through any gather into
+    // this domain (validate: only earlier rows), 0 when it reads none. Rows in row order.
+    g.scan = true;
+    std::vector<std::int32_t> wave(static_cast<std::size_t>(dom.rows), 0);
+    std::int32_t n_waves = 1;
+    for (const ir::Gather& ga : p->gathers) {
+      if (ga.domain != static_cast<ir::domain_id>(d)) continue;
+      for (std::int32_t r = 0; r < dom.rows; ++r) {
+        const ir::value_id v = ga.index[static_cast<std::size_t>(r)];
+        if (v < dom.value_base || v >= dom.value_base + r) continue;
+        const std::int32_t w = wave[static_cast<std::size_t>(v - dom.value_base)] + 1;
+        wave[static_cast<std::size_t>(r)] = std::max(wave[static_cast<std::size_t>(r)], w);
+        n_waves = std::max(n_waves, w + 1);
+      }
+    }
+    g.wave_begin.assign(static_cast<std::size_t>(n_waves) + 1, 0);
+    for (std::int32_t r = 0; r < dom.rows; ++r) ++g.wave_begin[static_cast<std::size_t>(wave[static_cast<std::size_t>(r)]) + 1];
+    for (std::int32_t w = 0; w < n_waves; ++w) g.wave_begin[static_cast<std::size_t>(w) + 1] += g.wave_begin[static_cast<std::size_t>(w)];
+    g.wave_rows.resize(static_cast<std::size_t>(dom.rows));
+    {
+      std::vector<std::int32_t> cursor(g.wave_begin.begin(), g.wave_begin.end() - 1);
+      for (std::int32_t r = 0; r < dom.rows; ++r) g.wave_rows[static_cast<std::size_t>(cursor[static_cast<std::size_t>(wave[static_cast<std::size_t>(r)])]++)] = r;
+    }
+    table_bytes += (g.wave_rows.size() + g.wave_begin.size()) * sizeof(std::int32_t);
   }
   if (grp.steps.empty()) throw std::invalid_argument("exec: a group with no steps");
   if (is_whole_segment(grp)) {
@@ -1000,6 +1029,41 @@ void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
   };
   for (std::size_t k = 0; k < grp.steps.size();) {
     StepPlan sp;
+    if (ir::is_fixed_sum(grp.steps[k])) {
+      // A scan group's Sum over operand slots: the left fold as Add kernels — Sum(a, b) is one
+      // Add; Sum(a, b, c) is Add(a, b) into a temporary then Add(temporary, c) — the same
+      // roundings in the same order as the variadic fold (E0).
+      const ir::Step& st = grp.steps[k];
+      const bool three = st.c.kind != ir::SlotKind::None;
+      StepPlan first;
+      first.op = Op::Add;
+      first.a = resolve(st.a);
+      first.b = resolve(st.b);
+      first.out = three ? tmp_buffer(0) : ((k + 1 == grp.steps.size()) ? nullptr : step_buffer(static_cast<int>(k)));
+      first.ir_first = first.ir_last = static_cast<int>(k);
+      for (int v = 0; v < n_lane_variants; ++v) {
+        first.fn[row_contiguous][v] = binary_kernel(v, Op::Add, first.a.kind, first.b.kind, false);
+        first.fn[row_indirect][v] = binary_kernel(v, Op::Add, first.a.kind, first.b.kind, true);
+      }
+      first.name = std::string("sum:add(") + to_string(first.a.kind) + "," + to_string(first.b.kind) + ")";
+      g.steps.push_back(std::move(first));
+      if (three) {
+        StepPlan second;
+        second.op = Op::Add;
+        second.a = Operand{Kind::Vec, tmp_buffer(0), nullptr};
+        second.b = resolve(st.c);
+        second.out = (k + 1 == grp.steps.size()) ? nullptr : step_buffer(static_cast<int>(k));
+        second.ir_first = second.ir_last = static_cast<int>(k);
+        for (int v = 0; v < n_lane_variants; ++v) {
+          second.fn[row_contiguous][v] = binary_kernel(v, Op::Add, Kind::Vec, second.b.kind, false);
+          second.fn[row_indirect][v] = binary_kernel(v, Op::Add, Kind::Vec, second.b.kind, true);
+        }
+        second.name = std::string("sum:add(vec,") + to_string(second.b.kind) + ")";
+        g.steps.push_back(std::move(second));
+      }
+      k += 1;
+      continue;
+    }
     if (opt.fuse_pairs && k + 1 < grp.steps.size() && build_pair_step(grp, uses, k, sp)) {
       // The chain continues while the last covered step is read only by the next one and that
       // step is a tail shape (a unary, or a binary with a literal / column).
@@ -1073,6 +1137,7 @@ void Interpreter::run(const double* state, int B, double* out) const {
   // Mutant interpreter.tile_boundary: the last row of every elementwise tile is skipped (its slot
   // keeps whatever the value buffer held). Constexpr 0 outside the mutation build.
   const int trim = mutant("interpreter.tile_boundary") ? 1 : 0;
+  const int drop_last_wave = mutant("interpreter.scan_drop_last_wave") ? 1 : 0;
   for (int b0 = 0; b0 < B; b0 += im.Lt) {
     const int L = std::min(im.Lt, B - b0);
     RunCtx ctx;
@@ -1109,6 +1174,29 @@ void Interpreter::run(const double* state, int B, double* out) const {
       }
       if (g.whole_segment) {
         g.seg_fn[ctx.v](g.seg, ctx, dom);
+        continue;
+      }
+      if (g.scan) {
+        // Wave by wave: the rows of a wave read rows of earlier waves only, so a wave is
+        // evaluated in tiles of the indirect row mode (the carry is a gather like any other)
+        // into the member buffer and copied to the rows' slots. Mutant
+        // interpreter.scan_drop_last_wave: the last wave (the last step of the longest chains)
+        // is not evaluated.
+        const std::int32_t* rows = g.wave_rows.data();
+        const int n_waves = static_cast<int>(g.wave_begin.size()) - 1 - drop_last_wave;
+        for (int w = 0; w < n_waves; ++w) {
+          const int w0 = g.wave_begin[static_cast<std::size_t>(w)];
+          const int w1 = g.wave_begin[static_cast<std::size_t>(w) + 1];
+          for (int k0 = w0; k0 < w1; k0 += tile) {
+            const int n = std::min(tile, w1 - k0);
+            eval_group(g, ctx, 0, rows + k0, n, ctx.member);
+            for (int i = 0; i < n; ++i) {
+              const double* src = ctx.member + static_cast<std::size_t>(i) * Ls;
+              double* dst = dom + static_cast<std::size_t>(rows[k0 + i]) * Ls;
+              for (int l = 0; l < L; ++l) dst[l] = src[l];
+            }
+          }
+        }
         continue;
       }
       for (int r0 = 0; r0 < g.rows; r0 += tile) {
@@ -1189,6 +1277,17 @@ std::string Interpreter::describe() const {
         }
         if (g.emitted > 0) os << "; " << g.emitted << " output rows written from the reduction blocks";
         os << "): ";
+      } else if (g.scan) {
+        const ir::Scan& sc = p.scans[static_cast<std::size_t>(dom.scan)];
+        std::size_t tiles = 0;
+        for (std::size_t w = 0; w + 1 < g.wave_begin.size(); ++w) {
+          const std::size_t n = static_cast<std::size_t>(g.wave_begin[w + 1] - g.wave_begin[w]);
+          tiles += (n + static_cast<std::size_t>(im.opt.tile) - 1) / static_cast<std::size_t>(im.opt.tile);
+        }
+        os << "scan: " << sc.chains() << " chain(s), " << g.wave_begin.size() - 1 << " wave(s) in " << tiles
+           << " tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes): ";
+        for (const StepPlan& s : g.steps) total_calls += tiles * static_cast<std::size_t>(1 + s.n_pre);
+        total_tiles += tiles;
       } else {
         const std::size_t tiles = (static_cast<std::size_t>(dom.rows) + static_cast<std::size_t>(im.opt.tile) - 1) /
                                   static_cast<std::size_t>(im.opt.tile);

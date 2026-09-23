@@ -2,9 +2,11 @@
 //
 // expand() regenerates a scalar tape from a Program: domains in order, rows in order, the
 // group's steps per row. Literals and columns become Const leaves (deduplicated by the tape, as
-// in the recording), gathers become operand references, segments become Sum / Affine operands,
-// Input rows become Input nodes in ordinal order, and the outputs are registered in ordinal
-// order. It performs no arithmetic.
+// in the recording), gathers become operand references (a scan's carry gather references the
+// previous row of the chain, emitted just before, so a scan unrolls back into the recorded
+// chain), segments become Sum / Affine operands, a fixed-arity Sum becomes a variadic Sum node
+// over its operands, Input rows become Input nodes in ordinal order, and the outputs are
+// registered in ordinal order. It performs no arithmetic.
 //
 // roundtrip_identical() compares two tapes node-for-node up to a canonical renumbering:
 //   1. a Merkle hash per node (op, constant bits, input ordinal, coefficients, operand hashes;

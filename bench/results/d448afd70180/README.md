@@ -2,7 +2,20 @@
 
 Intel(R) Xeon(R) W-3223 CPU @ 3.50GHz, 8 physical / 16 logical cores, Apple clang version 21.0.0 (clang-2100.1.1.101), flags `-O3 -march=x86-64-v3 -fno-math-errno`. 1-minute load before measuring: 4.73, after: 3.17.
 Engine commit measured: `c4fc0d7` (integrate/m1-m5 after P4-opt-3 e361ee5: an Exp/Log step read only by the next step is applied in place by the pair kernel on each row while it is in L1 (the exp domain runs as mul(neg(gat),col) => exp(vec)); a domain read only through one elementwise domain's gathers is evaluated per tile of that consumer into a tile temporary and never materialised (the knots -> times affine, 2,561 rows, inside the exp tiles); output rows of a producer fused into a whole-domain Sum are written to out from the reduction block that computes them (the 969 swap PVs of d7 inside the book sum: no output copy pass); all three applied at 1 lane and at 16 lanes or more only. Attempt 3 measured 40af34e (fused step pairs), attempt 2 363321f (reduction fusion), attempt 1 1805412).
-Google Benchmark, `--benchmark_repetitions=20 --benchmark_min_time=0.2s --benchmark_report_aggregates_only=false`; tables prebuilt, state written fresh each iteration; stats over the 20 repetitions (real time, us). Interpreter and hand kernel compiled with the release preset (D13). Correctness gates run under the reference preset.
+Google Benchmark, `--benchmark_repetitions=20 --benchmark_min_time=0.2s --benchmark_report_aggregates_only=false`; tables prebuilt, state written fresh each iteration; stats over the 20 repetition means (real time, us; see Measurement statistic). Interpreter and hand kernel compiled with the release preset (D13). Correctness gates run under the reference preset.
+
+## Read first: the outcome depends on the pairing
+
+ROADMAP.md M1 Go and RESUME.md P6 say "interpreter within 1.3x of the hand-fused kernel single-state, within 1.1x batched" and name no hand variant or exp implementation. The table below gives the ratio under every candidate denominator (medians, us). The gate table that follows uses the pairing P4/P6 chose (row 1); which pairing is the gate is a DECISIONS entry the orchestrator owes before the M1 verdict (M1/P7 review).
+
+| pairing | exactness | B=1 interp / hand | B=1 ratio (<= 1.3) | B=64 interp / hand | B=64 ratio (<= 1.1) |
+|---|---|---:|---:|---:|---:|
+| interpreter std::exp vs hand variant 2 (fused/shared-recip/std::exp): the P4/P6 like-for-like pairing, libm exp on both sides | interpreter E0 vs hand E1 | 56.72 / 54.17 | **1.047** (met) | 1577.5 / 1467.5 | **1.075** (met) |
+| interpreter exp_poly vs hand variant 0 (default: fused/shared-recip/exp_poly): the same exactness class on both sides | E1 vs E1 | 50.20 / 46.32 | **1.084** (met) | 881.3 / 709.7 | **1.242** (NOT met) |
+| interpreter std::exp (the gated E0 mode) vs hand variant 0 (default, as specified and delivered by P5) | E0 vs E1 | 56.72 / 46.32 | **1.225** (met) | 1577.5 / 709.7 | **2.223** (NOT met) |
+| interpreter std::exp vs hand variant 3 (reference arithmetic: the interpreter's own operation order, std::exp) | E0 vs E0 | 56.72 / 66.01 | **0.859** (met) | 1577.5 / 2244.7 | **0.703** (met) |
+
+Row 1 puts the identical scalar libm exp on both sides: at B=64 it is 696 us of the interpreter's 1577.5 (exp:0 minus exp:1 at the gate point) and 758 us of the hand kernel's 1467.5 (variant 2 minus variant 0), so the non-exp remainder ratio is 1.242, the same as the E1-vs-E1 row. Against the hand kernel as specified and delivered (variant 0, exp_poly, E1) the interpreter's gated E0 mode is 2.223x batched.
 
 ## Gate (like for like: interpreter std::exp vs hand fused/shared-recip/std::exp)
 
@@ -14,6 +27,25 @@ Google Benchmark, `--benchmark_repetitions=20 --benchmark_min_time=0.2s --benchm
 | hand eval_batch B=64 | variant 2 | 1462.2 | 1467.5 | 1475.3 | 1 | |
 
 B=64 at the B=1-best tile (512): best lane_tile 32, median 1583.2 us, ratio 1.079.
+
+## Measurement statistic
+
+min / median / p90 over n Google Benchmark repetitions; each repetition's real_time is the mean of its iterations (>= min_time of evaluations), so p90 is a p90 of repetition means, not of evaluations. docs/WORKLOADS.md M1 Measurement asks for >= 200 repetitions (timed evaluations); this round has n = 20 repetition means per row, a stated deviation; the gate uses medians. Gate rows:
+
+| row | n (repetition means) | iterations per repetition (min..max) | timed evaluations |
+|---|---:|---:|---:|
+| interpreter B=1 | 20 | 4961..4961 | 99220 |
+| hand eval B=1 | 20 | 5117..5117 | 102340 |
+| interpreter B=64 | 20 | 177..177 | 3540 |
+| hand eval_batch B=64 | 20 | 192..192 | 3840 |
+
+## Load rule
+
+docs/WORKLOADS.md Terms: cores = logical CPUs (hardware threads): threshold 8 (physical reading: 4). 1-minute loads during measurement: 4.73, 4.29, 3.47, 3.17; within the logical threshold: yes; within the physical threshold: no. Under the physical reading the before-sweep hand run (load 4.73) would be discarded and the after-sweep re-run (load 3.47) used as the denominator: ratios 1.054 / 1.082.
+
+## CI
+
+Not recorded for this round.
 
 ## Correctness gates (reference preset, -ffp-contract=off)
 
@@ -123,4 +155,4 @@ What dominates: at B=1 the coupon arithmetic inside the leg-sum blocks (46%) and
 - Gates were run once each under the reference preset at c4fc0d7 before measuring: ir_roundtrip_test (P3, 5 tests), exec_m1_interp_e0_test (P4 E0, 5 tests), hand_m1_hand_test (P5 E1, 9 tests) all pass; supplementary hand_m1_hand_e0_test (4) and exec_interp_test (6) pass; the full ctest suite is 23/23 under both the reference and the release preset. Logs in tmp/ (gitignored).
 - The plans measured (m1_p6_plan.txt): describe() at the two gate configurations, printed by a throwaway tool linked against the release libepykos (not in the repository), then the default-options plan from EPYKOS_DESCRIBE=1 (tile 256, lane_tile 8, which does not show the P4-opt-3 fusions). At tile 512 / lane_tile 1: 10 domains, 42,314 rows of which 34,305 are fused or inlined (d3/d5 coupons into the 129 leg-sum blocks of d6, d1 affine inlined into the 6 exp tiles of d2 with the exp tail), d7 swap PVs materialised (2 tiles) and copied out with d8 and the book. At tile 256 / lane_tile 32: 35,274 rows fused or inlined (d7 also folded into the book-sum block, its 969 output rows emitted from there), 176 leg-sum blocks, 27 tile passes and 48 kernel calls outside reductions per lane chunk (attempt 3: 53), 32 outputs copied from the value buffer and 969 emitted.
 
-Raw data: `m1_p6_hand.json`, `m1_p6_interp.json` (20 repetitions each), `m1_p6_gates.json`, `m1_p6_fingerprint.json`; everything above in `m1.json`. Regenerate with `bench/results/m1_summarise.py bench/results/d448afd70180`.
+Raw data: `m1_p6_hand.json`, `m1_p6_interp.json` (20 Google Benchmark repetitions each), `m1_p6_gates.json`, `m1_p6_fingerprint.json`, `m1_p6_notes.json`; everything above in `m1.json`. Regenerate with `bench/results/m1_summarise.py bench/results/d448afd70180`.

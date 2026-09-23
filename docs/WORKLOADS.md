@@ -38,8 +38,11 @@ For `i = 0..999`, drawn from sub-stream `i`:
 - swap: `pv = s_i·(Σ fixed − Σ float)`; book: `pv = Σ_i pv_i`
 
 ### Expected domain structure
-`Knots —linmap→ Times (unique {d_j/365}) —exp→ DF —gather→ Coupons {fixed, float, seasoned-first} —segment_sum→ Legs —segment_sum→ Swaps —segment_sum→ Book`.
-The seasoned-first coupons must fall out as their own signature; the signature pass is not told about them.
+`Knots —linmap→ Times (unique {d_j/365}) —exp→ DF —gather→ Coupons {fixed + seasoned-first, float} —segment_sum→ Legs —segment_sum→ Swaps —segment_sum→ Book`.
+The seasoned-first coupons must not fall into the float-coupon class; the signature pass is not told about them.
+By construction they share the constant-rate class with the fixed coupons (`N·τ·R·DF(e)` and `N·τ·K·DF(e)` are the
+same op tree with one constant slot; hash-consing modulo constants cannot separate them, D22). A separate bucket
+for them is an R2 (uniform-column) decision in M3, not an M1 requirement.
 
 ### Batch
 64 states: `z^(b) = z + δ^(b)`, `δ^(b)_k ~ N(0, 0.0010)` i.i.d. from sub-stream `100000 + b`; `b = 0` is the record point (`δ = 0`).
@@ -52,6 +55,21 @@ Single-state (`B = 1`) and batched (`B = 64`) value evaluation, tables prebuilt,
 repetition. Warm; ≥ 200 repetitions; report min, median and p90. Record the fingerprint (D13) and the 1-minute load
 average; discard runs with load above `cores/2`. Interpreter vs hand-fused reference under the same fingerprint only (D9).
 Tile sweep: 128 / 256 / 512 (D15).
+
+Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured):
+- A **repetition** is one timed evaluation. Google Benchmark's `--benchmark_repetitions=n` with `min_time` gives
+  `n` *repetition means* (each the mean over the evaluations of ≥ `min_time`), not `n` repetitions: statistics over
+  them are statistics of means, and a p90 of 20 means is much tighter than the p90 of the evaluations. A result
+  states which it reports and how many. Every M1/P6 round (attempts 1–4) used 20 Google Benchmark repetitions of
+  ≥ 0.2 s (P4/P5: 25), i.e. min/median/p90 over 20 means of ~5,000 (`B = 1`) or ~180 (`B = 64`) evaluations, a
+
+  deviation from the ≥ 200 above that the results now state; the gate ratios use medians, where the difference is
+  immaterial. A re-measurement at ≥ 200 timed evaluations per row is owed by the next benchmark round.
+- **cores** in `cores/2` means logical CPUs (hardware threads), the unit the load average is measured against
+  (`sysctl hw.logicalcpu` / `nproc`; `scripts/fingerprint.sh` records both counts). On the Mac Pro (8 cores /
+  16 threads) the threshold is 8. A result also reports the physical reading (4 there) when a run's load falls
+  between the two, and which rows it would discard.
+
 
 ---
 

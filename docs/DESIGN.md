@@ -132,7 +132,10 @@ removes Newton 2-cycles at kinks (see `PRIOR_ART.md`, desk_mixed).
    Identity, not tolerance.
 
 Expected outcome on a rates book: `Knots —linmap→ Times —exp→ DF —gather→ Subs —segment_sum→ Coupons —segment_sum→ Legs →
-Rows`, with buckets (e.g. coupons with a realised fixing) falling out as separate signatures.
+Rows`, with buckets falling out as separate signatures where their op trees differ (a coupon with a realised fixing
+has the fixed coupon's tree with a constant in the rate slot, so it shares that class and is separated, if wanted,
+by the uniform-column bucketing of §6 R2, not by the signature; D22).
+
 
 Across recordings the signature → domain map persists: a new trade of a known shape adds rows, not code.
 

@@ -6,7 +6,8 @@ Reads, from bench/results/<id>/:
   m1_p6_hand.json          hand_m1_hand_bench raw output (--benchmark_report_aggregates_only=false)
   m1_p6_interp.json        exec_m1_interp_bench raw output (tile x lane_tile x exp sweep)
   m1_p6_gates.json         {"roundtrip_ok": bool, "e0_ok": bool, "hand_e1_ok": bool, "evidence": {...}}
-  m1_p6_notes.json         optional free-form notes (profile, caveats) merged into m1.json
+  m1_p6_notes.json         optional free-form notes merged into m1.json: engine_commit, engine_commit_note,
+                           load1_after, comparison (text), profile (text), caveats (list)
 
 Writes m1.json (everything, machine-readable) and README.md (the short table).
 
@@ -153,6 +154,7 @@ def main(argv):
 
     out = {
         "package": "M1/P6",
+        "engine_commit": notes.get("engine_commit"),
         "fingerprint": fp,
         "load1_before_measurement": fp.get("load1"),
         "load1_after_measurement": notes.get("load1_after"),
@@ -187,6 +189,8 @@ def main(argv):
     L.append("%s, %d physical / %d logical cores, %s, flags `%s`. 1-minute load before measuring: %s%s." % (
         fp["cpu"], fp["cores_physical"], fp["cores_logical"], fp["compiler"], fp["flags"], fp.get("load1"),
         (", after: %s" % notes["load1_after"]) if "load1_after" in notes else ""))
+    if notes.get("engine_commit"):
+        L.append("Engine commit measured: `%s`%s." % (notes["engine_commit"], (" (%s)" % notes["engine_commit_note"]) if notes.get("engine_commit_note") else ""))
     L.append("Google Benchmark, `%s`; tables prebuilt, state written fresh each iteration; stats over the 20 repetitions "
              "(real time, us). Interpreter and hand kernel compiled with the release preset (D13). Correctness gates run under the reference preset." % out["benchmark_flags"])
     L.append("")
@@ -263,6 +267,11 @@ def main(argv):
         if k in interp:
             s = interp[k]
             L.append("- %s: median %.3f %s (min %.3f, p90 %.3f)." % (k, s["median"], s["unit"], s["min"], s["p90"]))
+    if notes.get("comparison"):
+        L.append("")
+        L.append("## Compared with the previous measurement")
+        L.append("")
+        L.append(notes["comparison"])
     if notes.get("profile"):
         L.append("")
         L.append("## Profile")

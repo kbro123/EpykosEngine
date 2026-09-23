@@ -1,18 +1,19 @@
 # M1 gate benchmark (P6) — fingerprint `d448afd70180`
 
-Intel(R) Xeon(R) W-3223 CPU @ 3.50GHz, 8 physical / 16 logical cores, Apple clang version 21.0.0 (clang-2100.1.1.101), flags `-O3 -march=x86-64-v3 -fno-math-errno`. 1-minute load before measuring: 1.87, after: 2.86.
+Intel(R) Xeon(R) W-3223 CPU @ 3.50GHz, 8 physical / 16 logical cores, Apple clang version 21.0.0 (clang-2100.1.1.101), flags `-O3 -march=x86-64-v3 -fno-math-errno`. 1-minute load before measuring: 2.53, after: 2.57.
+Engine commit measured: `363321f` (integrate/m1-m5 after P4-opt-1 ab452ca, reduction fusion: the two coupon domains d3/d5 (31,744 of 42,314 rows) are evaluated inside the leg-sum blocks and never materialised; attempt 1 measured 1805412 (before ab452ca)).
 Google Benchmark, `--benchmark_repetitions=20 --benchmark_min_time=0.2s --benchmark_report_aggregates_only=false`; tables prebuilt, state written fresh each iteration; stats over the 20 repetitions (real time, us). Interpreter and hand kernel compiled with the release preset (D13). Correctness gates run under the reference preset.
 
 ## Gate (like for like: interpreter std::exp vs hand fused/shared-recip/std::exp)
 
 | row | config | min | median | p90 | ratio | go |
 |---|---|---:|---:|---:|---:|---|
-| interpreter B=1 | tile 512, lane_tile 1, std::exp | 68.4 | 69.1 | 69.5 | **1.291** | <= 1.3: yes |
-| hand eval B=1 | variant 2 | 53.4 | 53.5 | 53.7 | 1 | |
-| interpreter B=64 | tile 128, lane_tile 8, std::exp | 2755.6 | 2780.8 | 2794.3 | **1.905** | <= 1.1: NO |
-| hand eval_batch B=64 | variant 2 | 1453.9 | 1459.7 | 1463.0 | 1 | |
+| interpreter B=1 | tile 512, lane_tile 1, std::exp | 64.2 | 64.8 | 65.0 | **1.207** | <= 1.3: yes |
+| hand eval B=1 | variant 2 | 53.4 | 53.7 | 54.1 | 1 | |
+| interpreter B=64 | tile 256, lane_tile 32, std::exp | 1947.1 | 1963.5 | 1972.1 | **1.340** | <= 1.1: NO |
+| hand eval_batch B=64 | variant 2 | 1458.1 | 1464.7 | 1469.8 | 1 | |
 
-B=64 at the B=1-best tile (512): best lane_tile 8, median 2862.2 us, ratio 1.961.
+B=64 at the B=1-best tile (512): best lane_tile 32, median 1964.9 us, ratio 1.341.
 
 ## Correctness gates (reference preset, -ffp-contract=off)
 
@@ -22,29 +23,29 @@ B=64 at the B=1-best tile (512): best lane_tile 8, median 2862.2 us, ratio 1.961
 | P4 E0 (interpreter vs replay and oracle, B=1 and B=64) | exec_m1_interp_e0_test | pass |
 | P5 E1 (hand kernel vs double maths, 1e-12) | hand_m1_hand_test | pass |
 
-`ir_roundtrip_test`: exit 0; PASSED
+`ir_roundtrip_test`: exit 0; [  PASSED  ] 5 tests
 
-`exec_m1_interp_e0_test`: exit 0; PASSED
+`exec_m1_interp_e0_test`: exit 0; [  PASSED  ] 5 tests
 
-`hand_m1_hand_test`: exit 0; PASSED
+`hand_m1_hand_test`: exit 0; [  PASSED  ] 9 tests
 
-`hand_m1_hand_e0_test`: exit 0; PASSED
+`hand_m1_hand_e0_test`: exit 0; [  PASSED  ] 4 tests
 
-`exec_interp_test`: exit 0; PASSED
+`exec_interp_test`: exit 0; [  PASSED  ] 6 tests
 
 ## Hand kernel (all variants)
 
 | benchmark | variant | min | median | p90 | us/state |
 |---|---|---:|---:|---:|---:|
-| BM_HandEval/0 | 0 fused/shared-recip/exp_poly | 45.3 | 45.5 | 45.8 | 45.53 |
-| BM_HandEval/1 | 1 fused/per-row-div/exp_poly | 46.0 | 46.3 | 46.4 | 46.28 |
-| BM_HandEval/2 | 2 fused/shared-recip/std::exp | 53.4 | 53.5 | 53.7 | 53.51 |
-| BM_HandEval/3 | 3 reference-arith/std::exp | 65.3 | 65.5 | 65.7 | 65.54 |
-| BM_HandEvalBatch/0 | 0 fused/shared-recip/exp_poly | 699.7 | 704.6 | 708.2 | 11.01 |
-| BM_HandEvalBatch/1 | 1 fused/per-row-div/exp_poly | 903.4 | 907.2 | 910.3 | 14.18 |
-| BM_HandEvalBatch/2 | 2 fused/shared-recip/std::exp | 1453.9 | 1459.7 | 1463.0 | 22.81 |
-| BM_HandEvalBatch/3 | 3 reference-arith/std::exp | 2222.6 | 2227.9 | 2235.5 | 34.81 |
-| BM_HandBuild | table build | 2343.2 | 2388.6 | 2423.6 | |
+| BM_HandEval/0 | 0 fused/shared-recip/exp_poly | 45.4 | 45.7 | 45.9 | 45.69 |
+| BM_HandEval/1 | 1 fused/per-row-div/exp_poly | 46.0 | 46.3 | 46.6 | 46.30 |
+| BM_HandEval/2 | 2 fused/shared-recip/std::exp | 53.4 | 53.7 | 54.1 | 53.66 |
+| BM_HandEval/3 | 3 reference-arith/std::exp | 65.4 | 65.7 | 66.0 | 65.65 |
+| BM_HandEvalBatch/0 | 0 fused/shared-recip/exp_poly | 698.1 | 706.3 | 708.8 | 11.04 |
+| BM_HandEvalBatch/1 | 1 fused/per-row-div/exp_poly | 903.7 | 907.8 | 911.8 | 14.18 |
+| BM_HandEvalBatch/2 | 2 fused/shared-recip/std::exp | 1458.1 | 1464.7 | 1469.8 | 22.89 |
+| BM_HandEvalBatch/3 | 3 reference-arith/std::exp | 2220.3 | 2232.2 | 2237.6 | 34.88 |
+| BM_HandBuild | table build | 2340.8 | 2374.8 | 2405.3 | |
 
 ## Interpreter tile sweep (D15), medians in us
 
@@ -52,50 +53,69 @@ B=1 (lane_tile 1):
 
 | tile | std::exp min | median | p90 | exp_poly min | median | p90 |
 |---:|---:|---:|---:|---:|---:|---:|
-| 128 | 71.7 | 72.3 | 72.9 | 60.1 | 60.6 | 60.9 |
-| 256 | 69.3 | 70.0 | 70.3 | 58.4 | 58.9 | 59.2 |
-| 512 | 68.4 | 69.1 | 69.5 | 56.7 | 57.7 | 58.5 |
+| 128 | 69.0 | 69.7 | 70.4 | 57.8 | 58.1 | 58.5 |
+| 256 | 66.4 | 67.0 | 67.4 | 54.7 | 55.1 | 55.5 |
+| 512 | 64.2 | 64.8 | 65.0 | 52.7 | 53.3 | 53.6 |
 
 B=64, std::exp (median us per call of 64 states; us/state = median/64):
 
 | tile \ lane_tile | 4 | 8 | 16 | 32 | 64 |
 |---:|---:|---:|---:|---:|---:|
-| 128 | 2829.4 | 2780.8 | 2960.0 | 3225.5 | 3783.3 |
-| 256 | 2824.0 | 2839.1 | 2978.7 | 3231.2 | 3810.9 |
-| 512 | 2886.4 | 2862.2 | 2984.3 | 3237.6 | 3855.4 |
+| 128 | 2282.7 | 2009.5 | 1967.6 | 1966.6 | 2263.8 |
+| 256 | 2219.0 | 1982.4 | 2003.7 | 1963.5 | 2249.8 |
+| 512 | 2189.4 | 2006.8 | 2005.6 | 1964.9 | 2284.4 |
 
 B=64, exp_poly (median us):
 
 | tile \ lane_tile | 4 | 8 | 16 | 32 | 64 |
 |---:|---:|---:|---:|---:|---:|
-| 128 | 2079.5 | 2033.2 | 2205.7 | 2422.9 | 2982.6 |
-| 256 | 2122.9 | 2106.6 | 2220.2 | 2417.3 | 2999.7 |
-| 512 | 2151.3 | 2132.1 | 2219.8 | 2439.7 | 3049.6 |
+| 128 | 1453.9 | 1176.5 | 1160.9 | 1167.9 | 1469.4 |
+| 256 | 1392.3 | 1158.0 | 1202.6 | 1171.2 | 1457.0 |
+| 512 | 1377.0 | 1186.4 | 1198.2 | 1171.6 | 1502.5 |
 
 ## Informational ratios (D9)
 
-- exp_poly both sides: B=1 1.268 (interp tile 512 57.7 us vs hand variant 0 45.5 us); B=64 2.886 (tile 128 lane_tile 8 2033.2 us vs 704.6 us).
-- vs the hand reference-arithmetic variant 3 (the interpreter's own operation order, no fma, division, std::exp): B=1 1.054, B=64 1.248.
-- BM_InterpBuild: median 866.781 us (min 743.072, p90 912.234).
-- BM_InterpPipeline: median 136.491 ms (min 133.066, p90 138.103).
+- exp_poly both sides: B=1 1.166 (interp tile 512 53.3 us vs hand variant 0 45.7 us); B=64 1.640 (tile 256 lane_tile 8 1158.0 us vs 706.3 us).
+- vs the hand reference-arithmetic variant 3 (the interpreter's own operation order, no fma, division, std::exp): B=1 0.986, B=64 0.880.
+- BM_InterpBuild: median 2091.203 us (min 2030.420, p90 2173.630).
+- BM_InterpPipeline: median 137.812 ms (min 132.578, p90 139.731).
+
+## Compared with the previous measurement
+
+Attempt 1 (commit a2abec6 results, engine 1805412, same fingerprint, same flags and repetitions) -> attempt 2 (engine 363321f), medians in us, like for like (std::exp both sides):
+
+| row | attempt 1 | attempt 2 | change |
+|---|---:|---:|---:|
+| interpreter B=1 (best tile) | 69.07 (tile 512) | 64.75 (tile 512) | -6.3% |
+| hand eval variant 2 | 53.51 | 53.66 | +0.3% |
+| b1_ratio | 1.291 | 1.207 | |
+| interpreter B=64 (best point) | 2780.8 (tile 128, lane_tile 8) | 1963.5 (tile 256, lane_tile 32) | -29.4% |
+| hand eval_batch variant 2 | 1459.7 | 1464.7 | +0.3% |
+| b64_ratio | 1.905 | 1.340 | |
+| interpreter B=1 exp_poly | 57.72 | 53.30 | -7.7% |
+| interpreter B=64 exp_poly | 2033.2 | 1158.0 | -43.0% |
+| BM_InterpBuild | 866.8 | 2091.2 | +141% (permuted member-order tables) |
+
+The hand kernel is unchanged and reproduces within 0.3%, so the whole change is the interpreter's reduction fusion. The B=64 lane-tile optimum moved from 4-8 to 16-32: with the coupon rows no longer in the value buffer the per-chunk working set is small enough for wider lane chunks to pay for themselves, and lane_tile 64 remains worst (value buffer 10,570 materialised rows x 64 lanes x 8 B = 5.4 MB per chunk).
 
 ## Profile
 
-`sample(1)` (macOS, 6 s at 1 ms, main thread; release binary, no debug info) of the winning configurations, share of samples by top-of-stack frame.
+`sample(1)` (macOS, 6 s at 1 ms, main thread, release binary without debug info; symbol template arguments decoded with Op {3 Sub, 4 Mul, 5 Div, 6 Neg, 7 Exp} and operand Kind {0 Vec, 1 Lit, 2 Col, 3 Gat}) of the two gate configurations, share of samples by top-of-stack frame.
 
-B=1, tile 512, lane_tile 1, std::exp (4662 samples): `k_seg_whole<Sum,1>` (the whole-domain segment sums: coupons -> legs, swaps -> book) 29.8%; `k_binary<Mul,Col,Gat,1>` (the materialised coupon rows `N*tau*K x DF(e)` and `N*tau x DF(e)`, gathered from the DF domain) 21.5%; libm `exp` 18.9%; `k_binary<Mul,Vec,Gat,1>` (the float-coupon second multiply by the gathered forward) 10.4%; `k_seg_whole<Affine,1>` (knots -> times) 6.1%; `Interpreter::run` dispatch 2.5%; `div(gat,gat)`, `div(vec,col)` (forwards) 2.3% + 2.1%; exp wrapper 2.0%; `neg`, `sub(gat,gat)`, `mul(vec,col)` 1-1.3% each.
+B=1, tile 512, lane_tile 1, std::exp (4650 samples): libm `exp` 19.9% (+0.3% stub); the fused float-coupon first step `k_binary<Mul,Col,Gat,1>` (`N*tau x DF(e)` over the member rows of each leg-sum block, into scratch) 15.3%; the fused fixed-coupon last step folded through the Sum epilogue, `acc_rows1/acc_tail1<k_binary_acc<Mul,Col,Gat>>` (`N*tau*K x DF(e)` with rows in flight in 16/8/4-row accumulators) 17.4% in total; the fused float-coupon last step `acc_*<k_binary_acc<Mul,Vec,Gat>>` (`s0 x fwd`) 12.4%; `seg_block_gathered<true/false,1>` (the gathered-member reductions: knots -> times affine, and the book sum) 12.3%; `seg_block_fused<false,1>` (the leg-sum block driver: member loop, accumulator stores) 7.2%; the forwards domain d4 (`div(gat,gat)` 3.1%, `div(vec,col)` 2.7%, `sub(gat,gat)` 1.6%, `neg(gat)` 1.6%) 9.0%; `k_unary<Exp,Vec>` wrapper 2.1%; `mul(vec,col)` (the -z*t before exp) 1.5%; `Interpreter::run` dispatch 0.9%.
 
-B=64, tile 128, lane_tile 8, std::exp (4672 samples): libm `exp` 30.0% (scalar libm, one call per (time, lane): 2564 x 64 per run, it does not vectorise across lanes); `k_seg_whole<Sum,8>` 22.9%; `k_binary<Mul,Col,Gat,8>` 17.8%; `k_binary<Mul,Vec,Gat,8>` 9.1%; `div(gat,gat)` 3.3%; exp wrapper 3.2%; `k_seg_whole<Affine,8>` 3.0%; `div(vec,col)` 2.9%; `Interpreter::run` 2.8%; `sub(gat,gat)` 1.6%; `neg` 1.2%.
+B=64, tile 256, lane_tile 32, std::exp (4662 samples): libm `exp` 43.1% (+0.8% stub): scalar libm, one call per (time, lane) = 2564 x 64 = 164k calls per run, no cross-lane vectorisation; fused float-coupon first step `k_binary<Mul,Col,Gat,32>` 9.0%; fused float-coupon last step `acc_rowsL<32,k_binary_acc<Mul,Vec,Gat>>` 7.8%; fused fixed-coupon last step `acc_rowsL<32,k_binary_acc<Mul,Col,Gat>>` 6.7%; the forwards domain d4 (`div(gat,gat)` 5.3%, `div(vec,col)` 4.6%, `sub(gat,gat)` 2.1%, `neg(gat)` 2.4%) 14.4%; `k_unary<Exp,Vec,32>` wrapper 4.3%; `seg_block_fused<false,32>` 3.7%; `seg_group<true,32,1>` (knots -> times affine) 3.5%; `Interpreter::run` 1.5%; `mul(vec,col)` 1.3%, `mul(col,vec)` (leg -> swap) 1.1%.
 
-What dominates: bytes moved, not arithmetic. Every coupon row (16,103 fixed + 15,703 float) is materialised into the value buffer by the elementwise kernels and then gathered back by the leg Sum (31,744 members), so the Sum plus the two coupon multiply kernels are 60% of B=1 and 50% of B=64; the hand kernel fuses gather -> fma -> segment sum in one pass and never stores the coupon rows. The second component is libm exp (19% / 30%); with exp_poly (E1) the interpreter drops to 57.7 us / 2033 us, but the hand kernel's exp_poly variant drops further (45.5 / 704.6), so exp_poly does not close the gap. The tile sweep is flat (B=1: 72.3 / 70.0 / 69.1 us; B=64 within 3% across tiles) and lane_tile 4-8 is best at B=64 (wider lane tiles overflow L1 with the 42,314-row value buffer: 42,314 x 8 x 8 B = 2.6 MB at lane_tile 8). The remedy is R5 group fusion (M3), not tile or layout tuning; consistent with P4's analysis.
+What dominates now: the coupon rows are no longer stored and re-gathered (attempt 1: whole-domain Sum 23-30% plus coupon multiplies 27-32%); their arithmetic now runs inside the leg-sum blocks (B=1: 45% of samples across the fused first/last steps and the block driver; B=64: 27%). At B=64 the single largest item is libm exp at 44% (about 860 us of the 1963 us), which the hand kernel's std::exp variant pays equally (its exp_poly -> std::exp difference is 1465 - 706 = 759 us), so exp is at parity and is not part of the like-for-like gap. The like-for-like gap is 499 us at B=64 (1963 vs 1465) and 11.1 us at B=1 (64.75 vs 53.66) and sits in the E0 arithmetic that the hand kernel replaces in E1: the forwards domain d4 performs 2 x 2,432 true divisions per lane (311k at B=64, 14% of samples, about 280 us) where the hand kernel takes one reciprocal per unique time and an fma; the float coupon is two multiplies plus the epilogue add (three roundings, as recorded) where the hand kernel uses gather -> fma -> segment sum; and the fused block driver plus accumulator traffic (7% / 4%) has no counterpart in the hand loop. Consistent with this, against the hand reference-arithmetic variant 3 (the interpreter's own operation order: division, no fma, std::exp) the interpreter is now faster: 0.986 at B=1 and 0.880 at B=64. Tile and lane-tile tuning cannot close the remainder (B=64 is within 0.2% across the three tiles at lane_tile 32); the remaining candidates are R4b (shared reciprocal, E1), fma contraction in the fused coupon step (E1), and an exp that vectorises across lanes (exp_poly, E1: 1158 us, 1.64x the hand exp_poly variant).
 
 ## Caveats
 
-- Same fingerprint as P4/P5 (d448afd70180): Intel Xeon W-3223, Apple clang 21, -O3 -march=x86-64-v3 -fno-math-errno; the machine was otherwise idle (load 1.9-3.1 / 16 logical cores throughout; the cores/2 = 8 discard threshold was never approached).
-- Google Benchmark real time over 20 repetitions of >= 0.2 s each; p90 is the nearest-rank 18th of 20 sorted repetitions. Both benchmarks write the state fresh each iteration (verified by reading bench/exec/m1_interp_bench.cpp and bench/hand/m1_hand_bench.cpp: z = z0 + 1e-9 * k drift, DoNotOptimize + ClobberMemory) and prebuild tables outside the timed loop; nothing is cached across iterations.
-- Hand kernel medians were re-measured after the interpreter sweep (tmp/m1_p6_hand_after.json, not committed): eval variant 2 53.43 us vs 53.51 us before, eval_batch variant 2 1456.7 us vs 1459.7 us; < 0.3% drift, so the sweep was taken in a stable thermal state.
-- The like-for-like pairing is interpreter exp:0 (libm std::exp, the E0 mode the gates use) vs hand variant 2 (fused/shared-recip/std::exp). The hand kernel's default (variant 0, exp_poly, E1) and its reference-arithmetic variant 3 are reported as informational rows (D9). B=64 for the hand kernel always computes 64 lanes; the interpreter runs 64/lane_tile chunks of the whole program.
-- Interpreter tile sweep per D15: 128/256/512; best B=1 median is tile 512 (69.07 us), best B=64 median is tile 128 with lane_tile 8 (2780.8 us); at tile 512 the best B=64 is lane_tile 8 at 2862.2 us (ratio 1.961). The gate's b64_ratio uses the best sweep point.
-- Gates were run once each under the reference preset (every TU -ffp-contract=off): ir_roundtrip_test (P3), exec_m1_interp_e0_test (P4 E0), hand_m1_hand_test (P5 E1) all pass; supplementary hand_m1_hand_e0_test and exec_interp_test also pass. Full logs in tmp/ (gitignored).
+- Same fingerprint as P4/P5/attempt 1 (d448afd70180): Intel Xeon W-3223, Apple clang 21, -O3 -march=x86-64-v3 -fno-math-errno; release preset for timings, reference preset (every TU -ffp-contract=off) for the gates; machine otherwise idle (load 2.5-2.9 / 16 logical cores throughout; the cores/2 = 8 discard threshold was never approached). Builds finished, and the XprotectService scan of the new binaries completed, before any measurement started; nothing was built during measurement.
+- Google Benchmark real time over 20 repetitions of >= 0.2 s each; p90 is the nearest-rank 18th of 20 sorted repetitions. Both benchmarks write the state fresh each iteration (verified by reading bench/exec/m1_interp_bench.cpp and bench/hand/m1_hand_bench.cpp: z = z0 + 1e-9 * k drift inside the timed loop, DoNotOptimize + ClobberMemory) and build tables in the constructor outside the timed loop; nothing is cached across iterations; no fix was needed.
+- Hand kernel variant 2 re-measured after the interpreter sweep (tmp/m1_p6_hand_after.json, gitignored): eval 53.31 us vs 53.66 before (-0.65%), eval_batch 1453.5 vs 1464.7 (-0.76%); the ratios use the before-sweep run (the conservative denominator); with the after-sweep denominators they would be 1.215 and 1.351.
+- The like-for-like pairing is interpreter exp:0 (libm std::exp, the E0 mode the gates use) vs hand variant 2 (fused/shared-recip/std::exp). The hand kernel's default (variant 0, exp_poly, E1) and its reference-arithmetic variant 3 are informational rows (D9). The hand kernel always computes 64 lanes at B=64; the interpreter runs 64/lane_tile chunks of the whole program.
+- Interpreter tile sweep per D15: 128/256/512, lane tiles 4/8/16/32/64 at B=64. B=1 improves monotonically with tile (69.72 / 66.95 / 64.75 us); B=64 is flat across tiles at lane_tile 32 (1966.6 / 1963.5 / 1964.9) with lane_tile 16-32 best and 4 / 64 worst (+12-16%). The gate's b64_ratio uses the best sweep point (tile 256, lane_tile 32); at the B=1-best tile 512 the best B=64 point is lane_tile 32 at 1964.9 us (ratio 1.341), so the choice of tile does not change the B=64 verdict.
+- Gates were run once each under the reference preset: ir_roundtrip_test (P3, 5 tests), exec_m1_interp_e0_test (P4 E0, 5 tests), hand_m1_hand_test (P5 E1, 9 tests) all pass; supplementary hand_m1_hand_e0_test (4) and exec_interp_test (6) pass; the full ctest suite is 23/23 under both the reference and the release preset. Logs in tmp/ (gitignored).
+- The plan measured (m1_p6_plan.txt, describe() at the default options, same structure at every tile / lane tile): 10 domains, 42,314 rows of which 31,744 (d3 fixed coupons, d5 float coupons) are fused into the 189 leg-sum blocks of d6; 37 + 25 coupon rows that a gather reads (the 31 single-period swaps of d8) stay materialised.
 
 Raw data: `m1_p6_hand.json`, `m1_p6_interp.json` (20 repetitions each), `m1_p6_gates.json`, `m1_p6_fingerprint.json`; everything above in `m1.json`. Regenerate with `bench/results/m1_summarise.py bench/results/d448afd70180`.

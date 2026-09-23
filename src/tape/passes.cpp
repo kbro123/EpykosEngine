@@ -403,10 +403,50 @@ PassResult affine_collapse(Tape& tape) {
     return false;
   };
 
+  // Single-term scaling (M3/G1, D37). A tainted product Const × atom that some reader SCALES AGAIN
+  // — a reader Mul(Const, this): the next step of a Thomas sweep with structural reciprocal pivots,
+  // a Bessel tangent of scaled secants, a back-substitution — becomes the one-term Affine
+  // −0.0 + c·x. Exact: −0.0 + p == p for every double p (+0.0 included: −0.0 + 0.0 = +0.0). Once
+  // the product is an Affine, the chain that scales it reads it as an atom, so chains of scaled
+  // affine steps collapse all the way. Every other product is left as it was: one whose readers
+  // are chains is taken by them as a term (M1's shared weight·knot products, one Affine per
+  // interpolated time), one read by an Exp, a Div, a Mul by a value or an output stays a Mul (the
+  // D22 single-term absorption question is R1/R3's, not this pass's). A division by a constant is
+  // not seen through: x/c is not c⁻¹·x bitwise, so the maths writes the structural reciprocal.
+  std::vector<char> scaled_again(n_nodes, 0);  // read by a Mul whose other operand is a Const
+  for (std::size_t i = 0; i < n_nodes; ++i) {
+    const Node& n = nodes[i];
+    if (n.op != Op::Mul) continue;
+    if (nodes[idx(n.a)].op == Op::Const) scaled_again[idx(n.b)] = 1;
+    if (nodes[idx(n.b)].op == Op::Const) scaled_again[idx(n.a)] = 1;
+  }
+  // Mutant affine.single_term_unscaled: the one-term Affine drops its coefficient (1·x instead of c·x).
+  const bool single_term_unscaled = mutant("affine.single_term_unscaled");
+
   std::vector<node_id> spine;
   std::vector<Addend> addends;
   for (std::size_t i = 0; i < n_nodes; ++i) {
     const node_id head = static_cast<node_id>(i);
+    if (nodes[i].op == Op::Mul && nodes[i].tainted && scaled_again[i]) {
+      const Node& n = nodes[i];
+      const Node& l = nodes[idx(n.a)];
+      const Node& r = nodes[idx(n.b)];
+      AffineSpec sp;
+      bool ok = false;
+      if (l.op == Op::Const && r.op != Op::Const && atom_ok(n.b)) {
+        sp.terms.push_back({single_term_unscaled ? 1.0 : l.konst, n.b});
+        ok = true;
+      } else if (r.op == Op::Const && l.op != Op::Const && atom_ok(n.a)) {
+        sp.terms.push_back({single_term_unscaled ? 1.0 : r.konst, n.a});
+        ok = true;
+      }
+      if (ok) {
+        collapsed[i] = 1;
+        has_spec[i] = 1;
+        spec[i] = std::move(sp);
+      }
+      continue;
+    }
     if (!is_chain_op(head) || absorbed[i]) continue;
     // Is `head` itself the inner node of a later chain node? Then that node handles it.
     if (uses.count[i] == 1) {

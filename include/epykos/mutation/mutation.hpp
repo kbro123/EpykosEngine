@@ -33,6 +33,7 @@ inline constexpr std::string_view registry[] = {
     "fold_sum.wrong_order",          // fold_sum: the Sum's operands are emitted in reverse fold order
     "affine.wrong_coefficient",      // affine_collapse: one coefficient (the first of the first Affine emitted) is off by one ulp
     "affine.drop_offset",            // affine_collapse: the leading constant c_0 is dropped (-0.0 emitted instead)
+    "affine.single_term_unscaled",   // affine_collapse: a one-term Affine (a scaled atom read as a value, M3/G1) drops its coefficient (1·x instead of c·x); no such product on the M1 book: the curve gates
     "expander.drop_gather",          // expand: gather 0 reads value id r (the identity index) instead of index[r]
     "expander.segment_off_by_one",   // expand: every segment loses its last member
     "signature.merge_classes",       // infer: the const-slot pattern is not part of the signature (a constant slot is a reference)

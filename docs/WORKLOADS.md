@@ -85,7 +85,9 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   by `tests/mutation/registry_test.cpp`, run by `scripts/mutation_test.sh`; D32), in harness order:
   `cse.merge_nonequal` (a Const operand's bit pattern is ignored by the CSE key), `fold_sum.wrong_order` (Sum operands
   reversed), `affine.wrong_coefficient` (the first coefficient of the first Affine emitted is one ulp off),
-  `affine.drop_offset` (c_0 dropped), `expander.drop_gather` (gather 0 reads the identity index),
+  `affine.drop_offset` (c_0 dropped), `affine.single_term_unscaled` (a one-term Affine — a scaled atom that a
+  non-chain op or an output reads as a value, M3/G1 — drops its coefficient: no such product on the M1 book, caught by
+  the curve gates `curve_*_e0_test`), `expander.drop_gather` (gather 0 reads the identity index),
   `expander.segment_off_by_one` (every segment loses its last member), `signature.merge_classes` (the const-slot
   pattern is not part of the signature), `interpreter.tile_boundary` (the last row of every elementwise tile is
   skipped); then the adjoint mutants (M2/Q4b, D33), caught by the adjoint gates — `tests/adjoint/m1_adjoint_test.cpp`

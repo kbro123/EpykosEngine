@@ -42,6 +42,7 @@ const std::vector<std::string> documented = {
     "fold_sum.wrong_order",
     "affine.wrong_coefficient",
     "affine.drop_offset",
+    "affine.single_term_unscaled",
     "expander.drop_gather",
     "expander.segment_off_by_one",
     "signature.merge_classes",

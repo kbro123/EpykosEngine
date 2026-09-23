@@ -43,9 +43,11 @@ Fixture: `WORKLOADS.md` §M3.
 **Exit gate:** hand-fused parity (≤ 1.05×) on catalogued groups; E0/E1 parity per rule.
 
 ## M4 — Curves and calibration
-Fixture: `WORKLOADS.md` §M4. Full scope, in this order: schemes → `implicit` → `pin` + `rank_update`.
+Fixture: `WORKLOADS.md` §M4. Full scope, in this order: schemes + variables + composite → `implicit` → `pin` + `rank_update`.
 - Region schemes as templated maths (Flat, Linear, Hermite, NaturalCubic, MonotoneCubic, BSpline); linear ones collapse
   to `linmap`, value-dependent ones through `select`. Eigen on the `double` side only (D14).
+- Interpolation variable per scheme (`zero`, `logdf`, `forward` where closed-form) and composite curves built by
+  region, each region its own scheme and variable, boundaries folded as structure (`WORKLOADS.md` §M4).
 - `implicit` node: least-squares calibration with IFT risk (`dx/dq`).
 - `pin` + `rank_update`: band edges and interpolation kinks as one active set; frozen-Newton streaming.
 

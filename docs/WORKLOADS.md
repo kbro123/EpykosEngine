@@ -83,9 +83,19 @@ interpreter. Parity gate: catalogued groups within 1.05× of the hand-fused refe
   tangents), NaturalCubic, MonotoneCubic (Fritsch–Carlson tangents with the Hyman filter), BSpline (cubic, clamped).
   Linear-in-knots schemes must collapse to `linmap`; MonotoneCubic must appear through `select` with mask, margin
   and arm gap exported.
-- **Optimality:** `‖Jᵀr‖∞ < 1e-12` at the solution, every scheme.
-- **IFT risk:** `dz/dq` vs bump-and-recalibrate (1 bp central bumps) at 1e-6, every scheme.
-- **Kink 2-cycle fixture:** a MonotoneCubic curve and a quote path of ≥ 50 quote vectors, constructed so that
+- **Interpolation variable**, per scheme: `zero` (interpolate `z(t)`, `DF = exp(−z·t)`), `logdf` (interpolate
+  `y(t) = −z(t)·t`, `DF = exp(y)`; linear on `logdf` is piecewise-constant forwards), and for Flat and Linear also
+  `forward` (interpolate the instantaneous forward, `DF = exp(−∫f)` in closed form). All six schemes on `zero` and
+  `logdf`; the variable is structure, never a `select`.
+- **Composite (region) curve:** an ordered list of regions `[t_a, t_b)` each with its own `(scheme, variable)`,
+  knots partitioned by region, value-continuous in `DF` at region boundaries; region lookup is structure (class A,
+  folded at record time). The M4 composite fixture on the 12 knots: `[0, 1Y)` Linear on `zero`, `[1Y, 10Y)`
+  MonotoneCubic on `zero`, `[10Y, 30Y]` Linear on `logdf`. Required: round-trip identity; the linear regions produce
+  affine rows and no `select`; `select` buckets appear only for rows in the monotone region; calibration to the 12
+  quotes, optimality and IFT risk as for the single-scheme curves.
+- **Optimality:** `‖Jᵀr‖∞ < 1e-12` at the solution, every scheme and the composite.
+- **IFT risk:** `dz/dq` vs bump-and-recalibrate (1 bp central bumps) at 1e-6, every scheme and the composite.
+- **Kink 2-cycle fixture:** the composite curve above (its MonotoneCubic region) and a quote path of ≥ 50 quote vectors, constructed so that
   frozen-Newton **without** `pin` oscillates between two Hyman states at at least one knot (this failure must be
   demonstrated by a test), and **with** `pin` + hysteresis converges from every quote vector within 5 iterations and
   no full refresh.

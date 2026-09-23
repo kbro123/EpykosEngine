@@ -80,8 +80,9 @@ Order: P0 → {P1, P2, P5} → P3 → P4 → P6 → P7. Kill path: > 2× ⇒ up 
 |---|---|---|
 | S1 linear schemes | Flat, Linear, NaturalCubic, BSpline as templated maths; collapse to `linmap` | round-trip; linmap recovered |
 | S2 value-dependent | Hermite, MonotoneCubic (Hyman via `select`); mask/margin/arm-gap export | round-trip; select buckets |
+| S3 variables + regions | interpolation variable (`zero`/`logdf`/`forward`) per scheme; composite curve by region, boundaries as structure | round-trip; no `select` on linear regions; composite calibrates |
 | I1 implicit | `implicit` node; least-squares calibration to the 12 quotes; IFT risk | `‖Jᵀr‖∞ < 1e-12`; IFT vs bump 1e-6 |
-| A1 active set | `pin`, `rank_update`, hysteresis; frozen-Newton streaming | kink 2-cycle fixture: failure shown, then converges ≤ 5 iters |
+| A1 active set | `pin`, `rank_update`, hysteresis; frozen-Newton streaming | kink 2-cycle fixture on the composite: failure shown, then converges ≤ 5 iters |
 | M4 review | | fixed or filed |
 
 ### M5 — batch axis, scan, exposure (`WORKLOADS.md` §M5)

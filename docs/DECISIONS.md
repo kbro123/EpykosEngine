@@ -516,7 +516,7 @@ Two mechanisms of M3/G1 that other packages build on.
    book, so it is caught by the curve E0 gates alone (`curve_record_e0_test`, `curve_composite_e0_test`), the
    mechanism of D32/D33 for an op the M1 book does not contain.
 
-## D37 — The implicit node is a block over solved inputs and residual outputs; the IFT rule; solve order and factorisation sharing measured (2026-09-23)
+## D40 — The implicit node is a block over solved inputs and residual outputs; the IFT rule; solve order and factorisation sharing measured (2026-09-23)
 Implements DESIGN.md §3.2 `implicit(F)` and D7 for M3/G4 (`include/epykos/solver/`, `src/solver/`; PROBLEM.md §5).
 1. **Representation.** An implicit node is recorded, on the one tape, as a *block*: its unknowns are tape Inputs the
    solver layer fills in (solved inputs), its residuals are tape outputs the solver drives to zero (residual outputs),

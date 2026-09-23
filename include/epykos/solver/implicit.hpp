@@ -6,7 +6,7 @@
 // rule at the solution, z̄ → p̄ = −F_pᵀ F_z⁻ᵀ z̄. The tape's length never depends on how many
 // iterations the solve took (the residual is recorded once, symbolically in z).
 //
-// How it sits in the one tape (D37). The unknowns are recorded as tape Inputs that the solver
+// How it sits in the one tape (D40). The unknowns are recorded as tape Inputs that the solver
 // layer, not the caller, fills in ("solved inputs"); the residuals are recorded as tape outputs
 // that the solver drives to zero ("residual outputs"); two diagnostics — ‖Jᵀr‖∞ and the
 // iteration count — are solved inputs registered as outputs (O1). An ImplicitBlock is the

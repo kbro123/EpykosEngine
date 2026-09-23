@@ -103,7 +103,7 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   | `adjoint.select_wrong_arm` | the select rule routes the adjoint to the other arm | **not exercisable on the M1 book** (no `select`); the near-miss select / max / min / abs shapes |
   | `adjoint.recip_rule_sign` | recip's rule accumulates `+(ȳ·y)·y` instead of `−(ȳ·y)·y` | **not exercisable on the M1 book** (no `recip`); the near-miss `recip_of` shape |
 
-  The implicit node's mutants (M3/G4, D37; one line each in `src/solver/residual.cpp`), caught by the IFT gates
+  The implicit node's mutants (M3/G4, D40; one line each in `src/solver/residual.cpp`), caught by the IFT gates
   `tests/solver/m1_implicit_adjoint_test.cpp` (IFT vs bump-and-recalibrate on the M1 book, 1e-6),
   `tests/solver/curve_set_adjoint_test.cpp` (through two chained curve blocks) and
   `tests/solver/m1_implicit_vs_dual_test.cpp` (vs forward mode through the calibration, 1e-12):

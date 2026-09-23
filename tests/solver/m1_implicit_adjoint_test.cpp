@@ -131,7 +131,7 @@ TEST(M1Implicit, TapeLengthIsIndependentOfTheStartingPoint) {
 // the signature pass materialises once DF(0) and the 7-day instrument share it (D22 rule 1's
 // fan-out boundary; D22 already notes the single-term absorption of `Neg(Input)` into the affine
 // pass that would fold them, deferred because it costs the M1 interpreter its exp tail and its
-// inlined interpolation — an M4 rewrite with a cost model, D37). The test asserts what the
+// inlined interpolation — an M4 rewrite with a cost model, D40). The test asserts what the
 // sharing gate means and reports the bucket.
 TEST(M1Implicit, OneTapeEveryDfDomainFeedsResidualAndBookAndNoDfIsComputedTwice) {
   const Fixture& f = fixture();

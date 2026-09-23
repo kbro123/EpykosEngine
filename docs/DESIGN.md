@@ -105,7 +105,7 @@ recognises.
 `select` vs `pin`: the **value** owns a `select`'s mask; the **solver** owns a `pin`'s mask. That distinction is what
 removes Newton 2-cycles at kinks (see `PRIOR_ART.md`, desk_mixed).
 
-As implemented (M3/G4, D37; `solver/implicit.hpp`, `solver/residual.hpp`, `solver/implicit_program.hpp`,
+As implemented (M3/G4, D40; `solver/implicit.hpp`, `solver/residual.hpp`, `solver/implicit_program.hpp`,
 `solver/curve_set.hpp`): an implicit node is a *block* on the one tape — its unknowns are Inputs the solver fills in,
 its residuals outputs it drives to zero, its O1 diagnostics (`‖Jᵀr‖∞`, iterations) solved inputs registered as outputs —
 kept in an `ImplicitRegistry` of ordinals that survives every pass; `Op::Implicit` stays reserved. The residual

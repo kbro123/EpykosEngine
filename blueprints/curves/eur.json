@@ -1,0 +1,41 @@
+{
+  "meta": {
+    "title": "EUR curve definitions: €STR OIS discounting, EURIBOR 6M and 3M projection",
+    "description": "Stage A's multi-curve dependence (PROBLEM.md section 4): the €STR curve from the overnight fixing and €STR OIS; the 6M EURIBOR curve from the 6M deposit and the standard EUR IRS (fixed annual 30/360 vs 6M), discounted on €STR; the 3M EURIBOR curve from the 3M deposit, eight FEU3 futures (convexity zero, stated) and 3s6s tenor-basis swaps (the spread on the 3M leg), which read the 6M and €STR curves. Knots at the instruments' maturities. Tenors from the conventions' cited standard tenor sets (docs/G4_BUNDLE.md EUR.3-EUR.6).",
+    "sources": [
+      "docs/G4_BUNDLE.md EUR.3 (€STR OIS tenors), EUR.4 (EURIBOR IRS tenors: CFTC MAT), EUR.5 (3s6s basis: spread on the 3M leg, Bianchetti-Carlicchi), EUR.6 (FEU3 periods, EURIBOR deposits)",
+      "Bianchetti and Carlicchi, Markets Evolution After the Credit Crunch (arXiv 1301.7078): multiple-curve bootstrapping of the 3M curve from basis swaps against the 6M curve"
+    ],
+    "notes": ["The choice of the 6M curve as the swap curve and the 3M curve through basis swaps follows the EUR market's standard IRS (vs 6M EURIBOR); the exact instrument selection is a curve-definition matter (own construction)."]
+  },
+  "curves": {
+    "EUR-ESTR": {
+      "index": "EUR-ESTR", "currency": "EUR",
+      "description": "€STR OIS discount curve, linear in the zero rate.",
+      "scheme": "linear", "variable": "zero",
+      "instruments": [
+        {"blueprint": "EUR-ESTR-ON-DEPOSIT", "tenor": "1D"},
+        {"blueprint": "EUR-ESTR-OIS", "tenors": ["1M", "2M", "3M", "6M", "9M", "1Y", "18M", "2Y", "3Y", "4Y", "5Y", "7Y", "10Y", "12Y", "15Y", "20Y", "30Y"]}
+      ]
+    },
+    "EUR-EURIBOR-6M": {
+      "index": "EUR-EURIBOR-6M", "currency": "EUR",
+      "description": "6M EURIBOR projection curve from the 6M deposit and fixed-vs-6M swaps, €STR-discounted.",
+      "scheme": "linear", "variable": "zero",
+      "instruments": [
+        {"blueprint": "EUR-EURIBOR-6M-DEPOSIT", "tenor": "6M"},
+        {"blueprint": "EUR-EURIBOR-6M-IRS", "tenors": ["1Y", "2Y", "3Y", "4Y", "5Y", "7Y", "10Y", "12Y", "15Y", "20Y", "30Y"]}
+      ]
+    },
+    "EUR-EURIBOR-3M": {
+      "index": "EUR-EURIBOR-3M", "currency": "EUR",
+      "description": "3M EURIBOR projection curve from the 3M deposit, eight FEU3 futures and 3s6s basis swaps against the 6M curve, €STR-discounted.",
+      "scheme": "linear", "variable": "zero",
+      "instruments": [
+        {"blueprint": "EUR-EURIBOR-3M-DEPOSIT", "tenor": "3M"},
+        {"blueprint": "EUR-EURIBOR-3M-FUTURE", "contracts": 8},
+        {"blueprint": "EUR-3S6S-BASIS", "tenors": ["3Y", "4Y", "5Y", "7Y", "10Y", "12Y", "15Y", "20Y", "30Y"]}
+      ]
+    }
+  }
+}

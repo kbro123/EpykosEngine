@@ -1,0 +1,101 @@
+{
+  "meta": {
+    "title": "Stage A instrument blueprints: SOFR OIS (plain, observation shift, shift + lockout), SOFR averaging swaps, SOFR futures, €STR OIS, EURIBOR swaps, 3s6s basis, EURIBOR futures, front-end deposits",
+    "description": "Each blueprint names a convention of blueprints/conventions/instruments.json and the coupon kind every leg records with (include/epykos/maths/instrument/blueprint.hpp); a trade of the population supplies notional, side, dates, tenor and rate. The coupon mechanics are code (maths/instrument/coupon.hpp); the observation windows, lags and day counts come from the convention. Sources: the convention's own citations (docs/G4_BUNDLE.md USD.3-USD.5, EUR.3-EUR.6) and the ISDA 2021 Definitions / ARRC formulas for compounding in arrears and averaging (G4_BUNDLE.md section 6).",
+    "sources": [
+      "docs/G4_BUNDLE.md sections USD.3, USD.4, USD.5, EUR.3, EUR.4, EUR.5, EUR.6 (the conventions each blueprint names)",
+      "ARRC, A User's Guide to SOFR (2021): compounding in arrears, payment delay, lookback, observation shift, lockout; simple (arithmetic) average",
+      "ISDA 2021 Interest Rate Derivatives Definitions section 7.3 OIS compounding formula; Overnight Averaging (as cited in the ISDA Good Friday 2026 guidance)",
+      "CME SR3 / SR1 and Eurex FEU3 contract specifications: price = 100 minus the rate; convexity adjustment zero and stated (PROBLEM.md section 9, D35)"
+    ],
+    "notes": [
+      "Curve slots: the discount curve of a blueprint is its convention's discount_index (else the currency's), the projection curve of a float leg its index; the caller maps index names to curve objects (builder.hpp CurveSlots).",
+      "Futures notional: the contract value at 100 points times the number of contracts (SR3 and SR1: 250,000 USD per contract = 2,500 USD per point; FEU3: 250,000 EUR); the PV of a position is (price - traded price) / 100 x notional, undiscounted (variation margin)."
+    ]
+  },
+  "blueprints": {
+    "USD-SOFR-OIS": {
+      "convention": "USD-SOFR-OIS",
+      "description": "USD fixed vs SOFR compounded in arrears (plain), the interdealer standard.",
+      "legs": [{"coupon": "fixed"}, {"coupon": "rfr_compounded"}],
+      "notional": 10000000, "side": "receive", "tenor": "5Y"
+    },
+    "USD-SOFR-OIS-SHIFT2": {
+      "convention": "USD-SOFR-OIS-SHIFT2",
+      "description": "USD fixed vs SOFR compounded with a two business day observation shift (customised).",
+      "legs": [{"coupon": "fixed"}, {"coupon": "rfr_compounded", "observation": {"method": "observation_shift", "lookback_days": 2, "lockout_days": 0}}],
+      "notional": 10000000, "side": "receive", "tenor": "5Y"
+    },
+    "USD-SOFR-OIS-SHIFT2-LOCKOUT2": {
+      "convention": "USD-SOFR-OIS-SHIFT2-LOCKOUT2",
+      "description": "USD fixed vs SOFR compounded with a two business day observation shift and a two business day lockout (customised).",
+      "legs": [{"coupon": "fixed"}, {"coupon": "rfr_compounded", "observation": {"method": "observation_shift", "lookback_days": 2, "lockout_days": 2}}],
+      "notional": 10000000, "side": "receive", "tenor": "5Y"
+    },
+    "USD-SOFR-AVG-SWAP": {
+      "convention": "USD-SOFR-AVG-SWAP",
+      "description": "USD fixed vs the arithmetic average of daily SOFR (does not telescope).",
+      "legs": [{"coupon": "fixed"}, {"coupon": "rfr_averaged"}],
+      "notional": 10000000, "side": "receive", "tenor": "5Y"
+    },
+    "USD-SOFR-ON-DEPOSIT": {
+      "convention": "USD-SOFR-ON-DEPOSIT",
+      "description": "The overnight SOFR fixing as a one-day deposit (the curve's first instrument).",
+      "notional": 1, "side": "lend", "tenor": "1D"
+    },
+    "USD-SOFR-3M-FUTURE": {
+      "convention": "USD-SOFR-3M-FUTURE",
+      "description": "CME SR3: 100 minus compounded SOFR over the IMM quarter; convexity zero (stated).",
+      "notional": 250000, "side": "long"
+    },
+    "USD-SOFR-1M-FUTURE": {
+      "convention": "USD-SOFR-1M-FUTURE",
+      "description": "CME SR1: 100 minus the arithmetic average of daily SOFR over the calendar month; convexity zero (stated).",
+      "notional": 250000, "side": "long"
+    },
+    "EUR-ESTR-OIS": {
+      "convention": "EUR-ESTR-OIS",
+      "description": "EUR fixed vs €STR compounded in arrears (plain).",
+      "legs": [{"coupon": "fixed"}, {"coupon": "rfr_compounded"}],
+      "notional": 10000000, "side": "receive", "tenor": "5Y"
+    },
+    "EUR-ESTR-ON-DEPOSIT": {
+      "convention": "EUR-ESTR-ON-DEPOSIT",
+      "description": "The overnight €STR fixing as a one-day deposit.",
+      "notional": 1, "side": "lend", "tenor": "1D"
+    },
+    "EUR-EURIBOR-3M-DEPOSIT": {
+      "convention": "EUR-EURIBOR-3M-DEPOSIT",
+      "description": "The 3M EURIBOR fixing as a spot-starting three-month deposit.",
+      "notional": 1, "side": "lend", "tenor": "3M"
+    },
+    "EUR-EURIBOR-6M-DEPOSIT": {
+      "convention": "EUR-EURIBOR-6M-DEPOSIT",
+      "description": "The 6M EURIBOR fixing as a spot-starting six-month deposit.",
+      "notional": 1, "side": "lend", "tenor": "6M"
+    },
+    "EUR-EURIBOR-3M-IRS": {
+      "convention": "EUR-EURIBOR-3M-IRS",
+      "description": "EUR fixed annual 30/360 vs 3M EURIBOR quarterly, fixing in advance.",
+      "legs": [{"coupon": "fixed"}, {"coupon": "term_rate"}],
+      "notional": 10000000, "side": "receive", "tenor": "5Y"
+    },
+    "EUR-EURIBOR-6M-IRS": {
+      "convention": "EUR-EURIBOR-6M-IRS",
+      "description": "EUR fixed annual 30/360 vs 6M EURIBOR semi-annual, fixing in advance.",
+      "legs": [{"coupon": "fixed"}, {"coupon": "term_rate"}],
+      "notional": 10000000, "side": "receive", "tenor": "5Y"
+    },
+    "EUR-3S6S-BASIS": {
+      "convention": "EUR-3S6S-BASIS",
+      "description": "EUR 3M EURIBOR + spread (quarterly) vs 6M EURIBOR flat (semi-annual), €STR-discounted; the spread on the 3M leg.",
+      "legs": [{"coupon": "term_rate", "spread": true}, {"coupon": "term_rate", "spread": false}],
+      "notional": 10000000, "side": "receive", "tenor": "5Y"
+    },
+    "EUR-EURIBOR-3M-FUTURE": {
+      "convention": "EUR-EURIBOR-3M-FUTURE",
+      "description": "Eurex FEU3: 100 minus the 3M EURIBOR fixing of the last trading day; the deposit from the third Wednesday for three months; convexity zero (stated).",
+      "notional": 250000, "side": "long"
+    }
+  }
+}

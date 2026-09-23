@@ -203,7 +203,7 @@ fused group is rewrite / catalogue work (M4).
 | class | example | treatment |
 |---|---|---|
 | A structural | region lookup, schedule shape, turn windows | folded at record time; a change is a re-record |
-| B limiter (min/max/abs/sign) | Hyman monotonicity filter | `select`; mask + margin + arm gap exported; kinks become an active set in the solver via `pin` |
+| B limiter (min/max/abs/sign) | Hyman monotonicity filter | `select`; mask + margin + arm gap exported (as outputs: `tape/select_export.hpp`, D39; the safe-arm table of §10); kinks become an active set in the solver via `pin` |
 | C formula selection on a quote | Huber bid/offer band | outside the pricing graph: `row_map` + solver active set |
 | D iterative / implicit | yield, implied vol, calibration, regressions | `implicit`; never unrolled |
 | E discrete argmin | bond-future CTD | `select` over a small candidate set, or a `frozen` index with a guard |
@@ -229,7 +229,26 @@ fused group is rewrite / catalogue work (M4).
   (`src/**/*_e0.cpp`, `tests/**/*_e0_test.cpp`) in every preset on every compiler (D25: a clang pragma is not enough, GCC
   contracts in ISO C++ mode); production builds may contract, and gates then use E1 tolerances.
 - Every rewrite declares its exactness class; the verifier applies the matching tolerance.
-- `select` evaluates both arms: arms must be NaN-safe (safe-arm discipline; e.g. `m/|m|` → `copysign`).
+- `select` evaluates both arms: arms must be NaN-safe (safe-arm discipline; e.g. `m/|m|` → `copysign`). The rewrites
+  used by the MonotoneCubic scheme's Hyman limiter (`maths/curve/scheme.hpp`, M3/G1, D38), the first class-B maths in
+  the engine, are the table below; every arm is a product or a selection of finite values, so no arm can overflow,
+  divide by zero or produce a NaN for finite inputs, and the recorded Select nodes export mask, margin and arm gap
+  (`tape/select_export.hpp`, D39):
+
+  | naive form | hazard in the unselected arm | safe form recorded |
+  |---|---|---|
+  | `sign(x) = x / |x|` | `0 / 0` at `x = 0` | `select(x < 0, −1, +1)` (`+1` at 0; the sign only ever multiplies a bound that vanishes with `x`) |
+  | `|x|` as `sqrt(x²)` or `std::fabs` | a branch on a value / a non-`Scalar` call | `select(x < 0, −x, x)` (`abs(−0.0)` is `−0.0`) |
+  | `min(a, b)`, `max(a, b)` | a branch on a value | `select(b < a, b, a)`, `select(a < b, b, a)` |
+  | `clamp(x, 0, L)` | a branch on a value | `select(L < m, L, m)` with `m = select(x < 0, 0, x)` |
+  | the Hyman bound as a ratio, `m · min(1, 3·min(|dl|, |dr|) / |m|)` | division by `|m| = 0` | `σ · min(max(σ·m, 0), 3·min(|dl|, |dr|))`, `σ = sign(dr)`: products only |
+  | zero at an extremum, `if (dl·dr <= 0) m = 0` | a branch on a value | `select(dl·dr > 0, limited, 0)`; the limited arm is finite at `dl·dr = 0` |
+  | the harmonic-mean tangent, `(w1 + w2) / (w1/dl + w2/dr)` | `1/0` at a zero secant, `inf − inf` | not used: the three-point (Bessel) tangent is a weighted sum with structural weights |
+  | `min(|dl|, |dr|)` at an end knot, where `dl = dr` | a Select whose two arms are one value: a permanent tie with zero margin | structural: `3·|d|` at an end knot, no Select written |
+
+  A flip of such a select between two states is classified by the arm gap, never by the bit (§6): the limiter's
+  selects are ties (`min`, `max`, `abs`, the sign), so their gap vanishes with the margin and a flip is degenerate; a
+  select whose arms differ by a finite amount at the boundary is a jump (measured: `classify_flip`).
 - No `-ffast-math`.
 
 ---

@@ -443,3 +443,75 @@ swaps, FX pairs, central-bank schedules, each with its cited sources) — may be
 under `include/`, `src/`, `api/`, `tools/` or `tests/` of SwapEngine is opened. Imported conventions are
 cross-checked against the independent web research of `docs/G4_BUNDLE.md`; a disagreement is recorded, not
 silently resolved either way.
+
+## D38 — The curve family: schemes as templated maths over structural tables, the variable as a template parameter, composites anchored on the boundary knot (2026-09-23)
+Implements `PROBLEM.md` §3 "interpolation" and `WORKLOADS.md` §M4 "Schemes / Interpolation variable / Composite"
+(M3/G1, `include/epykos/maths/curve/`). Six choices:
+1. **A scheme is structure plus a Scalar loop.** `Flat`, `Linear`, `Hermite` (Bessel tangents), `NaturalCubic`,
+   `MonotoneCubic` (Fritsch–Carlson three-point tangents through the Hyman filter) and `BSpline` (clamped, degree
+   min(3, n − 1)) are built from the knot times alone — bracket tables, Bessel weights, the Thomas pivots and their
+   reciprocals, the B-spline knot vector — and evaluate `prepare(v)` (the Scalar coefficients of one state: tangents,
+   second derivatives) once per curve and state, then `value(v, coef, t)` per time. Every scheme is flat outside its
+   grid and returns the knot value itself at a knot time (structure), so a composite's boundary is bitwise where its
+   two regions agree on the variable. `Linear` is the M1 scheme statement for statement; `maths/curve/linear.hpp`
+   is untouched and the M1 E0 gates are unchanged.
+2. **Division by a structural constant is written as a product by its reciprocal.** `x / c` is not `(1/c)·x` bitwise,
+   so a pass cannot absorb a division exactly; the Thomas sweep and the secants therefore multiply by reciprocal pivots
+   and reciprocal spacings computed in double at construction (they are structure: knot times only). With D38's
+   single-term scaling, every linear-in-values scheme then collapses to Affine nodes: NaturalCubic's sweep becomes a
+   chain of one- and two-term Affines (one level-domain per sweep step in the IR), Hermite's tangents two-term
+   Affines of one-term Affines, the interpolated value one four-term Affine (measured on the 10-swap book:
+   `curve_record_e0_test`, no Select and nothing but Input / Affine / Neg / Const×value in the log-DF subgraph for
+   the five linear schemes; 57–67 Selects for MonotoneCubic).
+3. **The variable is a template parameter**, `Variable::{zero, logdf, forward}` on `Curve<S, V>`, never a select:
+   zero is `log DF = −z(t)·t` (M1's), logdf interpolates log DF itself with the origin knot (0, 0) in front of the
+   grid when the first knot is at t > 0 (DF(0) = 1 is structure), forward is `−∫_0^t f` in closed form for Flat and
+   Linear only (a compile-time restriction). Extrapolation is flat in the variable for all three; for logdf that is
+   a constant DF (a zero forward) beyond the last knot — a stated simplification: a logdf curve definition places its
+   last knot at or beyond the last cash flow.
+4. **BSpline's state is its de Boor points.** The clamped B-spline interpolates its end points only and reproduces
+   linear functions of the Greville abscissae; the knot vector's interior knots are the de Boor averages of the knot
+   times (Piegl & Tiller 9.8). An interpolating variant (values on the grid, a structural collocation inverse) was
+   not built: the calibrating state is the control points, whose Jacobian is the basis matrix.
+5. **Composite continuity by anchoring** (`composite.hpp`): regions `[t_a, t_b)` partition `[0, ∞)` and the knots;
+   at a boundary the knot that sits on it owns the boundary value — if region r + 1's first knot is at t_b, region r
+   gets a right anchor there (that knot converted into r's variable by an affine map with a structural coefficient:
+   identity when the variables agree, `y = −z·t_b` / `z = y·(−1/t_b)` otherwise) and interpolates to it; otherwise
+   region r extrapolates flat to t_b and region r + 1 takes a left anchor at t_b from region r's log DF. Forward
+   regions carry no level: they inherit region r − 1's log DF at t_a and are accepted as the last region only
+   (a following region would have to inherit its level too, and its knots would lose their meaning) — a stated
+   restriction. Region lookup is a comparison on double t at record time (class A, folded). Measured on the
+   `WORKLOADS.md` §M4 composite: bitwise at 1Y (zero / zero), within 2e-16 relative at 10Y (zero / logdf, two
+   roundings of the conversion), round-trip identity raw and after the passes, E0 through the replay, the evaluator
+   and the interpreter at B = 1 and B = 13, select buckets only for the monotone region (every Select row reads
+   knots 4–9: the region's five knots and the 10Y knot its anchor is converted from), the adjoint's full Jacobian
+   vs `Dual<12>` within 3.9e-15 of the row scale at 24 ball states, the record point skipped as a limiter tie.
+6. **The runtime scheme choice is a `std::variant` visited per region** (`SchemeKind`, `RegionSpec`), the shape a
+   curve definition of `blueprints/` (D36) maps onto; a single-scheme curve is a one-region composite and is bitwise
+   the template (`curve_record_e0_test`).
+
+## D39 — Select exports are outputs; affine_collapse absorbs a scaled atom that is scaled again (2026-09-23)
+Two mechanisms of M3/G1 that other packages build on.
+1. **Select exports** (`tape/select_export.hpp`). `export_selects(tape)` appends three outputs per Select node —
+   the predicate as the mask (1.0 / 0.0), a Sub over the comparison's operands as the signed margin (`y − x` for
+   `<`, `<=`; `x − y` for `>`, `>=`, `==`; the mask itself for a constant predicate), a Sub of the arms as the arm
+   gap (`a − b`) — and returns the ordinal table. Nothing else is needed: the tape passes keep outputs, the
+   signature pass materialises them, `exec::Interpreter::run` writes them at `out[o·B + b]`, and `adjoint::Adjoint`
+   seeds them with `out_bar` (zero for a diagnostic: the pricing outputs and adjoints are unchanged, asserted).
+   The task's "export flag on the IR / Interpreter / Adjoint" is therefore not a flag: the export is the program's
+   output list, which every consumer already honours, and the IR format is untouched (the Scan work of G3 changes
+   it concurrently). `classify_flip` applies DESIGN.md §6: a flip is significant only if the arm gap exceeds a
+   threshold; the Hyman limiter's flips are ties (measured: a bisected flip at the record point's `|d_4| = |d_5|`
+   tie has a gap of 1e-16 and moves no DF by more than 1e-16 relative), a select whose arms differ at the boundary
+   is a jump.
+2. **Single-term scaling in `affine_collapse`** (E0). A tainted product `Const × atom` that another
+   `Mul(Const, ·)` reads becomes the one-term Affine `−0.0 + c·x` (exact for every double, `−0.0 + p = p`), so a
+   chain that scales a scaled affine — a Thomas sweep step `(r − a·d'_{i−1})·(1/p_i)`, a Bessel tangent
+   `w_a·d_{k−1} + w_b·d_k` of scaled secants, a back-substitution `d'_i − c'_i·M_{i+1}` — reads it as an atom and
+   collapses. Every other product is left as it was: one read only by chains is taken by them as a term (the M1
+   tape is unchanged: one Affine per interpolated time, the pinned counts of `tape_m1_record_e0_test` and
+   `ir_domain_chain_test`), one read by an Exp, a Div, a Mul by a value or an output stays a Mul (D22's
+   single-term question for the knot-time DFs remains R1/R3's). A division by a constant is not absorbed (D38.2).
+   Mutant `affine.single_term_unscaled` (the coefficient dropped) is registered; no such product exists on the M1
+   book, so it is caught by the curve E0 gates alone (`curve_record_e0_test`, `curve_composite_e0_test`), the
+   mechanism of D32/D33 for an op the M1 book does not contain.

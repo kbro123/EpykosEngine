@@ -34,10 +34,10 @@ bench/run.sh                             one benchmark binary → bench/results/
 scripts/mutation_test.sh                 the mutation gate: builds the mutation preset, every registered mutant vs the gate tests (D32; the adjoint gates *_adjoint_test are in the set, D33)
 include/epykos/                          public headers, namespace epykos, macros EPY_*
   scalar/     Rec, RecBool, Dual, scalar traits, select/structural_if
-  maths/      templated pricing maths: calendar; exp_poly (vectorisable exp, E1); curve/ (linear.hpp = the linear-in-zero-rate scheme; M4 adds schemes, variables, composite); swap/ (ois.hpp = OIS coupon formulas; M4 adds legs, swaps); model/ (M5)
-  fixtures/   test-only, not engine API (namespace epykos::fixtures): m1_book (seeded book + batch), m1_price (leg/swap/book folds over the book), m1_reference (double oracle table), record_m1 (record helper), m1_differential (the M2 ball, reference and D26 scales on the tester), nearmiss_shapes (near-miss op trees, the gate fixture behind the mutation harness)
+  maths/      templated pricing maths: calendar; exp_poly (vectorisable exp, E1); curve/ (linear.hpp = M1's linear-in-zero-rate scheme, unchanged; scheme.hpp = Flat, Linear, Hermite, NaturalCubic, MonotoneCubic, BSpline; curve.hpp = Variable {zero, logdf, forward} and Curve<S, V>; composite.hpp = the region curve, M3/G1, D38); swap/ (ois.hpp = OIS coupon formulas; G2 adds legs, swaps); model/ (M6)
+  fixtures/   test-only, not engine API (namespace epykos::fixtures): m1_book (seeded book + batch), m1_price (leg/swap/book folds over the book), m1_reference (double oracle table), record_m1 (record helper), m1_differential (the M2 ball, reference and D26 scales on the tester), nearmiss_shapes (near-miss op trees, the gate fixture behind the mutation harness), curve_book (the M1-style book priced off any df(t): the curve gates, M3/G1)
   rng/        Philox-4x32-10, AS241 inverse normal
-  tape/       node table, opcode enum (one for every pass), CSE/DCE, fold-sum, affine collapse, replay
+  tape/       node table, opcode enum (one for every pass), CSE/DCE, fold-sum, affine collapse (single-term scaling since M3/G1, D39), replay, select exports (mask / margin / arm gap as outputs, D39)
   ir/         domain IR (plain data, serialisable), signature pass, expander (round-trip), reference evaluator
   exec/       tiled interpreter, tile/batch layout, thread pool (M5)
   verify/     differential tester (M2/Q1, D30): state ball (E0 TU), E0 bitwise / E1 ulps-or-relative with caller scales, batched compiled side, report

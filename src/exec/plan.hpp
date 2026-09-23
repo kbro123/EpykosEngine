@@ -33,8 +33,8 @@ const char* to_string(Kind k) noexcept;
 
 struct Operand {
   Kind kind = Kind::Lit;
-  const double* data = nullptr;        // Vec: the buffer; Lit: &value; Col: values by row
-  const std::int32_t* index = nullptr; // Gat: value id by row
+  const double* data = nullptr;        // Vec: the buffer; Lit: &value; Col: values by row; Gat: the rows' base (the value buffer, or an inlined producer's tile temporary)
+  const std::int32_t* index = nullptr; // Gat: row of `data` (a value id, or a tile row) by domain row
   std::int32_t stride = 0;             // Lit: 0, Col: 1 — a per-row scalar is data[row · stride] (pair kernels)
 };
 
@@ -73,6 +73,10 @@ struct RunCtx;
 using OpKernel = void (*)(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out);
 using LoadKernel = void (*)(const Operand& src, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out);
 using SegKernel = void (*)(const SegPlan& sp, const RunCtx& ctx, double* domain_values);
+struct InlinedProducer;
+// A whole-domain Sum / Affine inlined producer evaluated for consumer rows r0 .. r0 + n into
+// out[i·L + l] from its consumer-ordered transposed tables (InlinedProducer::memT).
+using SegListKernel = void (*)(const InlinedProducer& ip, const RunCtx& ctx, int r0, int n, double* out);
 // Reduction epilogue: evaluates a step (or loads an operand) for kr member positions of n rows
 // (member row idx[kk·n + i] + r0 of position kk, tile row kk·n + i for Vec operands) and folds
 // the values into acc[i·L + l] in position order: Sum acc = acc + v (acc = v at the block's
@@ -133,6 +137,14 @@ struct StepPlan {
   double* out = nullptr;                 // scratch for a non-final step; nullptr = the caller's destination
   Op op2 = Op::Const;                    // fused pair: the second step's op (Const: not a pair)
   bool prev_right = false;               // fused pair: the first step's value is op2's right operand
+  // Chain tail (plain pair kernels only, kernels_impl.hpp: apply_tails): libm steps (Exp / Log)
+  // of the pair's value that nothing else reads, applied in place on each row (row block at
+  // L = 1) right after it is stored, so the argument never round-trips through the scratch.
+  // acc_fn is null for a step with a tail.
+  static constexpr int max_tail = 2;
+  int n_tail = 0;
+  Op tail_op[max_tail] = {};
+  bool tail_poly = false;                // Exp tails use exp_poly (ExpMode::poly, E1) rather than std::exp
   int ir_first = 0, ir_last = 0;         // IR steps this kernel covers
   std::string name;                      // for describe()
 };
@@ -173,6 +185,34 @@ struct SegPlan {
   std::int32_t min_len = 0, max_len = 0;
 };
 
+// A domain read only through the gathers of one elementwise domain (the consumer), evaluated for
+// each tile of the consumer instead of as a whole: the rows the tile gathers (`index`, the
+// consumer's gather, value ids by consumer row) are computed into `temp` (tile-shaped) and the
+// consumer's operand reads temp through GroupPlan::tile_index. Never materialised: no write to
+// and no read back from a cold region of the value buffer (the 656 KB of interpolated rates on
+// the M1 book at 32 lanes, the same arithmetic either way).
+struct InlinedProducer {
+  std::int32_t domain = -1;                    // the producer
+  std::size_t gather = 0;                      // the consumer's ir gather slot
+  const std::int32_t* gather_index = nullptr;  // that gather's value ids by consumer row (operand matching)
+  std::vector<std::int32_t> index;             // the ids the producer is evaluated for: the gather's, with a
+                                               // foreign id (a row of another domain) replaced by the producer's row 0
+  std::vector<std::int32_t> foreign_row;       // consumer rows whose id is foreign (ascending) ...
+  std::vector<std::int32_t> foreign_id;        // ... and those ids: copied from the value buffer into the temporary
+  std::vector<std::size_t> foreign_start;      // per consumer tile: first entry of foreign_row in it (n_tiles + 1)
+  double* temp = nullptr;                      // tile · Lt doubles
+  // A whole-domain Sum / Affine producer (every row the same `len` members): its member ids and
+  // coefficients transposed in consumer row order, memT[k · rows + r] = member k of the row
+  // consumer row r gathers (a foreign row: the producer's row 0, overwritten by the copy), and
+  // c_0 per consumer row (Affine with a column c_0) or the literal.
+  SegListKernel seg_fn[n_lane_variants] = {};
+  std::int32_t len = 0;
+  std::int32_t rows = 0;                       // the consumer's rows (the stride of memT / coefT)
+  std::vector<std::int32_t> memT;
+  std::vector<double> coefT;
+  Operand konst;                               // Affine: Lit, or Col in consumer row order
+};
+
 struct GroupPlan {
   std::int32_t domain = -1;
   std::int32_t rows = 0;
@@ -190,12 +230,38 @@ struct GroupPlan {
   bool fused = false;
   std::vector<std::int32_t> keep;        // rows materialised anyway
   std::vector<std::int32_t> consumers;   // the reduction domains that evaluate it (describe)
+  // Producers evaluated per tile of this group (InlinedProducer), and the tile row of each of
+  // this group's rows (r mod tile) their operands gather through. A group that inlines producers
+  // is only ever evaluated in the contiguous row mode.
+  std::vector<InlinedProducer> inlined;
+  std::vector<std::int32_t> tile_index;
+  std::int32_t tile = 0;                 // rows per tile (foreign_start is indexed by r0 / tile)
+  std::int32_t inlined_into = -1;        // this group is an inlined producer of that domain
 };
 
 // Evaluates an elementwise group for n rows (r0, idx: see the row modes above) of lane chunk ctx;
-// the last step writes `dest` (tile-shaped, [i·L + l]), earlier steps their own scratch.
+// the last step writes `dest` (tile-shaped, [i·L + l]), earlier steps their own scratch. Inlined
+// producers (contiguous rows only) are evaluated first, for the rows this tile gathers.
 inline void eval_group(const GroupPlan& g, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* dest) {
   const int mode = idx != nullptr ? row_indirect : row_contiguous;
+  for (const InlinedProducer& ip : g.inlined) {
+    const GroupPlan& pg = ctx.groups[ip.domain];
+    const std::int32_t* ids = ip.index.data() + r0;
+    if (pg.whole_segment) {
+      ip.seg_fn[ctx.v](ip, ctx, r0, n, ip.temp);
+    } else {
+      eval_group(pg, ctx, -pg.value_base, ids, n, ip.temp);
+    }
+    if (!ip.foreign_row.empty()) {
+      const std::size_t t = static_cast<std::size_t>(r0 / g.tile);
+      const std::size_t Ls = static_cast<std::size_t>(ctx.L);
+      for (std::size_t f = ip.foreign_start[t]; f < ip.foreign_start[t + 1]; ++f) {
+        const double* src = ctx.values + static_cast<std::size_t>(ip.foreign_id[f]) * Ls;
+        double* dst = ip.temp + static_cast<std::size_t>(ip.foreign_row[f] - r0) * Ls;
+        for (std::size_t l = 0; l < Ls; ++l) dst[l] = src[l];
+      }
+    }
+  }
   for (const StepPlan& s : g.steps) {
     for (int j = 0; j < s.n_pre; ++j) s.pre[j].fn[mode][ctx.v](s.pre[j].src, ctx, r0, idx, n, s.pre[j].dst);
     double* o = s.out != nullptr ? s.out : dest;
@@ -215,6 +281,7 @@ struct KernelTable {
   static OpKernel seg_rows(bool affine, bool ind);            // Sum / Affine per tile (fallback)
   static LoadKernel load(Kind k, bool ind);                   // materialise an operand
   static SegKernel seg_whole(bool affine);                    // Sum / Affine whole-domain, bucketed
+  static SegListKernel seg_list(bool affine);                 // Sum / Affine for a list of rows (inlined producer)
   static AccKernel binary_acc(Op op, Kind ka, Kind kb, bool affine);  // reduction epilogues (indirect rows)
   static AccKernel unary_acc(Op op, Kind ka, bool affine);
   static AccKernel konst_acc(Kind kk, bool affine);

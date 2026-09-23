@@ -19,8 +19,11 @@
 //     reads — t = op(x, y) then op2(t, z) or op2(z, t), with op, op2 among add / sub / mul / div
 //     / neg and x, y, z literals, columns or gathers — are one kernel (a fused pair): both
 //     operations run in registers per lane, in the recorded order with the recorded roundings,
-//     and t is never stored. A longer chain is a pair followed by single steps. On the M1 book
-//     the forwards, the exp argument, the float coupons and the swap PVs are pairs.
+//     and t is never stored. A longer chain is a pair followed by single steps, except that an
+//     Exp / Log of the pair's value that nothing else reads (a chain tail) is applied by the pair
+//     kernel in place on each row it has just stored, while the row is in L1, so the libm
+//     argument never round-trips through the scratch. On the M1 book the forwards, the exp
+//     argument (with its exp as the tail), the float coupons and the swap PVs are pairs.
 //     Options::fuse_pairs switches it off (one kernel per step);
 //   * a Sum / Affine group is a whole-domain pass: rows are bucketed by segment length (a
 //     structure-only permutation of independent rows) and the members of each bucket are stored
@@ -35,6 +38,14 @@
 //     rows are never written to or read back from the value buffer. On the M1 book this is the
 //     two coupon domains (31,806 rows) folded into the leg sums. Options::fuse_reductions
 //     switches it off (every domain materialised);
+//   * a domain read only through the gathers of one elementwise domain (no output, no segment
+//     membership, no other reader; a whole-domain Sum / Affine only when every row has the same
+//     materialised members, an interpolation) is not materialised either: each tile of the
+//     consumer evaluates it for the rows the tile gathers into a tile-shaped temporary, which
+//     the consumer's operand reads by tile row — the same kernels and fold order (E0), but no
+//     write to and read back from a cold region of the value buffer. On the M1 book this is
+//     the interpolated rates (2,561 rows) evaluated inside the exp domain's tiles.
+//     Options::inline_producers switches it off;
 //   * gathers and segment members read the value buffer of the current chunk.
 //
 // Runtime B and tile; kernels are instantiated for lane widths 1, 4, 8, 16, 32, 64 (a chunk of
@@ -71,6 +82,7 @@ struct Options {
   ExpMode exp = ExpMode::std_exp;    // std_exp: E0; poly: E1 (exp_poly), timing only
   bool fuse_reductions = true;       // evaluate reduction-only elementwise domains inside the reductions (E0); false: materialise every domain
   bool fuse_pairs = true;            // evaluate two consecutive chained steps in one kernel with the middle value in registers (E0); false: one kernel per step
+  bool inline_producers = true;      // evaluate a domain read only through one elementwise domain's gathers inside that domain's tiles (E0); false: materialise it
 };
 
 class Interpreter {

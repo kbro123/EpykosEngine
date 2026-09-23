@@ -81,34 +81,38 @@ inline int row_at(int r0, const std::int32_t* idx, int i) noexcept {
 // ---- operand access ------------------------------------------------------------------------
 
 // One element (L = 1 or the runtime variant's lane l): row r / tile row i / lane l of stride LL.
+// A gathered operand reads its own base (Operand::data: the value buffer, or an inlined
+// producer's tile temporary), so `values` is unused for it.
 template <Kind K>
 inline double elem(const double* values, const Operand& o, int r, std::size_t i, int l, std::size_t LL) noexcept {
+  (void)values;
   if constexpr (K == Kind::Vec) {
-    (void)values; (void)r;
+    (void)r;
     return o.data[i * LL + static_cast<std::size_t>(l)];
   } else if constexpr (K == Kind::Lit) {
-    (void)values; (void)r; (void)i; (void)l; (void)LL;
+    (void)r; (void)i; (void)l; (void)LL;
     return o.data[0];
   } else if constexpr (K == Kind::Col) {
-    (void)values; (void)i; (void)l; (void)LL;
+    (void)i; (void)l; (void)LL;
     return o.data[r];
   } else {
     (void)i;
-    return values[static_cast<std::size_t>(o.index[r]) * LL + static_cast<std::size_t>(l)];
+    return o.data[static_cast<std::size_t>(o.index[r]) * LL + static_cast<std::size_t>(l)];
   }
 }
 
 // L > 1: stage row r's lanes of a vector-kind operand in `dst`; return the scalar of a scalar kind.
 template <Kind K, int L>
 inline double stage_row(double* dst, const double* values, const Operand& o, int r, std::size_t i) noexcept {
+  (void)values;
   if constexpr (K == Kind::Vec) {
-    (void)values; (void)r;
+    (void)r;
     const double* src = o.data + i * static_cast<std::size_t>(L);
     for (int l = 0; l < L; ++l) dst[l] = src[l];
     return 0.0;
   } else if constexpr (K == Kind::Gat) {
     (void)i;
-    const double* src = values + static_cast<std::size_t>(o.index[r]) * static_cast<std::size_t>(L);
+    const double* src = o.data + static_cast<std::size_t>(o.index[r]) * static_cast<std::size_t>(L);
     for (int l = 0; l < L; ++l) dst[l] = src[l];
     return 0.0;
   } else {
@@ -784,6 +788,7 @@ inline void seg_block_fused(const SegPlan& sp, const SegBlock& blk, const RunCtx
       } else {
         Operand o;
         o.kind = Kind::Gat;
+        o.data = ctx.values;
         o.index = mem;
         sp.load_acc_gat[v](o, ctx, 0, nullptr, n, kr, first, coef, acc);
       }
@@ -805,6 +810,131 @@ void k_seg_whole(const SegPlan& sp, const RunCtx& ctx, double* dom) {
       seg_block_fused<Affine, L>(sp, blk, ctx, dom);
     } else {
       seg_block_gathered<Affine, L>(sp, blk, ctx, dom);
+    }
+  }
+}
+
+// A whole-domain Sum / Affine group inlined into a consumer (plan.hpp: InlinedProducer), evaluated
+// for consumer rows r0 .. r0 + n into out[i·L + l] from its consumer-ordered transposed tables:
+// every row has `len` members, fold step k reads memT[k·rows + r0 + i] — the access pattern of
+// the bucketed whole-domain pass, rows independent, each row's fold the recorded left-to-right
+// order (E0). L = 1: blocks of rows, the row axis vectorised; L > 1: a row's L lanes in locals.
+template <bool Affine, int L>
+void k_seg_list(const InlinedProducer& ip, const RunCtx& ctx, int r0, int n, double* out) {
+  const double* values = ctx.values;
+  const int len = ip.len;
+  const std::size_t R = static_cast<std::size_t>(ip.rows);
+  const std::int32_t* memT = ip.memT.data() + static_cast<std::size_t>(r0);
+  const double* coefT = Affine ? ip.coefT.data() + static_cast<std::size_t>(r0) : nullptr;
+  const double* konst = Affine ? ip.konst.data : nullptr;
+  const bool konst_col = Affine && ip.konst.kind == Kind::Col;
+  auto row_c0 = [&](int i) { return konst_col ? konst[r0 + i] : konst[0]; };
+  if constexpr (L == 1) {
+    constexpr int RB = row_block;
+    int i = 0;
+    for (; i + RB <= n; i += RB) {
+      double acc[RB];
+      int k0;
+      if constexpr (Affine) {
+        for (int j = 0; j < RB; ++j) acc[j] = row_c0(i + j);
+        k0 = 0;
+      } else {
+        for (int j = 0; j < RB; ++j) acc[j] = values[memT[i + j]];
+        k0 = 1;
+      }
+      for (int k = k0; k < len; ++k) {
+        const std::size_t kk = static_cast<std::size_t>(k) * R + static_cast<std::size_t>(i);
+        double v[RB];
+        for (int j = 0; j < RB; ++j) v[j] = values[memT[kk + static_cast<std::size_t>(j)]];
+        if constexpr (Affine) {
+          for (int j = 0; j < RB; ++j) {
+            const double p = coefT[kk + static_cast<std::size_t>(j)] * v[j];
+            acc[j] = acc[j] + p;
+          }
+        } else {
+          for (int j = 0; j < RB; ++j) acc[j] = acc[j] + v[j];
+        }
+      }
+      for (int j = 0; j < RB; ++j) out[i + j] = acc[j];
+    }
+    for (; i < n; ++i) {
+      double acc;
+      int k0;
+      if constexpr (Affine) {
+        acc = row_c0(i);
+        k0 = 0;
+      } else {
+        acc = values[memT[i]];
+        k0 = 1;
+      }
+      for (int k = k0; k < len; ++k) {
+        const std::size_t kk = static_cast<std::size_t>(k) * R + static_cast<std::size_t>(i);
+        const double v = values[memT[kk]];
+        if constexpr (Affine) {
+          const double p = coefT[kk] * v;
+          acc = acc + p;
+        } else {
+          acc = acc + v;
+        }
+      }
+      out[i] = acc;
+    }
+  } else if constexpr (L > 1) {
+    for (int i = 0; i < n; ++i) {
+      double acc[L];
+      int k0;
+      if constexpr (Affine) {
+        const double c0 = row_c0(i);
+        for (int l = 0; l < L; ++l) acc[l] = c0;
+        k0 = 0;
+      } else {
+        const double* src = values + static_cast<std::size_t>(memT[i]) * static_cast<std::size_t>(L);
+        for (int l = 0; l < L; ++l) acc[l] = src[l];
+        k0 = 1;
+      }
+      for (int k = k0; k < len; ++k) {
+        const std::size_t kk = static_cast<std::size_t>(k) * R + static_cast<std::size_t>(i);
+        const double* src = values + static_cast<std::size_t>(memT[kk]) * static_cast<std::size_t>(L);
+        if constexpr (Affine) {
+          const double c = coefT[kk];
+          for (int l = 0; l < L; ++l) {
+            const double p = c * src[l];
+            acc[l] = acc[l] + p;
+          }
+        } else {
+          for (int l = 0; l < L; ++l) acc[l] = acc[l] + src[l];
+        }
+      }
+      double* dst = out + static_cast<std::size_t>(i) * static_cast<std::size_t>(L);
+      for (int l = 0; l < L; ++l) dst[l] = acc[l];
+    }
+  } else {
+    const std::size_t LL = static_cast<std::size_t>(ctx.L);
+    for (int i = 0; i < n; ++i) {
+      double* d = out + static_cast<std::size_t>(i) * LL;
+      int k0;
+      if constexpr (Affine) {
+        const double c0 = row_c0(i);
+        for (std::size_t l = 0; l < LL; ++l) d[l] = c0;
+        k0 = 0;
+      } else {
+        const double* src = values + static_cast<std::size_t>(memT[i]) * LL;
+        for (std::size_t l = 0; l < LL; ++l) d[l] = src[l];
+        k0 = 1;
+      }
+      for (int k = k0; k < len; ++k) {
+        const std::size_t kk = static_cast<std::size_t>(k) * R + static_cast<std::size_t>(i);
+        const double* src = values + static_cast<std::size_t>(memT[kk]) * LL;
+        if constexpr (Affine) {
+          const double c = coefT[kk];
+          for (std::size_t l = 0; l < LL; ++l) {
+            const double p = c * src[l];
+            d[l] = d[l] + p;
+          }
+        } else {
+          for (std::size_t l = 0; l < LL; ++l) d[l] = d[l] + src[l];
+        }
+      }
     }
   }
 }
@@ -861,13 +991,14 @@ constexpr bool pair_unary(Op op) noexcept { return op == Op::Neg; }
 // L = 1 / runtime L: one element of a pair operand.
 template <PK K>
 EPYKOS_EXEC_INLINE double pget(const double* values, const Operand& o, int r, int l, std::size_t LL) noexcept {
+  (void)values;
   if constexpr (K == PK::S) {
-    (void)values; (void)l; (void)LL;
+    (void)l; (void)LL;
     return o.data[static_cast<std::size_t>(r) * static_cast<std::size_t>(o.stride)];
   } else if constexpr (K == PK::G) {
-    return values[static_cast<std::size_t>(o.index[r]) * LL + static_cast<std::size_t>(l)];
+    return o.data[static_cast<std::size_t>(o.index[r]) * LL + static_cast<std::size_t>(l)];
   } else {
-    (void)values; (void)o; (void)r; (void)l; (void)LL;
+    (void)o; (void)r; (void)l; (void)LL;
     return 0.0;
   }
 }
@@ -878,14 +1009,15 @@ struct PairRow {
   double s = 0.0;
   const double* p = nullptr;
   EPYKOS_EXEC_INLINE static PairRow make(const double* values, const Operand& o, int r, std::size_t LL) noexcept {
+    (void)values;
     PairRow v;
     if constexpr (K == PK::S) {
-      (void)values; (void)LL;
+      (void)LL;
       v.s = o.data[static_cast<std::size_t>(r) * static_cast<std::size_t>(o.stride)];
     } else if constexpr (K == PK::G) {
-      v.p = values + static_cast<std::size_t>(o.index[r]) * LL;
+      v.p = o.data + static_cast<std::size_t>(o.index[r]) * LL;
     } else {
-      (void)values; (void)o; (void)r; (void)LL;
+      (void)o; (void)r; (void)LL;
     }
     return v;
   }
@@ -918,12 +1050,56 @@ EPYKOS_EXEC_INLINE double pair_eval(double x, double y, double z) noexcept {
   }
 }
 
-template <Op op, PK KA, PK KB, Op op2, PK KC, bool PR, int L, bool Ind>
-void k_pair(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out) {
+// ---- chain tails ---------------------------------------------------------------------------
+//
+// A pair's value may feed a libm step of the group (Exp / Log) that nothing else reads. The plain
+// pair kernels apply it in place on the row (row block at L = 1) they have just stored, while it
+// is still in L1: the libm call runs per element either way, but the argument tile is never
+// written to and read back from the scratch. The same call on the same value as the single-step
+// kernel (E0); Exp follows the plan's exp mode (std::exp, or exp_poly under ExpMode::poly, E1).
+// Applied to the stored row rather than to the kernel's local array: with the calls in the same
+// basic block as the locals, the compiler kept the locals in registers across them and
+// scalarised the pair's own lane loop (measured). The block length is a compile-time constant
+// where the row shape is (L lanes, or a row block at L = 1).
+
+struct TailSet {
+  int n = 0;
+  Op op[StepPlan::max_tail] = {};
+  bool poly = false;
+  static TailSet of(const StepPlan& s) noexcept {
+    TailSet t;
+    t.n = s.n_tail;
+    t.poly = s.tail_poly;
+    for (int j = 0; j < StepPlan::max_tail; ++j) t.op[j] = s.tail_op[j];
+    return t;
+  }
+};
+
+// nb values o[0..nb) in place (NB > 0: nb is NB).
+template <int NB>
+EPYKOS_EXEC_INLINE void apply_tails(const TailSet& t, double* o, int nb) noexcept {
+  const int n = NB > 0 ? NB : nb;
+  for (int j = 0; j < t.n; ++j) {
+    if (t.op[j] == Op::Exp) {
+      if (t.poly) {
+        for (int q = 0; q < n; ++q) o[q] = hand::exp_poly(o[q]);
+      } else {
+        for (int q = 0; q < n; ++q) o[q] = apply1<Op::Exp>(o[q]);
+      }
+    } else {
+      for (int q = 0; q < n; ++q) o[q] = apply1<Op::Log>(o[q]);
+    }
+  }
+}
+
+// The pair's rows; Tail: the chain tail applied in place after each row / row block is stored.
+template <Op op, PK KA, PK KB, Op op2, PK KC, bool PR, int L, bool Ind, bool Tail>
+EPYKOS_EXEC_INLINE void pair_rows(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out) {
   const double* values = ctx.values;
   const Operand& a = s.a;
   const Operand& b = s.b;
   const Operand& c = s.c;
+  const TailSet ts = Tail ? TailSet::of(s) : TailSet{};
   if constexpr (L == 1) {
     int i = 0;
     for (; i + row_block <= n; i += row_block) {
@@ -933,10 +1109,15 @@ void k_pair(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* id
         o[j] = pair_eval<op, op2, PR>(pget<KA>(values, a, r, 0, 1), pget<KB>(values, b, r, 0, 1), pget<KC>(values, c, r, 0, 1));
       }
       for (int j = 0; j < row_block; ++j) out[i + j] = o[j];
+      if constexpr (Tail) apply_tails<row_block>(ts, out + i, row_block);
     }
-    for (; i < n; ++i) {
-      const int r = row_at<Ind>(r0, idx, i);
-      out[i] = pair_eval<op, op2, PR>(pget<KA>(values, a, r, 0, 1), pget<KB>(values, b, r, 0, 1), pget<KC>(values, c, r, 0, 1));
+    if (i < n) {
+      const int i0 = i;
+      for (; i < n; ++i) {
+        const int r = row_at<Ind>(r0, idx, i);
+        out[i] = pair_eval<op, op2, PR>(pget<KA>(values, a, r, 0, 1), pget<KB>(values, b, r, 0, 1), pget<KC>(values, c, r, 0, 1));
+      }
+      if constexpr (Tail) apply_tails<0>(ts, out + i0, n - i0);
     }
   } else if constexpr (L > 1) {
     for (int i = 0; i < n; ++i) {
@@ -948,6 +1129,7 @@ void k_pair(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* id
       for (int l = 0; l < L; ++l) o[l] = pair_eval<op, op2, PR>(va.get(l), vb.get(l), vc.get(l));
       double* dst = out + static_cast<std::size_t>(i) * static_cast<std::size_t>(L);
       for (int l = 0; l < L; ++l) dst[l] = o[l];
+      if constexpr (Tail) apply_tails<L>(ts, dst, L);
     }
   } else {
     const std::size_t LL = static_cast<std::size_t>(ctx.L);
@@ -957,7 +1139,20 @@ void k_pair(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* id
       for (int l = 0; l < ctx.L; ++l) {
         dst[l] = pair_eval<op, op2, PR>(pget<KA>(values, a, r, l, LL), pget<KB>(values, b, r, l, LL), pget<KC>(values, c, r, l, LL));
       }
+      if constexpr (Tail) apply_tails<0>(ts, dst, ctx.L);
     }
+  }
+}
+
+template <Op op, PK KA, PK KB, Op op2, PK KC, bool PR, int L, bool Ind>
+void k_pair(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out) {
+  // Tails are applied in place on the row (row block) just stored — an L1 store-forward, not a
+  // scratch round trip — rather than on the local array, which would make the compiler keep the
+  // locals in registers across the tail's switch and scalarise the pair's own lane loop (measured).
+  if (s.n_tail > 0) {
+    pair_rows<op, KA, KB, op2, KC, PR, L, Ind, true>(s, ctx, r0, idx, n, out);
+  } else {
+    pair_rows<op, KA, KB, op2, KC, PR, L, Ind, false>(s, ctx, r0, idx, n, out);
   }
 }
 
@@ -1130,6 +1325,11 @@ LoadKernel KernelTable<L>::load(Kind k, bool ind) {
 template <int L>
 SegKernel KernelTable<L>::seg_whole(bool affine) {
   return affine ? &k_seg_whole<true, L> : &k_seg_whole<false, L>;
+}
+
+template <int L>
+SegListKernel KernelTable<L>::seg_list(bool affine) {
+  return affine ? &k_seg_list<true, L> : &k_seg_list<false, L>;
 }
 
 // ---- reduction epilogue tables -------------------------------------------------------------

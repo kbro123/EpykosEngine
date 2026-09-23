@@ -18,6 +18,42 @@
 #include "epykos/tape/op.hpp"
 #include "plan.hpp"
 
+// Optional per-domain timers (compile with -DEPYKOS_EXEC_PROFILE): run() accumulates the wall
+// time of each domain's pass and of the output copy, and the totals are printed to stderr at
+// exit as microseconds per run. Off by default: no code in the run loop.
+#ifdef EPYKOS_EXEC_PROFILE
+#include <chrono>
+#include <cstdio>
+namespace {
+struct ProfileTable {
+  static constexpr int slots = 64;   // domain id, or slots - 1 for the output copy
+  double ns[slots] = {};
+  long runs = 0;
+  ~ProfileTable() {
+    if (runs == 0) return;
+    double total = 0.0;
+    for (double v : ns) total += v;
+    std::fprintf(stderr, "exec profile over %ld runs (us per run):\n", runs);
+    for (int i = 0; i < slots; ++i) {
+      if (ns[i] > 0.0) std::fprintf(stderr, "  slot %2d: %9.2f us (%5.1f%%)\n", i, ns[i] / static_cast<double>(runs) / 1e3, 100.0 * ns[i] / total);
+    }
+    std::fprintf(stderr, "  total  : %9.2f us\n", total / static_cast<double>(runs) / 1e3);
+  }
+} g_profile;
+struct ProfileScope {
+  int slot;
+  std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+  explicit ProfileScope(int s) : slot(s) {}
+  ~ProfileScope() { g_profile.ns[slot] += std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count(); }
+};
+}  // namespace
+#define EPYKOS_EXEC_PROFILE_SCOPE(slot) ProfileScope profile_scope_(slot)
+#define EPYKOS_EXEC_PROFILE_RUN() ++g_profile.runs
+#else
+#define EPYKOS_EXEC_PROFILE_SCOPE(slot)
+#define EPYKOS_EXEC_PROFILE_RUN()
+#endif
+
 namespace epykos::exec {
 
 using namespace detail;
@@ -74,6 +110,7 @@ OpKernel input_kernel(int v, bool ind) { EPYKOS_EXEC_DISPATCH(v, input(ind)) }
 OpKernel seg_rows_kernel(int v, bool affine, bool ind) { EPYKOS_EXEC_DISPATCH(v, seg_rows(affine, ind)) }
 LoadKernel load_kernel(int v, Kind k, bool ind) { EPYKOS_EXEC_DISPATCH(v, load(k, ind)) }
 SegKernel seg_whole_kernel(int v, bool affine) { EPYKOS_EXEC_DISPATCH(v, seg_whole(affine)) }
+SegListKernel seg_list_kernel(int v, bool affine) { EPYKOS_EXEC_DISPATCH(v, seg_list(affine)) }
 AccKernel binary_acc_kernel(int v, Op op, Kind ka, Kind kb, bool affine) { EPYKOS_EXEC_DISPATCH(v, binary_acc(op, ka, kb, affine)) }
 AccKernel unary_acc_kernel(int v, Op op, Kind ka, bool affine) { EPYKOS_EXEC_DISPATCH(v, unary_acc(op, ka, affine)) }
 AccKernel konst_acc_kernel(int v, Kind kk, bool affine) { EPYKOS_EXEC_DISPATCH(v, konst_acc(kk, affine)) }
@@ -124,6 +161,10 @@ bool is_whole_segment(const ir::Group& g) {
 constexpr double fuse_max_refs_per_row = 2.0;
 constexpr double fuse_max_kept_fraction = 0.5;
 
+// An inlined producer is evaluated once per gather reference; past this many references per
+// row it is materialised instead.
+constexpr double inline_max_refs_per_row = 1.25;
+
 }  // namespace
 
 struct Interpreter::Impl {
@@ -140,19 +181,26 @@ struct Interpreter::Impl {
   std::vector<GroupPlan> groups;
   std::vector<char> fused;              // per domain: evaluated inside its consumers' reductions
   std::vector<std::vector<std::int32_t>> keep_rows;  // per fused domain: rows materialised anyway
+  std::vector<std::int32_t> inlined_into;   // per domain: the consumer whose tiles evaluate it, or -1
+  struct InlineRef { std::size_t gather; std::int32_t producer; };
+  std::vector<std::vector<InlineRef>> inline_refs;   // per consumer: its inlined gathers
+  int n_inline_temps = 0;               // most inlined gathers of one consumer (temporaries shared across consumers)
 
   double* step_buffer(int k) const { return scratch.data() + static_cast<std::size_t>(k) * tile_elems; }
   double* tmp_buffer(int j) const { return step_buffer(max_steps + j); }
   double* acc_buffer() const { return step_buffer(max_steps + 3); }
   double* member_buffer() const { return step_buffer(max_steps + 4); }
+  double* inline_temp(int t) const { return step_buffer(max_steps + 5 + t); }
 
   Operand resolve(const ir::Slot& s) const;
   void decide_fusion();
+  void decide_inline();
   void build_group(std::size_t d, GroupPlan& g);
   void build_segment(std::int32_t consumer, const ir::Segment& seg, bool affine, const ir::Slot& konst, std::int32_t rows,
                      SegPlan& sp);
   void build_step(const ir::Step& st, std::size_t k, std::size_t n_steps, GroupPlan& g, StepPlan& sp);
   bool build_pair_step(const ir::Group& grp, const std::vector<int>& uses, std::size_t k, StepPlan& sp);
+  bool add_tail_step(const ir::Step& st, std::size_t prev, StepPlan& sp);
 };
 
 Operand Interpreter::Impl::resolve(const ir::Slot& s) const {
@@ -174,6 +222,7 @@ Operand Interpreter::Impl::resolve(const ir::Slot& s) const {
       break;
     case ir::SlotKind::Gather:
       o.kind = Kind::Gat;
+      o.data = values.data();
       o.index = p->gathers[static_cast<std::size_t>(s.index)].index.data();
       break;
     default:
@@ -225,6 +274,98 @@ void Interpreter::Impl::decide_fusion() {
     fused[d] = 1;
     fused_values += static_cast<std::size_t>(dom.rows) - keep.size();
     keep_rows[d] = std::move(keep);
+  }
+}
+
+// Which domains are evaluated per tile of the one elementwise domain that gathers them
+// (plan.hpp: InlinedProducer) rather than materialised: not recurrent, with rows, not fused into
+// reductions, read by nothing but the gathers of one consumer (no output, no segment
+// membership, no gather from any other domain), with at most inline_max_refs_per_row gather
+// references per row (a row is evaluated once per reference); a whole-domain Sum / Affine only
+// when every row has the same number of members, all of them materialised (an interpolation:
+// the per-row fold then vectorises like the bucketed pass; a reduction over fused producers
+// keeps its blocks). The consumer is a materialised elementwise domain (not a whole-domain
+// reduction, not fused, not recurrent, not itself inlined), and a domain that inlines producers
+// is never inlined itself (it would run in the indirect row mode, whose rows its inlined operands
+// cannot address). A gather may hold a few ids of other domains (a time that is a knot reads the
+// input directly): those rows are copied from the value buffer into the temporary, so they must
+// be materialised. Decided in Program order (producers precede consumers). A structure-only
+// decision; the arithmetic is the same.
+void Interpreter::Impl::decide_inline() {
+  const ir::Program& prog = *p;
+  const std::size_t nd = prog.domains.size();
+  inlined_into.assign(nd, -1);
+  inline_refs.assign(nd, {});
+  n_inline_temps = 0;
+  if (!opt.inline_producers) return;
+  auto dom_of = [&](ir::value_id v) { return static_cast<std::int32_t>(prog.domain_of(v)); };
+  std::vector<char> blocked(nd, 0);   // read other than through a gather
+  for (ir::value_id v : prog.outputs) blocked[static_cast<std::size_t>(dom_of(v))] = 1;
+  for (const ir::Segment& seg : prog.segments) {
+    for (ir::value_id v : seg.members) blocked[static_cast<std::size_t>(dom_of(v))] = 1;
+  }
+  const std::size_t ng = prog.gathers.size();
+  std::vector<std::int32_t> user(ng, -1);   // the domain whose steps read the gather slot (-2: several)
+  for (std::size_t d = 0; d < nd; ++d) {
+    for (const ir::Step& st : prog.groups[d].steps) {
+      for (const ir::Slot* sl : {&st.a, &st.b, &st.c, &st.konst}) {
+        if (sl->kind != ir::SlotKind::Gather) continue;
+        std::int32_t& u = user[static_cast<std::size_t>(sl->index)];
+        if (u == -1 || u == static_cast<std::int32_t>(d)) u = static_cast<std::int32_t>(d);
+        else u = -2;
+      }
+    }
+  }
+  // Per domain: the gather slots holding some of its ids, and how many ids in all.
+  std::vector<std::vector<std::size_t>> readers(nd);
+  std::vector<std::size_t> refs(nd, 0);
+  for (std::size_t k = 0; k < ng; ++k) {
+    std::vector<char> seen(nd, 0);
+    for (ir::value_id v : prog.gathers[k].index) {
+      const std::size_t t = static_cast<std::size_t>(dom_of(v));
+      ++refs[t];
+      if (!seen[t]) {
+        seen[t] = 1;
+        readers[t].push_back(k);
+      }
+    }
+  }
+  for (std::size_t d = 0; d < nd; ++d) {
+    const ir::Domain& dom = prog.domains[d];
+    if (dom.recurrent || dom.rows < 1 || blocked[d] || fused[d] || readers[d].empty()) continue;
+    if (!inline_refs[d].empty()) continue;   // inlines producers itself: stays a contiguous-row group
+    const ir::Group& grp = prog.groups[d];
+    if (is_whole_segment(grp)) {
+      const ir::Segment& seg = prog.segments[static_cast<std::size_t>(grp.steps.front().a.index)];
+      bool uniform = true, materialised = true;
+      const std::int32_t len0 = seg.offsets.size() > 1 ? seg.offsets[1] - seg.offsets[0] : 0;
+      for (std::size_t r = 0; r + 1 < seg.offsets.size(); ++r) uniform &= (seg.offsets[r + 1] - seg.offsets[r]) == len0;
+      for (ir::value_id v : seg.members) {
+        const std::size_t t = static_cast<std::size_t>(dom_of(v));
+        materialised &= !fused[t] && inlined_into[t] < 0;
+      }
+      if (!uniform || !materialised) continue;
+    }
+    const std::int32_t c = user[readers[d][0]];
+    if (c < 0 || c == static_cast<std::int32_t>(d)) continue;
+    bool ok = true;
+    for (std::size_t k : readers[d]) ok &= user[k] == c;
+    if (!ok) continue;
+    const std::size_t cd = static_cast<std::size_t>(c);
+    if (is_whole_segment(prog.groups[cd]) || fused[cd] || prog.domains[cd].recurrent || inlined_into[cd] >= 0) continue;
+    if (static_cast<double>(refs[d]) > inline_max_refs_per_row * static_cast<double>(dom.rows)) continue;
+    // Foreign ids of those gathers must be materialised rows (the copy reads the value buffer).
+    for (std::size_t k : readers[d]) {
+      for (ir::value_id v : prog.gathers[k].index) {
+        const std::size_t t = static_cast<std::size_t>(dom_of(v));
+        if (t != d && inlined_into[t] >= 0) ok = false;
+      }
+    }
+    if (!ok) continue;
+    inlined_into[d] = c;
+    for (std::size_t k : readers[d]) inline_refs[cd].push_back({k, static_cast<std::int32_t>(d)});
+    n_inline_temps = std::max(n_inline_temps, static_cast<int>(inline_refs[cd].size()));
+    fused_values += static_cast<std::size_t>(dom.rows);
   }
 }
 
@@ -671,6 +812,24 @@ bool Interpreter::Impl::build_pair_step(const ir::Group& grp, const std::vector<
   return true;
 }
 
+// Step `st` (the one after IR step `prev`, which is the last step the pair `sp` covers and which
+// nothing else reads) appended to the pair's chain tail (plan.hpp: StepPlan::n_tail) when it is
+// Exp or Log of step prev: the kernel applies the call in place on each stored row
+// (kernels_impl.hpp: apply_tails).
+bool Interpreter::Impl::add_tail_step(const ir::Step& st, std::size_t prev, StepPlan& sp) {
+  if (sp.n_tail >= StepPlan::max_tail) return false;
+  if (st.op != Op::Exp && st.op != Op::Log) return false;
+  const ir::Slot p{ir::SlotKind::Step, static_cast<std::int32_t>(prev)};
+  if (!(st.a == p)) return false;
+  sp.tail_op[sp.n_tail++] = st.op;
+  if (st.op == Op::Exp && opt.exp == ExpMode::poly) sp.tail_poly = true;
+  // Name: the tail around the value in registers, e.g. "mul(neg(gat),col) => exp(vec)".
+  std::ostringstream name;
+  name << sp.name << " => " << to_string(st.op) << ((st.op == Op::Exp && sp.tail_poly) ? "_poly" : "") << "(vec)";
+  sp.name = name.str();
+  return true;
+}
+
 void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
   const ir::Domain& dom = p->domains[d];
   const ir::Group& grp = p->groups[d];
@@ -679,6 +838,7 @@ void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
   g.value_base = dom.value_base;
   g.fused = fused[d] != 0;
   g.keep = keep_rows[d];
+  g.inlined_into = inlined_into[d];
   table_bytes += g.keep.size() * sizeof(std::int32_t);
   if (dom.recurrent) {
     throw std::invalid_argument("exec: domain " + std::to_string(d) + " (" + dom.name +
@@ -702,17 +862,106 @@ void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
       if (sl->kind == ir::SlotKind::Step) ++uses[static_cast<std::size_t>(sl->index)];
     }
   }
+  // Inlined producers: a temporary per inlined gather; the operands that read that gather are
+  // re-pointed at the temporary, addressed by tile row.
+  g.tile = opt.tile;
+  const std::size_t n_tiles = (static_cast<std::size_t>(g.rows) + static_cast<std::size_t>(opt.tile) - 1) /
+                              static_cast<std::size_t>(opt.tile);
+  for (std::size_t t = 0; t < inline_refs[d].size(); ++t) {
+    const InlineRef& ref = inline_refs[d][t];
+    InlinedProducer ip;
+    ip.domain = ref.producer;
+    ip.gather = ref.gather;
+    const std::vector<ir::value_id>& ids = p->gathers[ref.gather].index;
+    ip.gather_index = ids.data();
+    ip.temp = inline_temp(static_cast<int>(t));
+    const GroupPlan& pg = groups[static_cast<std::size_t>(ref.producer)];
+    ip.index.assign(ids.begin(), ids.end());
+    ip.foreign_start.assign(n_tiles + 1, 0);
+    for (std::size_t r = 0; r < ids.size(); ++r) {
+      const ir::value_id v = ids[r];
+      if (v >= pg.value_base && v < pg.value_base + pg.rows) continue;
+      ip.index[r] = pg.value_base;
+      ip.foreign_row.push_back(static_cast<std::int32_t>(r));
+      ip.foreign_id.push_back(v);
+      ++ip.foreign_start[r / static_cast<std::size_t>(opt.tile) + 1];
+    }
+    for (std::size_t q = 1; q <= n_tiles; ++q) ip.foreign_start[q] += ip.foreign_start[q - 1];
+    table_bytes += ip.index.size() * sizeof(std::int32_t) + (ip.foreign_row.size() + ip.foreign_id.size()) * sizeof(std::int32_t) +
+                   ip.foreign_start.size() * sizeof(std::size_t);
+    if (pg.whole_segment) {
+      // The producer's segment tables transposed into this group's row order (decide_inline:
+      // every row has the same number of members).
+      for (int v = 0; v < n_lane_variants; ++v) ip.seg_fn[v] = seg_list_kernel(v, pg.seg.affine);
+      const ir::Segment& seg = p->segments[static_cast<std::size_t>(p->groups[static_cast<std::size_t>(ref.producer)].steps.front().a.index)];
+      const std::size_t R = ids.size();
+      ip.rows = static_cast<std::int32_t>(R);
+      ip.len = pg.seg.min_len;
+      const std::size_t lenz = static_cast<std::size_t>(ip.len);
+      ip.memT.resize(lenz * R);
+      if (pg.seg.affine) ip.coefT.resize(lenz * R);
+      for (std::size_t r = 0; r < R; ++r) {
+        const std::size_t prow = static_cast<std::size_t>(ip.index[r] - pg.value_base);
+        const std::size_t lo = static_cast<std::size_t>(seg.offsets[prow]);
+        for (std::size_t k = 0; k < lenz; ++k) {
+          ip.memT[k * R + r] = seg.members[lo + k];
+          if (pg.seg.affine) ip.coefT[k * R + r] = seg.coefs[lo + k];
+        }
+      }
+      ip.konst = pg.seg.konst;
+      if (pg.seg.affine && ip.konst.kind == Kind::Col) {
+        std::vector<double> c0(R);
+        for (std::size_t r = 0; r < R; ++r) c0[r] = pg.seg.konst.data[ip.index[r] - pg.value_base];
+        ip.coefT.insert(ip.coefT.end(), c0.begin(), c0.end());   // kept alive behind the transposed coefficients
+        ip.konst.data = ip.coefT.data() + lenz * R;
+      }
+      table_bytes += ip.memT.size() * sizeof(std::int32_t) + ip.coefT.size() * sizeof(double);
+    }
+    g.inlined.push_back(std::move(ip));
+  }
+  if (!g.inlined.empty()) {
+    g.tile_index.resize(static_cast<std::size_t>(g.rows));
+    for (std::int32_t r = 0; r < g.rows; ++r) g.tile_index[static_cast<std::size_t>(r)] = r % opt.tile;
+    table_bytes += g.tile_index.size() * sizeof(std::int32_t);
+  }
+  auto inline_operand = [&](Operand& o) {
+    if (o.kind != Kind::Gat) return;
+    for (const InlinedProducer& ip : g.inlined) {
+      if (o.index == ip.gather_index) {
+        o.data = ip.temp;
+        o.index = g.tile_index.data();
+        return;
+      }
+    }
+  };
   for (std::size_t k = 0; k < grp.steps.size();) {
     StepPlan sp;
     if (opt.fuse_pairs && k + 1 < grp.steps.size() && build_pair_step(grp, uses, k, sp)) {
-      sp.out = (k + 2 == grp.steps.size()) ? nullptr : step_buffer(static_cast<int>(k) + 1);
+      // The chain continues while the last covered step is read only by the next one and that
+      // step is a tail shape (a unary, or a binary with a literal / column).
+      std::size_t last = k + 1;
+      while (last + 1 < grp.steps.size() && uses[last] == 1 && add_tail_step(grp.steps[last + 1], last, sp)) ++last;
+      if (sp.n_tail > 0) {
+        for (int v = 0; v < n_lane_variants; ++v) sp.acc_fn[0][v] = sp.acc_fn[1][v] = nullptr;  // epilogues apply no tails
+      }
+      sp.ir_last = static_cast<int>(last);
+      sp.out = (last + 1 == grp.steps.size()) ? nullptr : step_buffer(static_cast<int>(last));
       g.steps.push_back(std::move(sp));
-      k += 2;
+      k = last + 1;
     } else {
       build_step(grp.steps[k], k, grp.steps.size(), g, sp);
       sp.ir_first = sp.ir_last = static_cast<int>(k);
       g.steps.push_back(std::move(sp));
       k += 1;
+    }
+  }
+  if (!g.inlined.empty()) {
+    for (StepPlan& s : g.steps) {
+      inline_operand(s.a);
+      inline_operand(s.b);
+      inline_operand(s.c);
+      inline_operand(s.konst);
+      for (int q = 0; q < s.n_pre; ++q) inline_operand(s.pre[q].src);
     }
   }
 }
@@ -736,12 +985,14 @@ Interpreter::Interpreter(const ir::Program& program, Options options) : impl_(st
   im.max_steps = 0;
   for (const ir::Group& g : program.groups) im.max_steps = std::max(im.max_steps, static_cast<int>(g.steps.size()));
   im.tile_elems = static_cast<std::size_t>(options.tile) * static_cast<std::size_t>(im.Lt);
-  im.scratch.assign(static_cast<std::size_t>(im.max_steps + 5) * im.tile_elems, 0.0);
   im.values.assign(program.num_values() * static_cast<std::size_t>(im.Lt), 0.0);
   im.groups.resize(program.domains.size());
   im.decide_fusion();
-  // Producers before consumers: a fused domain's consumers come later in Program order
-  // (validate: no forward reads), so building in order lets build_segment record them.
+  im.decide_inline();
+  im.scratch.assign(static_cast<std::size_t>(im.max_steps + 5 + im.n_inline_temps) * im.tile_elems, 0.0);
+  // Producers before consumers: a fused or inlined domain's consumers come later in Program
+  // order (validate: no forward reads), so building in order lets build_segment record them and
+  // lets a consumer find its inlined producers' plans.
   for (std::size_t d = 0; d < program.domains.size(); ++d) im.build_group(d, im.groups[d]);
 }
 
@@ -771,6 +1022,8 @@ void Interpreter::run(const double* state, int B, double* out) const {
     const std::size_t Ls = static_cast<std::size_t>(L);
     for (const GroupPlan& g : im.groups) {
       double* dom = values + static_cast<std::size_t>(g.value_base) * Ls;
+      EPYKOS_EXEC_PROFILE_SCOPE(g.domain);
+      if (g.inlined_into >= 0) continue;   // evaluated per tile of its consumer
       if (g.fused) {
         // Evaluated inside its consumers' reductions; only the kept rows are materialised:
         // evaluated in tiles of the row list into the member buffer, then copied to their slots.
@@ -796,8 +1049,12 @@ void Interpreter::run(const double* state, int B, double* out) const {
         eval_group(g, ctx, r0, nullptr, n, dom + static_cast<std::size_t>(r0) * Ls);
       }
     }
-    copy_out(ctx.v, values, p.outputs.data(), static_cast<int>(p.outputs.size()), out, B, b0, L);
+    {
+      EPYKOS_EXEC_PROFILE_SCOPE(63);
+      copy_out(ctx.v, values, p.outputs.data(), static_cast<int>(p.outputs.size()), out, B, b0, L);
+    }
   }
+  EPYKOS_EXEC_PROFILE_RUN();
 }
 
 std::string Interpreter::describe() const {
@@ -811,9 +1068,10 @@ std::string Interpreter::describe() const {
   for (int v = 1; v < n_lane_variants; ++v) os << ", " << lane_variants[v];
   os << "; a chunk of L lanes uses the L kernel or the runtime one\n";
   os << "  values: " << p.num_values() << " rows x " << im.Lt << " lanes = " << human_bytes(value_bytes()) << " ("
-     << im.fused_values << " rows fused, never materialised); scratch: " << im.max_steps
-     << " step + 3 temporary + accumulator + member buffers x " << im.opt.tile << " x " << im.Lt
-     << " doubles = " << human_bytes(scratch_bytes()) << "; plan tables " << human_bytes(table_bytes()) << '\n';
+     << im.fused_values << " rows fused or inlined, never materialised); scratch: " << im.max_steps
+     << " step + 3 temporary + accumulator + member + " << im.n_inline_temps << " inlined-producer buffers x "
+     << im.opt.tile << " x " << im.Lt << " doubles = " << human_bytes(scratch_bytes()) << "; plan tables "
+     << human_bytes(table_bytes()) << '\n';
   std::size_t total_tiles = 0, total_calls = 0;
   for (std::size_t d = 0; d < im.groups.size(); ++d) {
     const GroupPlan& g = im.groups[d];
@@ -822,6 +1080,14 @@ std::string Interpreter::describe() const {
        << dom.level << " reads {";
     for (std::size_t k = 0; k < dom.reads.size(); ++k) os << (k ? " " : "") << "d" << dom.reads[k];
     os << "} | ";
+    if (g.inlined_into >= 0) {
+      os << "inlined into d" << g.inlined_into << " (evaluated per consumer tile for the rows it gathers, not materialised): ";
+    }
+    if (!g.inlined.empty()) {
+      os << "inlines {";
+      for (std::size_t k = 0; k < g.inlined.size(); ++k) os << (k ? " " : "") << "d" << g.inlined[k].domain;
+      os << "} per tile; ";
+    }
     if (g.whole_segment) {
       const SegPlan& sp = g.seg;
       os << "whole-domain " << (sp.affine ? "affine" : "sum") << ": members per row " << sp.min_len << ".." << sp.max_len
@@ -836,10 +1102,14 @@ std::string Interpreter::describe() const {
         }
         os << "}, " << sp.memT.size() - sp.fused_members << " gathered";
       }
-      ++total_tiles;
-      ++total_calls;
+      if (g.inlined_into < 0) {
+        ++total_tiles;
+        ++total_calls;
+      }
     } else {
-      if (g.fused) {
+      if (g.inlined_into >= 0) {
+        // counted with the consumer's tiles
+      } else if (g.fused) {
         os << "fused into {";
         for (std::size_t k = 0; k < g.consumers.size(); ++k) os << (k ? " " : "") << "d" << g.consumers[k];
         os << "} (evaluated per reduction block, not materialised";
@@ -856,6 +1126,15 @@ std::string Interpreter::describe() const {
                                   static_cast<std::size_t>(im.opt.tile);
         os << tiles << " tile(s): ";
         for (const StepPlan& s : g.steps) total_calls += tiles * static_cast<std::size_t>(1 + s.n_pre);
+        for (const InlinedProducer& ip : g.inlined) {
+          const GroupPlan& pg = im.groups[static_cast<std::size_t>(ip.domain)];
+          std::size_t calls = 1;
+          if (!pg.whole_segment) {
+            calls = 0;
+            for (const StepPlan& s : pg.steps) calls += static_cast<std::size_t>(1 + s.n_pre);
+          }
+          total_calls += tiles * calls;
+        }
         total_tiles += tiles;
       }
       for (std::size_t k = 0; k < g.steps.size(); ++k) {

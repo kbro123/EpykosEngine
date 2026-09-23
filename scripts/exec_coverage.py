@@ -44,10 +44,22 @@ PROFILE_RUNS_RE = re.compile(r"exec profile over (\d+) runs")
 OUTPUT_SLOT = 4095
 
 
+HEADER_RE = re.compile(r"interpreter plan: tile (\d+) rows, lane_tile (\d+)")
+INLINE_MAX_REFS_PER_ROW = 1.25   # exec/interpreter.cpp inline_max_refs_per_row
+
+
+def row_fusion_pays(lanes: int) -> bool:
+    return lanes == 1 or lanes >= 16   # exec/interpreter.cpp row_fusion_pays
+
+
 def parse_plan(path: str) -> Dict[int, Dict[str, Any]]:
     plan: Dict[int, Dict[str, Any]] = {}
     with open(path) as f:
         for line in f:
+            h = HEADER_RE.search(line)
+            if h:
+                plan[-1] = {"tile": int(h.group(1)), "lane_tile": int(h.group(2))}
+                continue
             m = PLAN_RE.match(line.rstrip("\n"))
             if not m:
                 continue
@@ -58,7 +70,7 @@ def parse_plan(path: str) -> Dict[int, Dict[str, Any]]:
             if rest.startswith("whole-domain"):
                 treatment = rest
             else:
-                idx = rest.find(": ")
+                idx = rest.rfind(": ")
                 if idx >= 0:
                     treatment, steps = rest[:idx], rest[idx + 2:]
             kind = "plain"
@@ -99,7 +111,8 @@ def parse_domains(path: str) -> Dict[int, Dict[str, Any]]:
             out[d] = {"shape": row["shape"], "rows": int(row["rows"]), "level": int(row["level"]), "scan": int(row["scan"]) == 1,
                       "chains": int(row["chains"]), "last_op": row["last_op"], "steps": int(row["steps"]), "reads": ints(row["reads"]),
                       "gather_readers": ints(row["gather_readers"]), "segment_readers": ints(row["segment_readers"]),
-                      "scan_readers": ints(row["scan_readers"]), "output_rows": int(row["output_rows"])}
+                      "scan_readers": ints(row["scan_readers"]), "output_rows": int(row["output_rows"]),
+                      "gather_refs": int(row.get("gather_refs") or 0)}
     return out
 
 
@@ -143,10 +156,18 @@ def reason(d: int, facts: Dict[int, Dict[str, Any]], plan: Dict[int, Dict[str, A
     elif len(non_scan_gr) == 1 and not sr and not scr and f["output_rows"] == 0:
         c = non_scan_gr[0]
         ck = plan.get(c, {}).get("kind")
+        lt = plan.get(-1, {}).get("lane_tile", 0)
         if ck == "reduction":
             why.append("its only reader d%d is a whole-domain reduction reading it through a gather (not a uniform member pattern)" % c)
         elif ck == "scan":
             why.append("its only reader d%d is a scan" % c)
+        elif ck == "fused":
+            why.append("its only reader d%d is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)" % c)
+        elif not row_fusion_pays(lt):
+            why.append("inlinable into d%d, but row fusion is off at lane tile %d (row_fusion_pays: L = 1 or L >= 16)" % (c, lt))
+        elif f["rows"] > 0 and f["gather_refs"] > INLINE_MAX_REFS_PER_ROW * f["rows"]:
+            why.append("gathered %d times for %d rows by d%d: %.2f reads per producer row exceeds the inliner's %.2f (it would recompute the producer)" % (
+                f["gather_refs"], f["rows"], c, f["gather_refs"] / f["rows"], INLINE_MAX_REFS_PER_ROW))
         else:
             why.append("its only reader d%d did not inline it (consumer kind %s)" % (c, ck))
     if not gr and sr and not f["output_rows"]:
@@ -163,7 +184,7 @@ def render(plan: Dict[int, Dict[str, Any]], facts: Dict[int, Dict[str, Any]], pr
     L.append("| d | shape | rows | kind | planner treatment | reason not fused (plain tiles only) | readers (gather / segment) | outputs |%s" % (" time us | share |" if slots else ""))
     L.append("|---|---|---:|---|---|---|---|---:|%s" % ("---:|---:|" if slots else ""))
     kinds: Dict[str, Dict[str, float]] = {}
-    for d in sorted(plan):
+    for d in sorted(k for k in plan if k >= 0):
         p, f = plan[d], facts[d]
         why = reason(d, facts, plan) if p["kind"] == "plain" else "-"
         readers = "%s / %s" % (" ".join("d%d" % x for x in f["gather_readers"]) or "-", " ".join("d%d" % x for x in f["segment_readers"]) or "-")
@@ -178,7 +199,9 @@ def render(plan: Dict[int, Dict[str, Any]], facts: Dict[int, Dict[str, Any]], pr
             row += " %.1f | %.1f%% |" % (us, 100.0 * us / total_us if total_us else 0.0)
         L.append(row)
     L.append("")
-    L.append("Summary by treatment (domains, rows%s):" % (", time share" if slots else ""))
+    lt = plan.get(-1, {}).get("lane_tile")
+    L.append("Summary by treatment (domains, rows%s; lane tile %s, row fusion %s):" % (
+        ", time share" if slots else "", lt, "on" if lt is not None and row_fusion_pays(lt) else "off"))
     for kind in ("reduction", "fused", "inlined", "scan", "plain"):
         if kind not in kinds:
             continue
@@ -202,7 +225,7 @@ def main(argv: List[str]) -> int:
     a = ap.parse_args(argv)
     plan = parse_plan(a.plan)
     facts = parse_domains(a.domains)
-    missing = sorted(set(facts) - set(plan))
+    missing = sorted(set(facts) - set(k for k in plan if k >= 0))
     if missing:
         print("exec_coverage: domains in the facts but not in the plan: %s" % missing, file=sys.stderr)
         return 2
@@ -211,7 +234,7 @@ def main(argv: List[str]) -> int:
     print(text)
     if a.json:
         rows = []
-        for d in sorted(plan):
+        for d in sorted(k for k in plan if k >= 0):
             r = dict(plan[d])
             r.update({"facts": facts[d], "reason": reason(d, facts, plan) if plan[d]["kind"] == "plain" else None})
             if prof.get("slots") and d in prof["slots"]:

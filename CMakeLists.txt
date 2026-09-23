@@ -156,7 +156,10 @@ target_include_directories(epykos PUBLIC "${CMAKE_SOURCE_DIR}/include")
 target_compile_features(epykos PUBLIC cxx_std_20)
 target_link_libraries(epykos
   PUBLIC  Threads::Threads
-  PRIVATE epykos_warnings)
+  PRIVATE epykos_warnings
+  # Eigen on the double side only (D12, D14): the solver layer's linear algebra (src/solver/,
+  # M3/G4) behind its public headers, which never include Eigen; PRIVATE so no consumer sees it.
+  PRIVATE Eigen3::Eigen)
 # Mutation testing (D32): with EPYKOS_MUTATIONS=ON the deliberate defects guarded by
 # epykos::mutant("<pass>.<defect>") are compiled in and EPYKOS_MUTANT selects one per process;
 # scripts/mutation_test.sh asserts that the gate tests catch every one. PUBLIC so that every TU

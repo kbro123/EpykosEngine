@@ -102,6 +102,17 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   | `adjoint.affine_not_transposed` | an Affine reader's coefficient is read from the forward table at the reader's transposed position (`W`'s entries in `Wᵀ`'s order) | M1 book (the interpolation Affine), near-miss affine chains |
   | `adjoint.select_wrong_arm` | the select rule routes the adjoint to the other arm | **not exercisable on the M1 book** (no `select`); the near-miss select / max / min / abs shapes |
   | `adjoint.recip_rule_sign` | recip's rule accumulates `+(ȳ·y)·y` instead of `−(ȳ·y)·y` | **not exercisable on the M1 book** (no `recip`); the near-miss `recip_of` shape |
+
+  The implicit node's mutants (M3/G4, D37; one line each in `src/solver/residual.cpp`), caught by the IFT gates
+  `tests/solver/m1_implicit_adjoint_test.cpp` (IFT vs bump-and-recalibrate on the M1 book, 1e-6),
+  `tests/solver/curve_set_adjoint_test.cpp` (through two chained curve blocks) and
+  `tests/solver/m1_implicit_vs_dual_test.cpp` (vs forward mode through the calibration, 1e-12):
+
+  | mutant | defect | exercised by |
+  |---|---|---|
+  | `implicit.ift_not_transposed` | the IFT multiplier solves `F_z λ = z̄` instead of `F_zᵀ λ = z̄` | the calibrated M1 book (F_z is not symmetric) |
+  | `implicit.ift_drop_fp` | the parameter pull `p̄ −= F_pᵀ λ` is skipped: the quotes receive no adjoint | the calibrated M1 book (every quote adjoint arrives through it) |
+  | `implicit.stale_jacobian` | the IFT uses the last iterate's Jacobian, not the solution's (a 1e-9 relative error) | **below the 1e-6 bump gate**; the forward-mode gate at 1e-12 |
 - **Near-miss shapes** (`include/epykos/fixtures/nearmiss_shapes.hpp`, the gate fixture the mutation harness showed
   was missing, D32): 42 templated shapes over six positive inputs, each an op tree that differs from a neighbour in
   exactly one respect a signature may overlook — a constant on the left or the right of `−` and `/`, a constant in

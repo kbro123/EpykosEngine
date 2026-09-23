@@ -43,6 +43,9 @@ inline constexpr std::string_view registry[] = {
     "adjoint.affine_not_transposed", // build_plan: Affine reader coefficients read from the forward table at the transposed position (W, not W^T)
     "adjoint.select_wrong_arm",      // Adjoint::run: the select rule routes the adjoint to the other arm (no select on the M1 book: the near-miss gate)
     "adjoint.recip_rule_sign",       // Adjoint::run: recip's rule accumulates +(ybar*y)*y instead of -(ybar*y)*y (no recip on the M1 book: the near-miss gate)
+    "implicit.ift_not_transposed",   // Factors::solve_transposed: the IFT multiplier solves F_z lambda = z_bar instead of F_z^T lambda = z_bar
+    "implicit.ift_drop_fp",          // Factors::ift_adjoint: the parameter pull p_bar -= F_p^T lambda is skipped (the quotes receive no adjoint)
+    "implicit.stale_jacobian",       // BlockSolver::solve: the IFT uses the Jacobian of the last iterate before convergence, not the solution's
 };
 inline constexpr std::size_t registry_size = sizeof(registry) / sizeof(registry[0]);
 

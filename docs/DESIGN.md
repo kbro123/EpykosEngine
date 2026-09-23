@@ -234,7 +234,11 @@ Correctness gates:
   `-ffp-contract=off`, else E1 tolerance: D26's bound at the scale of the terms, D31; `verify/differential.hpp`,
   M2/Q1); this also catches missed branches;
 - **adjoint** vs central finite difference and vs forward mode;
-- **mutation testing** on rewrite rules (a mutated rule must fail a gate);
+- **mutation testing** on rewrite rules (a mutated rule must fail a gate): every pass carries its mutants as one-line
+  defects behind `epykos::mutant("<pass>.<defect>")` (`include/epykos/mutation/`), compiled in only by the `mutation`
+  preset and selected one per process by `EPYKOS_MUTANT`; `scripts/mutation_test.sh` runs the gates above once per
+  registered mutant and fails if any survives — a survivor is a gap in the gates, never a job for a mutant-specific
+  test (D29);
 - **external oracles** (QuantLib and others) added per product, test-only.
 
 Performance gates: per machine+toolchain fingerprint; fail on > 1.25× self-regression or an absolute target miss.

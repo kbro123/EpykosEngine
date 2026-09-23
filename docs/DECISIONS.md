@@ -326,3 +326,33 @@ point and 8 M2-ball states within 2.9e-9 relative (worst component; gate 1e-6 wi
 sub-stream 300000 at 3 states within 1.7e-8 (one lane per swap, out_bar = e_i); linearity 1.3e-14 (gate 1e-13);
 zero allocations in run(). Adjoint-vs-Dual (1e-12) lands with Q2. Buffers at lane tile 8: values + adjoints 5.4 MB,
 edge slots 3.9 MB (56,937 gather + 4,500 segment slots), tables 1.1 MB.
+## D32 — Mutation testing: mutants live in the passes behind a build option; a survivor is a gap in the gates (2026-09-23)
+Implements DESIGN.md §11 "mutation testing" for M2/Q4a (CLAUDE.md: every rewrite ships with a mutation test) and
+adds a preset to D13's list. A mutant is a deliberate one-line defect written inside the real pass it belongs to,
+guarded by `epykos::mutant("<pass>.<defect>")` and listed in the registry of `include/epykos/mutation/mutation.hpp`.
+The CMake option `EPYKOS_MUTATIONS` (default OFF) compiles them in; the `mutation` configure preset is the
+reference preset plus that option, so the E0 gates run under the reference flags with the mutants present. It is
+never a gated or measured build. With the option ON, the environment variable `EPYKOS_MUTANT=<name>` selects exactly
+one mutant per process, read once on the first query; an unregistered name throws on that query (a typo is loud, not
+a run with no mutant). With the option OFF, `epykos::mutant()` is a constexpr false: the defects compile away, the
+environment is never read, and `tests/mutation/registry_test.cpp` asserts this statically. The registry test also
+pins the registry to the list in `docs/WORKLOADS.md` §M2 (adding a mutant means editing both), prints it for the
+harness, and checks that every registered name has exactly one use site under `src/` and every use site names a
+registered mutant. `scripts/mutation_test.sh` builds the preset once and runs the GATE tests once per mutant — the
+ctest entries matching `roundtrip|differential|verify|_e0_test$`, never a test under `tests/mutation/` and never a
+pass's own unit tests — after checking they all pass with no mutant selected; it prints mutant → caught-by and exits
+non-zero if any mutant survives. A mutant caught only by a test written for it has not been caught: a survivor is a
+gap in the gates and is closed by a new generic gate, not by a mutant-specific test. CI runs the script on Linux GCC
+13 (`.github/workflows/ci.yml`, job `mutation`). The first run (Apple clang 21, reference flags) caught 7 of the 8
+registered mutants with the M1 gates alone and left `signature.merge_classes` alive: no gate fixture held two
+boundary shapes differing only in where a constant sits, because every class of the M1 book is far from every other
+(D22's observed chain), so a signature pass that merges `sub(c, x)` with `sub(x, c)` or `select(p, c, y)` with
+`select(p, y, c)` passed every gate; and `affine.drop_offset` was caught by one test only (the M1 book has no affine
+chain with a leading constant). The gap is closed by the near-miss shapes fixture (`fixtures/nearmiss_shapes.hpp`,
+WORKLOADS.md §M2) and its gates `ir_nearmiss_roundtrip_e0_test` and `exec_nearmiss_interp_e0_test`: 42 templated
+shapes that differ from one another in exactly one respect a signature may overlook, five seeded instances each,
+round-trip identity raw and after the passes, E0 replay of the expanded tape, the IR evaluator and the tape after
+every pass against the double instantiation on a 64-draw ball, and the interpreter at B = 1 and B = 64 across tiles
+and lane tiles. Adjoint mutants (wrong transpose, dropped pull) are M2/Q4b's, after Q3 lands; rewrite mutants
+(R1–R7) land in M3 with the rewrites (WORKLOADS.md §M2). The harness is bash only (macOS bash 3.2 and Linux); no
+Python.

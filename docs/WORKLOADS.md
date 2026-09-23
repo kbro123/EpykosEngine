@@ -81,7 +81,27 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
 - **Forward mode** is the same templated maths instantiated on a dual-number `Scalar`.
 - **Mutation set:** for each pass that exists (fold-sum, CSE, affine collapse, expander, adjoint) at least one mutant
   (wrong constant fold, dropped gather, off-by-one segment offset, wrong transpose) that must fail a gate.
-  Rewrite mutants (R1–R7) land in M3 with the rewrites.
+  Rewrite mutants (R1–R7) land in M3 with the rewrites. As registered (`include/epykos/mutation/mutation.hpp`, pinned
+  by `tests/mutation/registry_test.cpp`, run by `scripts/mutation_test.sh`; D29), in harness order:
+  `cse.merge_nonequal` (a Const operand's bit pattern is ignored by the CSE key), `fold_sum.wrong_order` (Sum operands
+  reversed), `affine.wrong_coefficient` (the first coefficient of the first Affine emitted is one ulp off),
+  `affine.drop_offset` (c_0 dropped), `expander.drop_gather` (gather 0 reads the identity index),
+  `expander.segment_off_by_one` (every segment loses its last member), `signature.merge_classes` (the const-slot
+  pattern is not part of the signature), `interpreter.tile_boundary` (the last row of every elementwise tile is
+  skipped). The adjoint mutants (wrong transpose, dropped pull) are added by M2/Q4b once the adjoint lands.
+- **Near-miss shapes** (`include/epykos/fixtures/nearmiss_shapes.hpp`, the gate fixture the mutation harness showed
+  was missing, D29): 42 templated shapes over six positive inputs, each an op tree that differs from a neighbour in
+  exactly one respect a signature may overlook — a constant on the left or the right of `−` and `/`, a constant in
+  one slot of a two-op tree or the other or neither, `select` with a constant in the condition, the true arm, the
+  false arm or both arms, sums of two, three and four members with and without a constant member, affine chains
+  with a leading, a trailing or no constant and with negated and subtracted terms, `exp` / `log` / `sqrt` / `neg`
+  around the same trees, `fma` with a constant in each slot, `recip` vs `1/x`, the comparisons the other way round,
+  `max` / `min` / `abs`. Five instances per shape (inputs rotated per instance; constants `c ~ U(0.5, 2.5)`,
+  `d ~ U(−1.5, 1.5)` from sub-stream `400000 + shape`, draws `2i`, `2i + 1`), then a left fold of every row into a
+  total: 211 outputs. Record point `(0.7, 1.3, 2.1, 0.4, 1.9, 1.1)`; state ball of 64 draws, each input scaled by
+  `U(0.5, 1.5)` from sub-stream `410000 + r` (draw 0 is the record point). Gates: round-trip identity raw and after
+  the passes (36 raw classes), E0 replay after every pass vs the `double` instantiation, expanded tape and IR
+  evaluator E0, interpreter E0 at `B = 1` and `B = 64` over tiles {1, 7, 256} × lane tiles {1, 3, 8, 64}.
 
 ---
 

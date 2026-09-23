@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Stage A instrument blueprints: SOFR OIS (plain, observation shift, shift + lockout), SOFR averaging swaps, SOFR futures, €STR OIS, EURIBOR swaps, 3s6s basis, EURIBOR futures, front-end deposits",
+    "title": "Stage A instrument blueprints: SOFR OIS (plain, observation shift, shift + lockout, lookback), SOFR averaging swaps, SOFR futures, €STR OIS (plain and its 1-day payment-lag variant), EURIBOR swaps, 3s6s basis, EURIBOR futures, front-end deposits",
     "description": "Each blueprint names a convention of blueprints/conventions/instruments.json and the coupon kind every leg records with (include/epykos/maths/instrument/blueprint.hpp); a trade of the population supplies notional, side, dates, tenor and rate. The coupon mechanics are code (maths/instrument/coupon.hpp); the observation windows, lags and day counts come from the convention. Sources: the convention's own citations (docs/G4_BUNDLE.md USD.3-USD.5, EUR.3-EUR.6) and the ISDA 2021 Definitions / ARRC formulas for compounding in arrears and averaging (G4_BUNDLE.md section 6).",
     "sources": [
       "docs/G4_BUNDLE.md sections USD.3, USD.4, USD.5, EUR.3, EUR.4, EUR.5, EUR.6 (the conventions each blueprint names)",
@@ -32,6 +32,12 @@
       "legs": [{"coupon": "fixed"}, {"coupon": "rfr_compounded", "observation": {"method": "observation_shift", "lookback_days": 2, "lockout_days": 2}}],
       "notional": 10000000, "side": "receive", "tenor": "5Y"
     },
+    "USD-SOFR-OIS-LOOKBACK2": {
+      "convention": "USD-SOFR-OIS-LOOKBACK2",
+      "description": "USD fixed vs SOFR compounded with a two business day lookback and no observation shift (customised; M3-fix).",
+      "legs": [{"coupon": "fixed"}, {"coupon": "rfr_compounded", "observation": {"method": "lookback", "lookback_days": 2, "lockout_days": 0}}],
+      "notional": 10000000, "side": "receive", "tenor": "5Y"
+    },
     "USD-SOFR-AVG-SWAP": {
       "convention": "USD-SOFR-AVG-SWAP",
       "description": "USD fixed vs the arithmetic average of daily SOFR (does not telescope).",
@@ -56,6 +62,12 @@
     "EUR-ESTR-OIS": {
       "convention": "EUR-ESTR-OIS",
       "description": "EUR fixed vs €STR compounded in arrears (plain).",
+      "legs": [{"coupon": "fixed"}, {"coupon": "rfr_compounded"}],
+      "notional": 10000000, "side": "receive", "tenor": "5Y"
+    },
+    "EUR-ESTR-OIS-LAG1": {
+      "convention": "EUR-ESTR-OIS-LAG1",
+      "description": "EUR fixed vs €STR compounded in arrears (plain), one business day payment lag instead of two (the disputed alternate, M3-fix).",
       "legs": [{"coupon": "fixed"}, {"coupon": "rfr_compounded"}],
       "notional": 10000000, "side": "receive", "tenor": "5Y"
     },

@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Instrument conventions: SOFR OIS (and its shifted / locked-out variants), SOFR averaging swaps, SOFR futures, €STR OIS, EURIBOR 3M / 6M swaps, 3s6s basis, EURIBOR futures, front-end deposits",
+    "title": "Instrument conventions: SOFR OIS (and its shifted / lookback / locked-out variants), SOFR averaging swaps, SOFR futures, €STR OIS (and its 1-business-day payment-lag variant), EURIBOR 3M / 6M swaps, 3s6s basis, EURIBOR futures, front-end deposits",
     "description": "Keyed by name. Legs, frequencies, day counts, roll, spot lag, payment delay, observation shift / lookback / lockout, stub rule and end-of-month flag are data read by include/epykos/conventions/registry.hpp; the mechanics (schedule.hpp, rfr.hpp, imm.hpp) are code. Every value cites its source as in docs/G4_BUNDLE.md sections USD.3-USD.5 and EUR.3-EUR.6; a value the research could not source is marked UNVERIFIED in its citation.",
     "sources": [
       "CFTC, Swaps Made Available To Trade (chart as of 2023-07-07): USD SOFR OIS and EUR EURIBOR fixed-float terms and tenors",
@@ -104,6 +104,31 @@
         "status": "own research: a customised convention for the seeded book"
       },
       "provenance": {"imported_from": "none", "imported_on": "2026-09-23", "cross_check": "own_research"}
+    },
+    "USD-SOFR-OIS-LOOKBACK2": {
+      "type": "ois",
+      "description": "USD fixed vs SOFR compounded in arrears with a two business day lookback and NO observation shift (ARRC: 'lookback without observation shift' - same accrual period and weights as plain compounding, but the rate applied on each accrual day is the rate published two business days earlier), as a customised swap. Not the interdealer standard. Added (M3-fix) so the lookback-only method has an instrument and a PV-level test: it previously existed only as an ObservationMethod value exercised by a conventions-layer date-list test, never by a priced trade (PROBLEM.md section 3 requires every realism-checklist item, including observation shift / lookback, be exercised by at least one instrument).",
+      "currency": "USD",
+      "calendar": "USD-SOFR-SWAP",
+      "spot_lag": 2,
+      "payment_lag": 2,
+      "bdc": "ModifiedFollowing",
+      "eom": true,
+      "stub": "ShortFront",
+      "legs": [
+        {"role": "fixed", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360"},
+        {"role": "float", "index": "USD-SOFR", "compounding": "compounded", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360",
+         "observation": {"method": "lookback", "lookback_days": 2, "lockout_days": 0}}
+      ],
+      "discount_index": "USD-SOFR",
+      "tenors": ["1Y", "2Y", "3Y", "5Y", "7Y", "10Y"],
+      "sources": {
+        "observation": "ARRC User's Guide to SOFR (2021): 'lookback without observation shift' - 'the observation date is k business days prior to the interest date... all other elements of the calculation are kept the same' (the accrual period and weights of plain compounding, section 3 of docs/G4_BUNDLE.md USD.3); ISDA 2021 Definitions 'Lookback' compounding method (ISDA Good Friday 2026 guidance fn 7, as for the SHIFT2 / SHIFT2-LOCKOUT2 variants)",
+        "other_fields": "as USD-SOFR-OIS",
+        "status": "own research: a customised convention for the seeded book, mirroring USD-SOFR-OIS-SHIFT2's provenance"
+      },
+      "provenance": {"imported_from": "none", "imported_on": "2026-09-23", "cross_check": "own_research",
+        "notes": ["M3-fix: closes the coverage gap of the M3 review finding that method=\"lookback\" was never wired into any blueprint"]}
     },
     "USD-SOFR-AVG-SWAP": {
       "type": "ois",
@@ -221,6 +246,31 @@
       },
       "provenance": {"imported_from": "SwapEngine/conventions/conventions.json products.EUR-ESTR-OIS", "imported_on": "2026-09-23", "imported_key": "products.EUR-ESTR-OIS", "cross_check": "partial",
         "notes": ["payment_lag 2 agrees with SwapEngine but disagrees with the TP ICAP template and LCH 2019 (1 BD): recorded, not resolved"]}
+    },
+    "EUR-ESTR-OIS-LAG1": {
+      "type": "ois",
+      "description": "EUR fixed vs €STR OIS, identical to EUR-ESTR-OIS except a ONE business day payment lag. Added (M3-fix) as a named variant of the disputed payment_lag field (the same pattern as USD-SOFR-OIS-SHIFT2 / SHIFT2-LOCKOUT2 for a customised parameter), because a further research pass (M3-fix) could not settle the disagreement between Strata / SwapEngine (2 days) and the TP ICAP MET template / LCH 2019 Product Eligibility EUR document (1 day) with a clearly-dated current (2024+) primary or CCP source: CME's EUR-ESTR-OIS PDF still blocks automated fetch, the CFTC-filed LCH EUR-ESTR clearing submission (2022-01-06) and the Tradeweb SEF rulebook chapter 9 still do not state a payment-lag figure, and LCH's Product Specific Contract Terms and Eligibility Criteria Manual (effective 2025-01-01) lists EUR-EuroSTR-OIS Compound as an eligible product but is an eligibility table (currency, floating rate index, tenor and notional limits) with no payment-lag column. Registry default for EUR-ESTR-OIS stays 2 (unchanged); this variant exposes 1 so Stage A's EUR-side PVs and risk can be sanity-checked under both conventions (docs/G4_BUNDLE.md EUR.3).",
+      "currency": "EUR",
+      "calendar": "EUR-TARGET",
+      "spot_lag": 2,
+      "payment_lag": 1,
+      "bdc": "ModifiedFollowing",
+      "eom": true,
+      "stub": "ShortFront",
+      "legs": [
+        {"role": "fixed", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360"},
+        {"role": "float", "index": "EUR-ESTR", "compounding": "compounded", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360",
+         "observation": {"method": "plain", "lookback_days": 0, "lockout_days": 0}}
+      ],
+      "discount_index": "EUR-ESTR",
+      "tenors": ["1W", "2W", "3W", "1M", "2M", "3M", "4M", "5M", "6M", "7M", "8M", "9M", "10M", "11M", "1Y", "18M", "2Y", "3Y", "4Y", "5Y", "6Y", "7Y", "8Y", "9Y", "10Y", "12Y", "15Y", "20Y", "25Y", "30Y", "40Y", "50Y"],
+      "sources": {
+        "payment_lag": "TP ICAP IRP MET template EUR Overnight Index Swap (2021 ISDA Definitions): 'Payment Lag: One Business Day'; LCH Product Eligibility EUR (October 2019): 'Payment lag 1 day' for €STR swaps - the disagreeing side of the EUR-ESTR-OIS DISAGREEMENT (docs/G4_BUNDLE.md EUR.3)",
+        "other_fields": "as EUR-ESTR-OIS",
+        "status": "own research (M3-fix): a named variant exposing the disputed value, not a resolution of the disagreement"
+      },
+      "provenance": {"imported_from": "none", "imported_on": "2026-09-23", "cross_check": "own_research",
+        "notes": ["M3-fix: closes the M3 review finding that the payment-lag disagreement had no alternate variant exposed, unlike SHIFT2 / LOCKOUT2"]}
     },
     "EUR-ESTR-ON-DEPOSIT": {
       "type": "deposit",

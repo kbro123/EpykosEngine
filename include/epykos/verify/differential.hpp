@@ -22,7 +22,7 @@
 //                 a difference of terms, the scale of the terms; without it the bound is relative
 //                 to the value itself; an infinite scale exempts that value from the bound).
 //                 ulps defaults to 4 and rel to 0 (Tolerance::e1); Tolerance::e1_relative(1e-12)
-//                 is D26's bound as written. Measured on the M1 book (D29): the release
+//                 is D26's bound as written. Measured on the M1 book (D30): the release
 //                 preset's contraction of the reference alone reaches 13 ulps of the leg scale,
 //                 so 4 ulps is a bound for kernels that share the reference's operations, not
 //                 for a reference the compiler was free to contract.

@@ -11,14 +11,14 @@
 // and coupon. The interpreter's kernels are pinned E0 (src/exec/kernels_l*_e0.cpp, D25), so
 // what is measured here is exactly the contraction the preset applies to the reference.
 //
-// Tolerance: D26 (the project's E1 class for a difference of legs, D29):
+// Tolerance: D26 (the project's E1 class for a difference of legs, D30):
 //   |Δpv_i| <= 1e-12·(|fixed_i| + |float_i|),  |Δbook| <= 1e-12·Σ_i |pv_i|            (asserted)
 //   |Δ| <= 1e-12·|value| wherever |value| >= 1e-2 × that scale                        (asserted)
 // The harness default of 4 ulps is reported alongside, scaled and unscaled, with its violation
 // counts, and is NOT asserted: on Apple clang 21 release the contraction of the reference alone
 // reaches 13 ulps of the leg scale (879 of 256,256 values beyond 4 ulps), because the float
 // coupon's fwd = (DF(s)/DF(e) − 1)/τ amplifies a 1-ulp DF difference by ~1/(z·τ) ≈ 25 before the
-// leg sums it (D29). 4 ulps is a bound for a kernel that shares the reference's operations
+// leg sums it (D30). 4 ulps is a bound for a kernel that shares the reference's operations
 // (the E0 gate holds bitwise), not for a reference the compiler was free to contract.
 //
 // Ad hoc runs (the "gtest flag" route): the Custom test is skipped unless at least one of the

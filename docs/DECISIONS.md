@@ -265,3 +265,29 @@ Tests: `tests/scripts/perf_gate_test.cpp` (ctest `scripts_perf_gate_test`) drive
 regression detected, cross-fingerprint refused, load refused, `--accept` seeding and updating, ratio and time targets
 including a committed denominator, the summariser's statistics and name parsing, and `run.sh` end to end on the
 scaffold benchmark — and skips only when no `python3` is on the PATH.
+
+## D30 — The differential tester's E1 class is D26's bound; 4 ulps is the harness default, not the M1 gate (2026-09-23)
+Refines D8 and D26 (M2/Q1, `include/epykos/verify/differential.hpp`, `src/verify/`). The tester compares a
+compiled evaluation (`exec::Interpreter`, the tape replay, any `BatchFn`) with the templated maths instantiated on
+double at the draws of the `WORKLOADS.md` §M2 ball, z + 0.005·u with u uniform on [−1, 1]^12 from Philox sub-stream
+200000 + r (draw index = knot), 256 draws; the draws are computed in an E0 TU (`src/verify/state_ball_e0.cpp`, D25),
+so a draw is the same bits on every preset and compiler and a report's worst state is reproducible. Two classes:
+E0 is bitwise; E1 is |a − b| ≤ max(ulps·ulp(m), rel·m) with m = max(|a|, |b|, scale), where `ulps` (default 4) counts
+spacings of doubles at m, `rel` (default 0) is a relative bound, and `scale` is an optional per-output, per-state
+scale supplied by the caller (D26's |fixed_i| + |float_i| per swap and Σ|pv_i| for the book; +inf exempts a value).
+Measured on the M1 book under the release preset on Apple clang 21 (`-O3 -march=x86-64-v3 -fno-math-errno`; the
+reference `price_book<double>` instantiated in a TU with those flags, the interpreter's kernels pinned E0 by D25):
+101,304 of 256,256 values differ; against the leg scale the worst swap is 1.55e-15 (13 ulps; swap 297, draw 243)
+and the book 7.8e-16 of Σ|pv| (6.6 ulps); against the values themselves 5.4e-10 (4.2e6 ulps; swap 182, draw 201, a
+PV of 0.87 on a notional of millions). 4 ulps of the leg scale is therefore exceeded at 879 values and 4 ulps of the
+value at 101,199. The mechanism is the maths as written, not a defect: the compiler contracts the interpolation
+(1 − w)·z_k + w·z_{k+1} (≤ 1 ulp of z(t), ≈ 1 ulp of DF(t) at t ≈ 30 y) and the float coupon's
+fwd = (DF(s)/DF(e) − 1)/τ amplifies a 1-ulp DF difference by 1/(z·τ) ≈ 25 before the leg sums up to 30 of them (GCC
+contracts the leg folds acc + N·τ·K·DF as well, D25). Decision: the M1 E1 differential
+(`tests/verify/m1_differential_test.cpp`) asserts D26 as written — 1e-12 of the leg scale for every value, and
+1e-12 of the value itself wherever |value| ≥ 1e-2 × scale (65,507 of the 256,256 swap-states are ill-conditioned
+and exempt from the literal) — at B = 1 and B = 64, and prints the 4-ulp counts scaled and unscaled for the record;
+under the reference preset it is bitwise and asserts so. A bound of a few ulps of the value is the class for a
+kernel that reproduces the reference's operations, which the E0 gate asserts bitwise under every preset
+(`tests/verify/m1_differential_e0_test.cpp`, B = 1 and B = 64, plus the tape replay); M3's E1 rewrites use the
+tolerance each rewrite declares (D8), with `ulps` and `rel` both available and the scale chosen per output.

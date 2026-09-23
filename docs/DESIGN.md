@@ -227,7 +227,8 @@ transpose of each index array (CSR "who reads me"), so adjoint groups are confli
 Correctness gates:
 - **round-trip identity** of domain IR vs recording (§5.7);
 - **differential**: compiled vs templated-`double` at randomised state in a ball around the record point (E0 exact under
-  `-ffp-contract=off`, else E1 tolerance); this also catches missed branches;
+  `-ffp-contract=off`, else E1 tolerance: D26's bound at the scale of the terms, D30; `verify/differential.hpp`,
+  M2/Q1); this also catches missed branches;
 - **adjoint** vs central finite difference and vs forward mode;
 - **mutation testing** on rewrite rules (a mutated rule must fail a gate);
 - **external oracles** (QuantLib and others) added per product, test-only.

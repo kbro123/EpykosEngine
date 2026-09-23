@@ -2,9 +2,12 @@
 
 Status: M0 design; **M1 (kill test) built and passed 2026-09-23** — the recorder, tape passes, signature pass, domain IR,
 tiled interpreter and hand-fused reference exist, and the interpreter is within 1.044× / 1.079× (single-state / batched)
-of the hand kernel (`ROADMAP.md` §M1 result, D27); M2–M5 in progress. Numbers quoted as *measured* without a fingerprint
-come from the SwapEngine research branch `research/aad-graph-kernels` and SwapEngine's gated baselines (see
-`PRIOR_ART.md`); M1's own measurements are in `bench/results/d448afd70180/` and `RESUME.md` §5; everything else is a target.
+of the hand kernel (`ROADMAP.md` §M1 result, D27); **M2 (verification harness and adjoints) built and passed 2026-09-23** —
+the differential tester, `Dual` forward mode, the mechanical adjoint over the domain IR, the mutation harness and the
+perf-gate tooling exist (`ROADMAP.md` §M2 result, D29–D34); M3 onward in progress. Numbers quoted as *measured* without a
+fingerprint come from the SwapEngine research branch `research/aad-graph-kernels` and SwapEngine's gated baselines (see
+`PRIOR_ART.md`); M1's and M2's own measurements are in `bench/results/d448afd70180/` and `RESUME.md` §5; everything else is
+a target.
 
 ---
 
@@ -187,6 +190,11 @@ transpose of each index array (CSR "who reads me"), so adjoint groups are confli
 every row value, the reverse recomputes a group's intermediate steps per tile and reads its value from the buffer,
 every (gather, row) and (segment, row) is an edge slot the reading group's reverse accumulates into, and a domain
 pulls its rows' adjoints from those slots in one fixed order (seeds, gathers, Sum members, Affine members × coefficient).
+Bits are independent of B, tile and lane tile by construction, so the E0 gates (forward bitwise vs the replay, a batched
+lane bitwise the single-state run) hold under every preset. Measured on the M1 book (d448afd70180, informational, D9):
+value + adjoint of the book PV 418.5 µs at B = 1, 7.38× the value-only interpreter, and 229.7 µs per state at B = 64,
+9.31× — every row value is materialised and none of the interpreter's fusions apply in the reverse; the reverse of a
+fused group is rewrite / catalogue work (M4).
 
 ---
 
@@ -231,11 +239,13 @@ pulls its rows' adjoints from those slots in one fixed order (seeds, gathers, Su
 Correctness gates:
 - **round-trip identity** of domain IR vs recording (§5.7);
 - **differential**: compiled vs templated-`double` at randomised state in a ball around the record point (E0 exact under
-  `-ffp-contract=off`, else E1 tolerance: D26's bound at the scale of the terms, D31; `verify/differential.hpp`,
-  M2/Q1); this also catches missed branches;
+  `-ffp-contract=off`, else E1 tolerance: D26's bound at the scale of the terms, D30; `verify/differential.hpp`,
+  M2/Q1: the ball is computed in an E0 TU, the compiled side is batched, the report names the worst output and draw);
+  this also catches missed branches;
 - **adjoint** vs central finite difference and vs forward mode (`Dual`), and linearity in the seed — on the M1 book
   and on the near-miss shapes fixture, whose `select` / `recip` / `fma` / `log` / `sqrt` rules the book cannot
-  exercise (M2/Q3, Q4b);
+  exercise (`adjoint::Adjoint` and `scalar/dual.hpp`, the same templated maths on `Dual<N>`; M2/Q2, Q3, Q3b, Q4b:
+  FD within 2.9e-9, forward mode within 2.1e-13 on the M1 book);
 - **mutation testing** on rewrite rules (a mutated rule must fail a gate): every pass carries its mutants as one-line
   defects behind `epykos::mutant("<pass>.<defect>")` (`include/epykos/mutation/`), compiled in only by the `mutation`
   preset and selected one per process by `EPYKOS_MUTANT`; `scripts/mutation_test.sh` runs the gates above once per
@@ -243,7 +253,11 @@ Correctness gates:
   test (D32); the adjoint's mutants are caught by the adjoint gates, which are part of the harness's gate set (D33);
 - **external oracles** (QuantLib and others) added per product, test-only.
 
-Performance gates: per machine+toolchain fingerprint; fail on > 1.25× self-regression or an absolute target miss.
+Performance gates: per machine+toolchain fingerprint; fail on > 1.25× self-regression or an absolute target miss. As
+built (M2/Q5, D29, D34): `bench/run.sh` writes `bench/results/<fingerprint>/<run>.json` (refusing at a 1-minute load
+above cores/2) and `scripts/perf_gate.py` gates it against `baseline.json` of the same fingerprint — keyed by the run
+name derived from the binary, moved only by `--accept` in a perf commit — and against the absolute targets of
+`bench/targets.json`; the M1 numbers are the first baseline.
 Reference implementations (QuantLib, hand-fused kernels) are informational tables, never the gate.
 
 ---

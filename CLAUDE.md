@@ -10,8 +10,12 @@ domain-typed array program executed by pre-compiled fused kernels, with mechanic
 ## Status
 M0 design complete. **M1 (kill test) passed 2026-09-23**: verdict go — the tiled interpreter at 1.044× the hand-fused
 kernel single-state and 1.079× batched on fingerprint d448afd70180, libm `std::exp` on both sides (D27; `docs/RESUME.md`
-§5 "M1 result"). M2–M5 in progress on branch `integrate/m1-m5` (see `docs/RESUME.md`). Nothing merges to `main` without
-the owner.
+§5 "M1 result"). **M2 (verification harness and adjoints) passed 2026-09-23**: the mechanical adjoint agrees with central
+finite differences within 2.9e-9 relative (gate 1e-6) and with forward mode (`Dual`) within 2.1e-13 (gate 1e-12) on the
+M1 book, all 13 registered mutants are caught by the gates, the differential tester is bitwise against the templated
+`double` maths at 256 ball states, and the perf gate holds the M1 numbers as the d448afd70180 baseline (D29–D34;
+`docs/RESUME.md` §5 "M2 result"). M3 onward in progress on branch `integrate/m1-m5`, re-planned around the desk problem
+of `docs/PROBLEM.md` (see `docs/RESUME.md` §3). Nothing merges to `main` without the owner.
 
 ## Rules
 - **Decisions are in `docs/DECISIONS.md`.** Changing one means appending a new entry that supersedes it, in the same

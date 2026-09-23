@@ -61,6 +61,32 @@ into M4–M6 below, applied to the desk problem.
 
 **Exit gate:** every `PROBLEM.md` §6 gate on the Stage A tape; the IR shows one DF domain read by both the residual
 and the book; conventions match published examples. Timings recorded as the M4 baseline (informational).
+**Result (2026-09-23): pass.** On fingerprint `d448afd70180` (Xeon W-3223, 8 cores / 16 threads, Apple clang 21,
+`-O3 -march=x86-64-v3 -fno-math-errno`) at `589245d` (integrate/m1-m5 tip, M3/G6 gate run 2 — an independent re-run
+confirming `f49d72a`'s m3-gate-1 result): the Stage A tape (G5, D44) is one recording of 2,000 trades / 70 quotes
+across 4 curves / 1,000 scenario lanes, 148 inputs (70 free), 8,191 outputs, 27,459,283 raw nodes → **517,036** after
+the E0 passes; the IR is 67 domains / 423,235 values / 5 scan domains (1,107 chains, 255,959 rows), with two DF
+domains (177 + 16,917 rows) read by both the calibration residuals and the book (`duplicates(Exp)` = 0). Every
+`PROBLEM.md` §6 gate holds (D45, G6): round-trip identity 0 mismatches; differential ball E0 0 mismatches of 8,191
+outputs (64 draws); whole-program adjoint of O2 vs FD **9.65e-10** (gate 1e-6) and vs forward mode (`Dual<70>`)
+**2.79e-15** (gate 1e-12); IFT risk ladder vs Dual **5.75e-15** on the full 2,000×70 ladder and vs Richardson
+bump-and-recalibrate **5.09e-8** (gate 1e-6); optimality **1.235e-13** (gate 1e-12) at the record point, the run and
+on 32 sampled lanes; the full 1,000-lane O4 grid: 0 not converged, 0 of 262,112 sampled outputs differ from an
+independent single-lane run; conventions vs published 52/52 and closed forms 27/27 (a case-count discrepancy against
+m3-gate-1's 64/64 / 25/25 on the same two suites is reported, not reconciled — every case passes in both runs, no
+gate boolean is affected). Suites: `ctest` release and reference 80/80 each; `scripts/mutation_test.sh` **20/20**
+mutants caught against the 40-gate set. Timings accepted as the M4 baseline (D9, D45; re-confirmed by G6 run 2 at
+0.977–1.002× across 17/17 rows, 0 regressions): record 7,806.8 ms, one calibration 14.93 ms, O2 evaluation 1.530 ms
+at B=1 / 52.27 ms at B=64, O3 reverse (IFT) 32.63 ms (book) / 278.4 ms (64 outputs), O3 forward (`Dual<70>`)
+1,373.4 ms, O4 **16.11 ms/scenario**; fusion coverage shows the compounding scan at 67–77% of every evaluation
+regardless of lane tile — the standing M4 target. Review: 5 findings (`m3-review-market`, `m3-review-one-tape`),
+2 actionable and fixed in `m3-fix` (`cc23459`: a lookback variant unwired from any blueprint, and a payment-lag
+convention disagreement given a named variant per further research, `docs/G4_BUNDLE.md` EUR.3). Simplifications
+labelled throughout (D44; full list in `docs/RESUME.md` §5 "M3 result" / "M3/G5" and `docs/G4_BUNDLE.md` §6–7):
+notably no FX in Stage A (placeholder 1.0), the scheme-sweep variants as separate recordings gated on 300 trades,
+O3's forward mode as `Dual<70>` rather than a tangent interpreter, and the calibration solve tolerance at 1e-13
+(not G4's 1e-14) forced by the 30-year daily products' rounding floor. `docs/RESUME.md` §5 "M3 result",
+`bench/results/d448afd70180/m3.md`.
 
 ## M4 — Optimise the totality (`PROBLEM.md` §7)
 - Rewrites R1–R7 with exactness classes, differential and mutation tests; the interpreter's planner decisions

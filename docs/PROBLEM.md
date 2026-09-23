@@ -62,6 +62,15 @@ Every item below is *structure*: computed at table-build time from conventions a
 Scenario grid (O4): `S = 1,000` scenarios, each a full recalibration of every curve followed by repricing, as batch
 lanes; first-order (IFT) scenario PVs are an informational row, never the definition.
 
+**Stage A, as built (M3, 2026-09-23; D44, D45):** one recording — 148 inputs (70 free quotes), 8,191 outputs,
+27,459,283 raw nodes → 517,036 after the E0 passes; IR of 67 domains / 423,235 values / 5 scan domains (1,107
+chains, 255,959 rows); two DF domains (177 knot-time + 16,917 interpolated rows) read by both the calibration
+residuals and the book, `duplicates(Exp)` = 0. Every gate of §6 below holds on this tape (`docs/RESUME.md` §5 "M3
+result"); the SOFR curve is additionally recorded on log-DF, monotone-cubic and composite variants (gated on 300 of
+the 2,000 trades, D44 simplification 2). Labelled simplifications carried into M4: no FX (§3 line 43 is Stage B); the
+solve tolerance is 1e-13, not 1e-14, on the 30-year daily products' own rounding floor; O3's forward-mode comparison
+is `Dual<70>` on the templated maths, not a tangent interpreter over the IR.
+
 Quotes are synthetic from the seed (stated as synthetic); conventions and tenor sets are researched with sources
 (`docs/G4_BUNDLE.md`).
 

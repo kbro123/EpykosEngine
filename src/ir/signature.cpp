@@ -125,10 +125,11 @@ struct Chain {
   std::vector<node_id> members;
 };
 
-// Thrown when a scan class cannot be laid out as one domain (its step reads a class that reads
-// the scan, or a row reads a later row after the chain-major reordering): infer() bans every
-// node of its chains from any chain and runs the inference again, and the class is split by
-// level as before (D23).
+// Thrown when a scan class cannot be laid out as one domain: its step reads a class that reads
+// the scan (infer() bans every node of its chains from any chain and runs the inference again,
+// and the class is split by level as before, D23), or a chain of the class starts inside
+// another chain or reads a later row after the chain-major reordering (only that chain's nodes
+// are banned: they become straight-line rows and the rest of the class stays a scan, M3/G5).
 struct ScanRetry {
   std::vector<node_id> nodes;
   std::string reason;
@@ -1275,25 +1276,43 @@ Program Inference::assemble() {
       sc.domain = d;
       sc.carry_gather = ref_slots[idx(cl.carry_slot)].index;
       sc.chain_offsets.push_back(0);
-      bool ok = true;
+      // A chain whose first row's carry reads a row of this very class is a BRANCH: its steps
+      // continue another chain from one of that chain's interior steps (two lockout coupons
+      // over the same start whose ends differ by a day share their steps up to the divergence,
+      // M3/G5). A branch is not a chain of the scan: its steps are banned from any chain and
+      // retried as straight-line rows reading the trunk's row (the trunk and every other chain
+      // of the class stay a scan). The same for a chain with a row that reads a later row of
+      // the class through another gather.
+      std::vector<std::int32_t> bad_chains;
       for (size_t r = 0; r < n_rows; ++r) {
         const bool first = pos_in_chain_[idx(rows[r])] == 0;
         if (first && r > 0) sc.chain_offsets.push_back(static_cast<std::int32_t>(r));
+        bool row_ok = true;
         for (std::int32_t k = 0; k < cl.n_ref; ++k) {
           const value_id v = p.gathers[idx(ref_slots[idx(k)].index)].index[r];
           if (k == cl.carry_slot) {
-            ok &= first ? v < dom.value_base : v == dom.value_base + static_cast<value_id>(r) - 1;
+            row_ok &= first ? v < dom.value_base : v == dom.value_base + static_cast<value_id>(r) - 1;
           } else {
-            ok &= v < dom.value_base + static_cast<value_id>(r);
+            row_ok &= v < dom.value_base + static_cast<value_id>(r);
           }
+        }
+        if (!row_ok) {
+          const std::int32_t ch = chain_of_[idx(rows[r])];
+          if (ch < 0 || std::find(bad_chains.begin(), bad_chains.end(), ch) != bad_chains.end()) continue;
+          bad_chains.push_back(ch);
         }
       }
       sc.chain_offsets.push_back(static_cast<std::int32_t>(n_rows));
-      if (!ok) {
+      if (!bad_chains.empty()) {
         ScanRetry retry;
-        retry.nodes.assign(rows.begin(), rows.end());
-        retry.reason = " scan class " + std::to_string(key.cls) + " (" + std::to_string(n_rows) +
-                       " rows) reads a row that is not earlier in the chain-major order;";
+        size_t banned_rows = 0;
+        for (std::int32_t ch : bad_chains) {
+          const Chain& chain = chains_[idx(ch)];
+          retry.nodes.insert(retry.nodes.end(), chain.members.begin(), chain.members.end());
+          banned_rows += chain.members.size();
+        }
+        retry.reason = " scan class " + std::to_string(key.cls) + " (" + std::to_string(n_rows) + " rows): " + std::to_string(bad_chains.size()) +
+                       " chain(s) of " + std::to_string(banned_rows) + " rows start inside another chain or read a later row, retried as straight-line steps;";
         throw retry;
       }
       dom.scan = static_cast<std::int32_t>(p.scans.size());

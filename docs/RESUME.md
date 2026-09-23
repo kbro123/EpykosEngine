@@ -249,3 +249,108 @@ available for Linux/GCC checks (used by M1/P7 to reproduce the GCC 13 CI jobs). 
 2026-09-23  M3/G6 gate  done: every PROBLEM.md section 6 gate on the Stage A tape as an explicit boolean with its worst number (tests/stage_a/gate_{differential_e0,risk,lanes}_test.cpp beside the G5 gates; bench/results/d448afd70180/m3.json + m3.md; D45), under both release and reference - one tape (8,191 outputs of one recording, 148 inputs / 70 free, 4 blocks; the O2 / O4 program and the O3 adjoint over the same Tape + ImplicitRegistry) ok; sharing ok (2 DF domains, 177 knot-time + 16,917 interpolated rows, both read by the residuals and the book, duplicates(Exp) 0); round-trip identity ok; differential ball over the 70 quotes (64 draws, rho 0.005, every draw a full recalibration; the batched program at 8 lanes bitwise the double maths at the knots a separate single-lane solve finds, all 8,191 outputs; B = 1 on 16 draws) E0 ok under release and reference; the whole-program adjoint of O2 (24 trades + 2 currencies + 2 netting sets + the book over the 70 knots) vs FD 9.7e-10 (gate 1e-6) and vs Dual<70> 2.8e-15 (1e-12); the IFT ladder of 50 sampled trades + the book vs Dual 2.3e-15 (1e-12) and vs Richardson 10 / 5 bp bump-and-recalibrate on 50 (trade, quote) pairs (one significant quote per trade) + the book's 70 quotes 5.1e-8 (1e-6; 115 of 120 entries above the recalibration noise floor); optimality |J^T r|_inf worst 1.2e-13 over the four blocks at the record point, at the run and on 32 sampled lanes; the generating curves recovered from their par quotes to 4.6e-14; 32 seeded O4 lanes run in the grid's 64-lane chunks bitwise independent single-lane runs (0 of 262,112 outputs, 0 state entries, 0 iteration counts differ); conventions vs published (conventions_*, 64/64) and closed forms (instrument_*, 25/25) re-run. Suites: ctest release 80/80 and reference 80/80 (77 + the 3 gate executables), scripts/mutation_test.sh 20/20 mutants caught against 39 gates before and 20/20 against 40 after the differential gate joined the set. Timings (bench/run.sh, ee021a3, release, load 6.91 -> 3.25 of 16, 20 x 0.2 s, medians; accepted as the M4 baseline under the run name stage_a_stage_a, D34 / D45): record 7,848.6 ms (27.5 M raw nodes -> 517,036; passes 4.3 s); one calibration 15.04 ms (the four block solves from the flat start, chord: 12 iterations, 4 Jacobians; 54.96 per_iteration); O2 evaluation (the whole-program interpreter alone at the solved state) 1.566 ms at B = 1 (1.522 at lane tile 1), 52.87 ms at B = 64 = 0.83 per lane (52.08 at lane tile 32); O3 reverse (the IFT adjoint, one lane per output) 32.6 ms for the book, 280.7 ms for 64 outputs (4.39 per lane), O3 forward (the Dual<70> pass, all 2,000 trades x 70 quotes) 1,384.0 ms; O4 16.23 ms per scenario (BM_Run/64 1,038.7 ms: 64 recalibrations + one batched run); ImplicitProgram build 1,021 ms; tape 517,036 nodes, IR 67 domains, 423,235 values, 5 scan domains (1,107 chains, 255,959 rows). Planner coverage (Interpreter::describe + -DEPYKOS_EXEC_PROFILE timers, scripts/exec_coverage.py): fuse_reductions fired on 14 domains (25,944 rows, the coupon products and the (acc - 1)/tau rates evaluated inside the 18 whole-domain Sum / Affine passes), the fused-pair kernel on every two-step chain; the inliner and the exp tails did not fire at the grid's lane tile 8 (row_fusion_pays: L = 1 or L >= 16) - at lane tiles 1 / 32 the interpolated zero rates (16,917 rows) inline into the DF exp with the exp as the tail, worth 3 % at B = 1 and 1.5 % at B = 64; unfused: the compounding scan d10 (255,687 rows, 1,102 chains, 262 waves) is 69 % of the B = 64 run and 74 % at B = 1 (a scan is never fused or inlined, D41), the interpolated DFs d5 12.5 % (gathered by 9 domains), f.w d8 3.0 % (outputs + a scan reader + 8 gathers), the forwards d6 2.5 % (3 gathers), d25 1.1 % (its only reader is itself fused into reductions), the rest of the plain domains 1.9 % together (output rows, or gathered and Sum members at once). Engine change: the EPYKOS_EXEC_PROFILE table holds 4,096 slots (it held 64; the Stage A program has 67 domains). Simplifications stated: 64 ball draws (not 256), the bump gate on 50 pairs + the book, the profile shares from an instrumented build (informational).  (this commit, branch m3/m3-gate-1)
 2026-09-23  M3/m3-fix review fixes  landed: two M3 review findings applied with regression tests. (1) ObservationMethod::Lookback (2-day lookback, NO observation shift) was implemented and unit-tested at the conventions layer only (rfr_test.cpp), never wired into a blueprint or priced, unmet against PROBLEM.md section 3's "exercised by at least one instrument" for every realism-checklist item: added USD-SOFR-OIS-LOOKBACK2 (convention + blueprint, mirroring SHIFT2's provenance), joined it to fixtures/instrument_sample.hpp's blueprint list (so it now goes through the round-trip / E0 / adjoint-vs-Dual<44> gates like every other Stage A blueprint), and added Coupon.LookbackByHandWithAProjectedPart to tests/instrument/coupon_test.cpp - an independent hand computation of the realised factor, the projected forwards (each day's own natural span, not the accrual weight) and the PV, analogous to the existing shift+lockout test. (2) The EUR-ESTR-OIS payment-lag disagreement (2 business days: Strata / SwapEngine; vs 1: TP ICAP MET template / LCH 2019) had no alternate variant exposed, unlike SHIFT2 / LOCKOUT2 for other disputed fields: a further research pass found no clearly-dated current (2024+) primary or CCP source that settles it either way (CME's PDF still blocks fetch; the CFTC-filed LCH clearing submission and the Tradeweb SEF rulebook still state no figure; LCH's Product Specific Contract Terms and Eligibility Criteria Manual, effective 2025-01-01, lists the product as eligible but carries no payment-lag column - docs/G4_BUNDLE.md EUR.3, new source [26]) - so, per the finding's own fallback, added EUR-ESTR-OIS-LAG1 (payment_lag 1, otherwise identical) as a named variant, wired it into the instrument sample, and added Coupon.PaymentLagVariantOnlyShiftsThePaymentDate verifying every coupon field but the payment date matches and the leg PV difference equals exactly the extra business day of discounting, on both legs, across four tenors. Side effect: the larger instrument sample (17 blueprints, up from 15) occasionally needs ir::infer's documented one-retry contingency (InferStats::scan_rounds = "1 + retries after a scan class could not be laid out" - the same mechanism G5's line already describes for lockout coupons); sample_roundtrip_test.cpp's bounds were widened (max_steps 260 -> 265, scan_rounds 1 -> <= 2) since the round-trip identity check in the same test already proves this is not a correctness issue. Registry defaults unchanged (USD-SOFR-OIS still plain, EUR-ESTR-OIS still payment_lag 2); both new instruments are customised / disputed variants, cross_check own_research. Apple clang 21: ctest release 80/80, ctest reference 80/80, scripts/mutation_test.sh 20/20 mutants caught against 40 gates. No SwapEngine file opened.  d917bc3..6ff973d, branch m3/m3-fix
 2026-09-23  M3/G6 gate, run 2  done: independent re-run of the M3/G6 gate on a fresh worktree cut from integrate/m1-m5 at cc23459 (the m3-fix lookback / payment-lag commits already landed; the tip had not moved since m3-gate-1). Every PROBLEM.md section 6 gate re-checked and unchanged in verdict: one tape, sharing (2 DF domains, duplicates(Exp) 0), round-trip identity, differential ball E0 (64 draws, 0 mismatches of 8,191 outputs, both presets), whole-program adjoint of O2 vs FD 9.65e-10 / vs Dual 2.79e-15 (release) and 2.25e-15 (reference), IFT ladder vs Dual 2.30e-15 (sample) / 5.75e-15 (the full 2,000 x 70 ladder) and vs Richardson bump-and-recalibrate 5.09e-8, optimality 1.235e-13 over 4 blocks (record point, run and 32 sampled lanes), recovery 4.56e-14, 32 sampled O4 lanes bitwise independent single runs (0 of 262,112 outputs differ), the whole 1,000-lane grid 0 not converged worst |J^T r|_inf 1.235e-13 - all ok, all within the gates. Suites: ctest release 80/80, reference 80/80; scripts/mutation_test.sh 20/20 mutants caught against the same 40-gate set, exit 0. conventions_* and instrument_* re-run and 100% passing, but counted directly this time at 52/52 (8 executables) and 27/27 (7 executables) - differs from m3-gate-1's stated 64/64 and 25/25; not reconciled here, flagged in bench/results/d448afd70180/m3.md for review. Timings (bench/run.sh, cc23459, release, load 4.8 -> 2.84 of 16, 20 x 0.2 s) compared against the m3-gate-1 baseline by scripts/perf_gate.py: 17/17 rows ok, 0 regressions, every ratio 0.977-1.002x, verdict PASS (baseline.json not moved, this run confirms it rather than re-accepting: record 7,806.8 ms, one calibration 14.93 ms chord, O2 evaluation 1.530 ms at B=1 / 52.27 ms at B=64, O3 reverse 32.63 ms (book) / 278.4 ms (64 outputs), O3 forward (Dual<70>) 1,373.4 ms, O4 16.11 ms per scenario). Fusion coverage re-measured with an ad hoc -DEPYKOS_EXEC_PROFILE build (build/profile, not a checked-in preset - a stated simplification) at lane tiles 1 / 8 / 32: shares match m3-gate-1 closely (whole-domain reduction, fused-into-reduction, plain-tile and output-copy shares at B=64/L=8 identical to 1 decimal place; the scan share 68.8% vs m3-gate-1's 68.7%); no new optimisation opportunity found beyond what m3-gate-1 already named for M4. No SwapEngine file opened. Verdict not given (per the package instructions, the caller decides); numbers in bench/results/d448afd70180/m3.json (updated) and m3.md (rewritten for this run).  (this commit, branch m3/m3-gate-2)
+
+2026-09-23  M3/g0  landed  92ed9a9 (branch m3/g0-conventions)
+2026-09-23  M3/g1  landed  b981d20 (branch m3/g1-curves)
+2026-09-23  M3/g3  landed  3a992dd (branch m3/g3-scan)
+2026-09-23  M3/g4  landed  5a5fea4 (branch m3/g4-implicit)
+2026-09-23  M3/g2  landed  728ae8d (branch m3/g2-instruments)
+2026-09-23  M3/g5  landed  152d563 (tip of origin/integrate/m1-m5 and origin/m3/g5-stage-a at close; the package is the seven commits 16866ac, 5ef6cd2, f4fefe0, 62272cf, d80f130, ad55c4d, 152d563 on top of 728ae8d)
+2026-09-23  M3/gate  done  f49d72a
+2026-09-23  M3/fix  landed  cc23459 (pushed as the tip of both integrate/m1-m5 and m3/m3-fix; landed on f49d72a with no rebase conflicts)
+2026-09-23  M3/gate2  done  589245d (second, independent G6 gate run; fast-forward push, baseline confirmed not re-accepted)
+
+### M3 result (2026-09-23)
+**Verdict: pass** (M3-close, at M3 close; the exit gate is `PROBLEM.md` §6 on the Stage A tape, D35 / D45). Engine
+measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after M3/G6 gate run 2; fingerprint
+`d448afd70180`). Order landed: {G0, G1, G3, G4} → G2 → G5 → G6 gate → review (m3-review-market, m3-review-one-tape)
+→ m3-fix → G6 gate run 2 (independent re-verification) → m3-close (this entry).
+- The Stage A tape (G5, D44; `blueprints/problems/stage_a.json`, `fixtures/stage_a`): 2,000 trades, 70 quotes across
+  four curves (USD-SOFR 22, EUR-ESTR 18, EUR-EURIBOR-3M 18, EUR-EURIBOR-6M 12), 1,000 scenario lanes; one recording —
+  148 tape inputs (70 free), 8,191 outputs (78 block/O1-diagnostic outputs, 70 O1 knots, 8,043 O2 book outputs; no
+  `Select` on the base tape, so no O6 exports there), 27,459,283 raw nodes → **517,036** after the E0 passes.
+- IR / sharing (G5, G6): **67 domains**, 423,235 values, **5 scan domains** of 1,107 chains over 255,959 rows (not
+  investigated why 5 domains arise from 3 scan classes rather than 1 — flagged by G5/G6 for M4); two DF domains
+  (177 knot-time rows, 16,917 interpolated rows) both read by the calibration residuals and the book,
+  `duplicates(Exp)` = 0 — no discount factor computed twice; round-trip identity 0 mismatches (raw on a 120-trade
+  book, passes-tape on the full book).
+- Every `PROBLEM.md` §6 gate on the Stage A tape, all **ok** (release preset worst numbers below; reference-preset
+  numbers agree to within `-ffp-contract=off` noise, in `bench/results/d448afd70180/m3.json`): one tape ok; sharing
+  ok; round-trip identity ok; differential ball E0 (64 draws, ρ 0.005) 0 mismatches of 8,191 outputs; whole-program
+  adjoint of O2 vs FD **9.65e-10** (gate 1e-6); vs Dual **2.79e-15** release / 2.25e-15 reference (gate 1e-12); IFT
+  ladder vs Dual **2.30e-15** on the 50-trade sample / 3.03e-15 reference, **5.75e-15** on the full 2,000×70 ladder
+  (140,000 entries); IFT vs Richardson bump-and-recalibrate **5.09301e-8** (gate 1e-6; 115/120 entries above the
+  recalibration noise floor); optimality **1.23544e-13** over 4 blocks at the record point, at the run and on 32
+  sampled lanes (gate 1e-12); recovery **4.56267e-14** (gate 1e-12, noise-0 par-quote recovery); 32 sampled O4 lanes
+  bitwise an independent single-lane program (0 of 262,112 outputs differ); the full 1,000-lane grid: 0 not
+  converged, worst ‖Jᵀr‖∞ 1.23544e-13; conventions vs published 52/52 (G0's 8 executables); closed forms 27/27
+  (G2's 7 executables) — see the discrepancy note below.
+- Suites (both G6 runs): `ctest --preset release` 80/80, `ctest --preset reference` 80/80,
+  `scripts/mutation_test.sh` **20/20 mutants caught** against the 40-gate set, exit 0 — including the three scan
+  mutants, with `adjoint.scan_forward_order` additionally caught by `stage_a_gate_differential_e0_test`; no gate
+  gap opened by Stage A over the smaller G0–G5 fixtures.
+- **Discrepancy, reported not reconciled** (flagged by G6 run 2, `bench/results/d448afd70180/m3.md`):
+  `conventions_*` (8 executables) and `instrument_*` (7 executables) counted 52/52 and 27/27 GTest cases on the
+  gate-run-2 tree (post m3-fix, each executable's own summary line read directly); m3-gate-1 had stated 64/64 and
+  25/25 for the same families on the pre-fix tree. All cases pass in both runs and no gate boolean is affected
+  (`conventions_ok` and `closed_forms_ok` both true); the count difference itself is unexplained and is carried
+  forward here for M4 rather than silently dropped.
+- Timings (informational, D9; the M4 baseline, D45; `bench/results/d448afd70180/{stage_a_stage_a.json,baseline.json,
+  m3.md}`; re-confirmed by G6 run 2 at 0.977–1.002× the baseline, 17/17 rows ok, 0 regressions —
+  `baseline.json` not re-accepted, only confirmed): BM_Record 7,806.8 ms median, BM_Build 1,016.4 ms, BM_Calibrate
+  (one lane, chord) 14.93 ms / per_iteration 54.70 ms, BM_Evaluate B=1/L=8 1.530 ms (B=64/L=8 52.27 ms, B=64/L=32
+  51.38 ms with row fusion on), BM_Run B=64 (O4) 1,030.9 ms = **16.11 ms/scenario**, BM_Adjoint (O3 reverse) B=1
+  32.63 ms / B=64 278.4 ms, BM_ForwardLadder (O3 forward, `Dual<70>`) 1,373.4 ms.
+- Fusion coverage on the Stage A program (planner, ad hoc `-DEPYKOS_EXEC_PROFILE` build — labelled a
+  simplification, not a checked-in preset, each (B, lane_tile) its own filtered process): at B=64/lane-tile 8 —
+  scan 68.8% (68.7% on the re-run), whole-domain reduction 9.1%, plain tiles 20.6%, fused-into-reduction 0.2%,
+  output copy 1.4%; at B=64/lane-tile 32 — scan 67.4%, reduction 8.8%, plain 22.4%, fused 0.1%, inlined 0.0%
+  (1 domain, 16,917 rows). The compounding scan (`d10`) is 67–77% of every evaluation regardless of lane tile —
+  the standing M4 target named by both gate runs; row-fusion's lane-tile choice is left a cost-model decision (M4).
+- Simplifications, labelled (D44; G4_BUNDLE.md §6–7; the full numbered list of 15 is in G5's own progress-log entry
+  above, summarised here): no FX in Stage A (`pv_usd` = pv × placeholder 1.0, recorded as a product); the scheme
+  sweep (log-DF / monotone cubic / composite SOFR variants) is separate recordings gated on 300 trades, not 2,000 —
+  a variant curve in the base tape would be calibrated but unread by the book, failing the sharing gate by
+  construction; the record-time DF memo (`df(slot, t)` per book) shrinks only the raw recording, cse already
+  merges the calibration instruments' DFs, nothing of the maths is folded; O3's AD mode is the engine-native
+  reverse IFT for the ladder and M2's `Dual<70>` (not a tangent interpreter over the IR) for forward mode — 6.2×
+  cheaper for the per-trade shape, 40× more expensive for the book alone, the choice reported per Jacobian block,
+  not automated (M4's rule); a scan chain whose initial value is an interior row of another chain is retried alone
+  as straight-line rows (G3's engine change, `src/ir/signature.cpp`) — without it the 2,000-trade book has no
+  scan at all; `solver::CurveSet` is Composite-aware (`CurveSpec::regions`), a spec without regions keeps the exact
+  M1 linear path; quote levels and fixings are synthetic and only plausible, no new market-convention research was
+  done in G5 (conventions come from G0/G2's registry); trade rates/spreads are par at the generating curves ×
+  (1 + ε), ε ~ U(±0.15); accrued interest is structure, not a tape output; the raw-recording round trip is gated on
+  a 120-trade book (the full 2,000-trade raw tape is 27.5M nodes); the bump-and-recalibrate gate's 1 bp bumps sit
+  at the recalibration noise floor (solve tolerance 1e-13, not G4's 1e-14 — forced by the 30-year daily products'
+  3–5e-14 rounding floor, stated in the test; `PROBLEM.md` §6's 1e-12 gate holds on every zero-rate block and lane,
+  the log-DF variant's overnight-deposit Jacobian entry 1/τ = 360 scales that variant's diagnostic by 360, stated
+  in the test); O4 bitwise-vs-single-run is gated on the first 8 lanes (E0 test), the full 1,000-lane grid is
+  convergence/sanity only. G2's own simplification, carried forward: a term-rate stub's forward runs over its
+  accrual period with the index day count; futures convexity 0, PV = (price − traded)/100 × notional undiscounted;
+  the Composite-aware solve (region-wise knots) was explicitly left to G5, and G5 delivered it.
+- Open risks / questions named by G5 and re-flagged by G6 for M4 (not investigated further by this package): (a)
+  why the compounding is 5 scan domains from 3 scan classes rather than one; (b) the scan-branch retry fix (G3)
+  changes retry granularity — every gate passes and the mutation harness is green, but M4 should watch
+  `InferStats::scan_retries` on later tapes; (c) `run.sh`'s first timed run had an uncommitted docs tree at that
+  moment (the code timed is the landed code; the JSON's commit field records the working commit as dirty).
+- Review: 5 findings across two lenses — `m3-review-market` (a market/conventions research probe; no commits of
+  its own landed on top of the gate tip, its findings folded into `m3-fix`'s research) and `m3-review-one-tape`
+  (the one-tape / sharing claims; evidence-only probe `tests/stage_a/review_probe_test.cpp`, commit `2713193`, not
+  landed by design — the same evidence-only convention as M1's `m1/p7-review-*` and M2's `m2/m2-review-adjoint`).
+  **2 actionable, fixed in `m3-fix` (cc23459)**: (1) `ObservationMethod::Lookback` existed at the conventions layer
+  only (unit-tested, `rfr_test.cpp`) and was never wired into a blueprint or priced, unmet against `PROBLEM.md` §3's
+  "exercised by at least one instrument" for every realism-checklist item — fixed by adding
+  `USD-SOFR-OIS-LOOKBACK2` and wiring it into `instrument_sample`; (2) the EUR-ESTR-OIS payment-lag disagreement
+  (2 business days per Strata / SwapEngine vs 1 per the TP ICAP MET template / LCH 2019) had no alternate variant
+  exposed — a further research pass found no dated primary or CCP source that settles it (LCH's Product Specific
+  Contract Terms and Eligibility Criteria Manual, effective 2025-01-01, lists the product but carries no
+  payment-lag column, `G4_BUNDLE.md` EUR.3, citation [26], still an open disagreement), so `EUR-ESTR-OIS-LAG1` was
+  added as a named variant per the finding's own fallback. **3 not actionable**: this package found no rejection or
+  triage record for these three in the repository — neither review branch carries a findings file of its own,
+  matching the M1/P7 and M2/Q6 pattern of review findings reported to the orchestrator rather than committed to
+  the tree — so their disposition is reported here as relayed by the orchestrator, not independently re-derived or
+  re-triaged by M3-close.
+- Not done in M3 (by design, `PROBLEM.md` §8): Stages B/C/D (M5/M6); the optimiser, cost model and catalogue (M4);
+  the per-domain `EPYKOS_EXEC_PROFILE` timers were run twice as an ad hoc, non-gated coverage check (G5, G6), never
+  as a checked-in preset or G6's own baseline instrument.

@@ -638,3 +638,23 @@ maths and the replay at 65 states, B = 64 lane for lane the 64 B = 1 runs over t
 {1, 3, 8, 32, 64}; the adjoint's Jacobian is within 3.1e-15 of forward mode (gate 1e-12, relative to the row's scale)
 and 2.1e-9 of central FD (gate 1e-6); the batched adjoint is lane for lane the single runs. The reverse of a fused
 scan step and the per-row adjoint of a scan are M4's, like every other fusion.
+
+## D42 — The conventions layer: a strict JSON registry of definitions, mechanics in code, disagreements recorded (2026-09-23)
+Implements D36 and D37 for Stage A (M3/G0). `blueprints/conventions/*.json` hold currencies, calendars (rule
+instances), day-count names, index definitions, instrument conventions and central-bank dates; every file may carry
+any section, the registry merges the directory in name order, a name defined twice is an error, and the schema is
+strict: an unknown key or a missing required field fails the load with `file:line:column`. Every value carries its
+citation (`sources`) matching `docs/G4_BUNDLE.md` and, where imported from SwapEngine's conventions file, a
+`provenance` (file, date, key, `cross_check` verdict). The rule kinds (`fixed`, `nth_weekday`, `easter_offset` with
+the SIFMA first-Friday exception; observances `none`, `sat_to_fri_sun_to_mon`, `sun_to_mon`, `sat_to_fri`,
+`next_weekday`), the business day conventions, the day counts, schedule generation, IMM periods and the RFR
+observation windows (plain, lookback, observation shift, lockout) are code under `include/epykos/conventions/`,
+structure only (ints and doubles; never a `Scalar`). Adding a currency, index or instrument is a JSON edit; the
+registry test proves it with a synthetic extra file. The JSON reader is in-house (`epykos/util/json.hpp`, D12).
+Three calendars are kept apart for SOFR because they differ on Good Friday: SIFMA business days (an early close is a
+business day), the days SOFR is published for (never Good Friday: NY Fed 2026), and Federal Reserve days; SOFR swap
+dates use the joint SIFMA + Fed calendar (ISDA MPN 2022-04-08). Where the sources disagree the registry takes one
+value and records the other rather than resolving silently (D37): the EUR EURIBOR IRS fixed leg is 30/360 Bond Basis
+(CFTC MAT, Bloomberg SEF, Strata) against SwapEngine's 30E/360; the €STR OIS payment lag is 2 (Strata, SwapEngine)
+against the TP ICAP template's and LCH 2019's 1. Futures carry no convexity adjustment (D35, stated). Items the
+research could not source are marked UNVERIFIED in both the bundle and the JSON, never presented as standard.

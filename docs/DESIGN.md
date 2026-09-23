@@ -40,6 +40,8 @@ implementation (instantiated on `double`) and the source the compiler records.
 
 ```
 Blueprint (instruments, curves, models as DATA)
+   │  (M3/G0, D42: blueprints/conventions/*.json read by the strict in-house JSON reader into the
+   │   conventions registry — calendars from rules, day counts, schedules, IMM, RFR windows are code)
    │
    ▼
 Templated maths  ── instantiated on double ──►  reference values (the oracle)

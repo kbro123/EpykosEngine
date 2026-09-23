@@ -67,6 +67,7 @@ struct InferStats {
   std::size_t chain_nodes = 0;       // their steps (rows of scan domains)
   std::size_t scan_classes = 0;      // classes laid out as scan domains
   std::size_t scan_rounds = 0;       // inference rounds (1 + retries after a scan class could not be laid out)
+  std::string scan_retries;          // why each retry happened (empty when scan_rounds == 1)
 };
 
 Program infer(const Tape& tape, InferStats* stats = nullptr);

@@ -47,8 +47,10 @@ constexpr uint64_t k_seed = 0x243F6A8885A308D3ull;
 constexpr int scan_min_steps = 3;
 // The carry is looked for at most this deep in a step's tree (acc·g: 1; a·x + b: 2).
 constexpr int scan_max_depth = 4;
-// A step tree bigger than this is not a scan step (the raw recording's leg add trees).
-constexpr int scan_max_tree = 64;
+// A tree bigger than this is not a scan step (the raw recording's leg add trees): the tree of
+// a chain's second step contains the first step expanded, so two steps plus the initial value's
+// tree must fit (an interpolated compounding step on the raw recording is ~32 entries).
+constexpr int scan_max_tree = 256;
 
 // ---- shapes -----------------------------------------------------------------------------
 
@@ -114,18 +116,22 @@ struct Frame {
   bool swapped = false;
 };
 
-// A chain the scan detection found: members in step order, the initial value, the step hash.
+// A chain the scan detection found: members in step order, the initial value, the step hash
+// and the carry's position in the step (the operand path from the root, in recorded order).
 struct Chain {
   uint64_t hash = 0;
+  std::uint32_t path = 0;
   node_id init = invalid_node;
   std::vector<node_id> members;
 };
 
 // Thrown when a scan class cannot be laid out as one domain (its step reads a class that reads
-// the scan, or a row reads a later row after the chain-major reordering): infer() bans the
-// chains and runs the inference again, and the class is split by level as before (D23).
+// the scan, or a row reads a later row after the chain-major reordering): infer() bans every
+// node of its chains from any chain and runs the inference again, and the class is split by
+// level as before (D23).
 struct ScanRetry {
-  std::vector<node_id> first_nodes;
+  std::vector<node_id> nodes;
+  std::string reason;
 };
 
 class Inference {
@@ -504,10 +510,22 @@ void Inference::detect_chains() {
     return hash_entry(hash_entry, 0);
   };
 
-  // Per node: its cuts (target, step hash), kept for the chain-start test of later nodes.
+  // Per node: its cuts (target, step hash, the carry's operand path), kept for the chain-start
+  // test of later nodes. A link needs the same hash AND the same path: under a commutative op
+  // the cut at either operand hashes alike (a·x: the coefficient or the carry), and a chain
+  // must carry through the same position of the step at every step, which is also what makes
+  // the extraction of the steps identical.
   struct Cut {
     node_id target;
     uint64_t hash;
+    std::uint32_t path;
+  };
+  auto path_of = [&](size_t e) {
+    std::uint32_t key = 0;
+    for (std::int32_t a = static_cast<std::int32_t>(e); a > 0; a = tree[idx(a)].parent) {
+      key = key * 4u + static_cast<std::uint32_t>(tree[idx(a)].slot) + 1u;
+    }
+    return key;
   };
   std::vector<std::int32_t> cut_begin(n_ + 1, 0);
   std::vector<Cut> cuts;
@@ -520,6 +538,7 @@ void Inference::detect_chains() {
     const node_id root = static_cast<node_id>(i);
     if (is_const_[i] || nd.op == Op::Input || nd.op == Op::Affine) continue;
     if (nd.op == Op::Sum && !small_sum(root)) continue;
+    if (banned_.count(root) != 0) continue;  // a retried class's step: never a chain node again
     if (!build_tree(root)) continue;
     // Normal-rule hashes bottom-up (entries are in preorder, so children come after parents:
     // walk backwards).
@@ -546,28 +565,30 @@ void Inference::detect_chains() {
       const Op parent_op = nodes_[idx(tree[idx(t.parent)].id)].op;
       const bool inner_target = !is_const_[idx(target)] && !boundary_[idx(target)] && chain_of_[idx(target)] < 0;
       if ((parent_op == Op::Add || parent_op == Op::Sum) && inner_target) continue;
-      cuts.push_back({target, cut_hash(target)});
+      cuts.push_back({target, cut_hash(target), path_of(e)});
     }
     // Extend a chain whose tail this node cuts with the chain's step, else start one with a
     // node whose own cut has this step.
     for (std::int32_t c = cut_begin[i]; c < static_cast<std::int32_t>(cuts.size()); ++c) {
       const node_id m = cuts[idx(c)].target;
       const uint64_t h = cuts[idx(c)].hash;
+      const std::uint32_t path = cuts[idx(c)].path;
       const std::int32_t ch = chain_of_[idx(m)];
       if (ch >= 0) {
         Chain& chain = chains_[idx(ch)];
-        if (chain.hash != h || chain.members.back() != m) continue;
+        if (chain.hash != h || chain.path != path || chain.members.back() != m) continue;
         chain.members.push_back(root);
         chain_of_[i] = ch;
         pos_in_chain_[i] = static_cast<std::int32_t>(chain.members.size()) - 1;
         break;
       }
-      if (is_const_[idx(m)] || starts.count(m) != 0 || banned_.count(m) != 0) continue;
+      if (is_const_[idx(m)] || starts.count(m) != 0) continue;
       bool started = false;
       for (std::int32_t d = cut_begin[idx(m)]; d < cut_begin[idx(m) + 1]; ++d) {
-        if (cuts[idx(d)].hash != h) continue;
+        if (cuts[idx(d)].hash != h || cuts[idx(d)].path != path) continue;
         Chain chain;
         chain.hash = h;
+        chain.path = path;
         chain.init = cuts[idx(d)].target;
         chain.members = {m, root};
         chains_.push_back(std::move(chain));
@@ -924,37 +945,80 @@ void Inference::levels_and_domains() {
   for (size_t c = 0; c < n_classes; ++c) {
     if (scc_size[idx(scc_of_[c])] > 1 || (class_recurrent_[c] && !class_scan_[c])) scc_nontrivial_[idx(scc_of_[c])] = 1;
   }
-  {
-    // A scan class inside a cycle with other classes: its step depends on values that depend on
-    // earlier steps through another class; not one domain. Retry without its chains.
-    ScanRetry retry;
-    for (size_t c = 0; c < n_classes; ++c) {
-      if (!class_scan_[c] || scc_size[idx(scc_of_[c])] <= 1) continue;
-      for (node_id r : classes_[c].rows) {
-        if (pos_in_chain_[idx(r)] == 0) retry.first_nodes.push_back(r);
-      }
-    }
-    if (!retry.first_nodes.empty()) throw retry;
-  }
 
   // Levels: rows in tape order (every read is an earlier node, so one pass is exact); only
-  // reads inside the same non-trivial SCC count.
+  // reads inside the same non-trivial SCC count. A scan class is normally inside such an SCC
+  // (every Sum of a program is one class: the compounding steps read the 1 + r·τ sums, the leg
+  // sums read the coupons that read the steps), so it takes part in the split as a unit: its
+  // carry reads are not edges, and every step of a chain gets the chain's level — one more than
+  // the deepest read of any of its steps — so that the whole chain lands in one level-domain,
+  // evaluated after everything its steps read. Levels only rise, so the fixed point is reached
+  // in a few passes; a chain that reads itself through other classes (a step reading a value
+  // that depends on an earlier step of the same chain) never settles and its class is retried
+  // without chains (ScanRetry).
   level_of_.assign(n_, 0);
-  for (size_t i = 0; i < n_; ++i) {
-    const std::int32_t c = class_of_[i];
-    if (c < 0 || !scc_nontrivial_[idx(scc_of_[idx(c)])]) continue;
-    const Class& cl = classes_[idx(c)];
-    const size_t r = idx(row_of_[i]);
-    std::int32_t lvl = 0;
-    auto consider = [&](node_id target) {
-      if (scc_of_[idx(class_of_[idx(target)])] != scc_of_[idx(c)]) return;
-      lvl = std::max(lvl, level_of_[idx(target)] + 1);
-    };
-    for (std::int32_t k = 0; k < cl.n_ref; ++k) consider(cl.ref_nodes[r * idx(cl.n_ref) + idx(k)]);
-    if (!cl.seg_offsets.empty() && r + 1 < cl.seg_offsets.size()) {
-      for (std::int32_t m = cl.seg_offsets[r]; m < cl.seg_offsets[r + 1]; ++m) consider(cl.seg_members[idx(m)]);
+  auto propagate = [&]() {
+    bool changed = false;
+    for (size_t i = 0; i < n_; ++i) {
+      const std::int32_t c = class_of_[i];
+      if (c < 0 || !scc_nontrivial_[idx(scc_of_[idx(c)])]) continue;
+      const Class& cl = classes_[idx(c)];
+      const size_t r = idx(row_of_[i]);
+      std::int32_t lvl = level_of_[i];
+      auto consider = [&](node_id target) {
+        if (scc_of_[idx(class_of_[idx(target)])] != scc_of_[idx(c)]) return;
+        lvl = std::max(lvl, level_of_[idx(target)] + 1);
+      };
+      for (std::int32_t k = 0; k < cl.n_ref; ++k) {
+        const node_id target = cl.ref_nodes[r * idx(cl.n_ref) + idx(k)];
+        if (k == cl.carry_slot && class_of_[idx(target)] == c) continue;
+        consider(target);
+      }
+      if (!cl.seg_offsets.empty() && r + 1 < cl.seg_offsets.size()) {
+        for (std::int32_t m = cl.seg_offsets[r]; m < cl.seg_offsets[r + 1]; ++m) consider(cl.seg_members[idx(m)]);
+      }
+      if (lvl != level_of_[i]) {
+        level_of_[i] = lvl;
+        changed = true;
+      }
     }
-    level_of_[i] = lvl;
+    return changed;
+  };
+  auto unify_chains = [&]() {
+    bool changed = false;
+    for (const Chain& chain : chains_) {
+      const std::int32_t c = class_of_[idx(chain.members.front())];
+      if (c < 0 || !class_scan_[idx(c)] || !scc_nontrivial_[idx(scc_of_[idx(c)])]) continue;
+      std::int32_t top = 0;
+      for (node_id m : chain.members) top = std::max(top, level_of_[idx(m)]);
+      for (node_id m : chain.members) {
+        if (level_of_[idx(m)] != top) {
+          level_of_[idx(m)] = top;
+          changed = true;
+        }
+      }
+    }
+    return changed;
+  };
+  {
+    propagate();
+    size_t rounds = 0;
+    const size_t max_rounds = 8 + n_classes;
+    while (unify_chains()) {
+      if (++rounds > max_rounds || !propagate()) {
+        if (rounds > max_rounds) {
+          ScanRetry retry;
+          for (size_t c = 0; c < n_classes; ++c) {
+            if (!class_scan_[c] || !scc_nontrivial_[idx(scc_of_[c])]) continue;
+            for (node_id r : classes_[c].rows) retry.nodes.push_back(r);
+            retry.reason += " scan class " + std::to_string(c) + " (" + to_string(classes_[c].proto.back().op) + ", " +
+                            std::to_string(classes_[c].rows.size()) + " rows) reads itself through other classes;";
+          }
+          throw retry;
+        }
+        break;
+      }
+    }
   }
 
   // Domains in order of first appearance (tape order of their first row).
@@ -1227,9 +1291,9 @@ Program Inference::assemble() {
       sc.chain_offsets.push_back(static_cast<std::int32_t>(n_rows));
       if (!ok) {
         ScanRetry retry;
-        for (node_id r : rows) {
-          if (pos_in_chain_[idx(r)] == 0) retry.first_nodes.push_back(r);
-        }
+        retry.nodes.assign(rows.begin(), rows.end());
+        retry.reason = " scan class " + std::to_string(key.cls) + " (" + std::to_string(n_rows) +
+                       " rows) reads a row that is not earlier in the chain-major order;";
         throw retry;
       }
       dom.scan = static_cast<std::int32_t>(p.scans.size());
@@ -1300,15 +1364,20 @@ Program Inference::run(InferStats* stats) {
 
 Program infer(const Tape& tape, InferStats* stats) {
   std::unordered_set<node_id> banned;
+  std::string retries;
   for (int round = 0;; ++round) {
     Inference inf(tape, banned);
     try {
       Program p = inf.run(stats);
-      if (stats != nullptr) stats->scan_rounds = static_cast<size_t>(round) + 1;
+      if (stats != nullptr) {
+        stats->scan_rounds = static_cast<size_t>(round) + 1;
+        stats->scan_retries = retries;
+      }
       return p;
     } catch (const ScanRetry& retry) {
-      if (round >= 16) throw std::logic_error("ir::infer: scan detection did not settle in 16 rounds");
-      for (node_id n : retry.first_nodes) banned.insert(n);
+      if (round >= 16) throw std::logic_error("ir::infer: scan detection did not settle in 16 rounds; last reason:" + retry.reason);
+      retries += "round " + std::to_string(round) + ":" + retry.reason;
+      for (node_id n : retry.nodes) banned.insert(n);
     }
   }
 }

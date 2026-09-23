@@ -160,6 +160,14 @@ node_id Tape::constant(double value) {
   return id;
 }
 
+void Tape::set_input_value(int ordinal, double value) {
+  if (ordinal < 0 || static_cast<std::size_t>(ordinal) >= inputs_.size()) {
+    throw RecordError("tape: set_input_value: input ordinal " + std::to_string(ordinal) + " out of range (" +
+                      std::to_string(inputs_.size()) + " inputs)");
+  }
+  nodes_[static_cast<std::size_t>(inputs_[static_cast<std::size_t>(ordinal)])].konst = value;
+}
+
 node_id Tape::unary(Op op, node_id a) {
   if (op_arity(op) != 1) throw RecordError(std::string("tape: ") + to_string(op) + " is not unary");
   if (a < 0 || static_cast<std::size_t>(a) >= nodes_.size()) bad_operand("unary", a, nodes_.size());

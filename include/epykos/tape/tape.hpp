@@ -94,6 +94,11 @@ class Tape {
   node_id input(double value);
   // The Const node for this bit pattern, created on first use (+0.0 and -0.0 are distinct).
   node_id constant(double value);
+  // Sets the record-point value of input `ordinal` (Node::konst, what input_values() reports).
+  // The solver layer writes an implicit node's solution here after its record-time solve, so the
+  // record point of a tape with implicit nodes is the calibrated one. Throws RecordError for a
+  // bad ordinal.
+  void set_input_value(int ordinal, double value);
 
   // ---- nodes (low-level; the Rec operators are the normal way) ---------------------------
   node_id unary(Op op, node_id a);

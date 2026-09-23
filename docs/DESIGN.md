@@ -182,7 +182,11 @@ exceeds a threshold, never on the bit alone.
 
 Adjoints (§3 rules applied group by group in reverse): scatter-add is replaced by a **pull** through the precomputed
 transpose of each index array (CSR "who reads me"), so adjoint groups are conflict-free gathers and vectorise. At the
-`Times` boundary `linmapᵀ` gives `−(G·diag(DF))·W` — the analytic calibration Jacobian, derived.
+`Times` boundary `linmapᵀ` gives `−(G·diag(DF))·W` — the analytic calibration Jacobian, derived. As implemented
+(M2/Q3, D31; `adjoint::Adjoint` over the domain IR, the interpreter's batch layout): the forward pass materialises
+every row value, the reverse recomputes a group's intermediate steps per tile and reads its value from the buffer,
+every (gather, row) and (segment, row) is an edge slot the reading group's reverse accumulates into, and a domain
+pulls its rows' adjoints from those slots in one fixed order (seeds, gathers, Sum members, Affine members × coefficient).
 
 ---
 
@@ -227,7 +231,7 @@ transpose of each index array (CSR "who reads me"), so adjoint groups are confli
 Correctness gates:
 - **round-trip identity** of domain IR vs recording (§5.7);
 - **differential**: compiled vs templated-`double` at randomised state in a ball around the record point (E0 exact under
-  `-ffp-contract=off`, else E1 tolerance: D26's bound at the scale of the terms, D30; `verify/differential.hpp`,
+  `-ffp-contract=off`, else E1 tolerance: D26's bound at the scale of the terms, D31; `verify/differential.hpp`,
   M2/Q1); this also catches missed branches;
 - **adjoint** vs central finite difference and vs forward mode;
 - **mutation testing** on rewrite rules (a mutated rule must fail a gate);

@@ -9,7 +9,7 @@
 // Layout (D15, shared with exec::Interpreter): batch axis innermost everywhere. state[k·B + b]
 // and state_bar[k·B + b] per input ordinal k; out[o·B + b] and out_bar[o·B + b] per output
 // ordinal o. B is split into chunks of at most `lane_tile` lanes; for each chunk the forward pass
-// stores every row value at values[v·L + l] (L = lanes in the chunk, D29: row values kept,
+// stores every row value at values[v·L + l] (L = lanes in the chunk, D31: row values kept,
 // intermediate steps recomputed per tile in the reverse) and writes the outputs, then the
 // reverse walks the domains backwards: pull the domain's v̄ from the edge slots of its readers
 // (plan.hpp), then reverse the group in tiles of `tile` rows — recompute the intermediate steps,

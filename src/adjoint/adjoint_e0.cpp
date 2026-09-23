@@ -527,8 +527,9 @@ void Adjoint::run(const double* state, int B, const double* out_bar, double* out
     throw std::invalid_argument("adjoint: B must be in [1, max_batch] (" + std::to_string(B) + " vs " +
                                 std::to_string(im.opt.max_batch) + ")");
   }
-  // The buffers are the object's own scratch: run() is const in the interface sense only.
-  Impl& m = const_cast<Impl&>(im);
+  // The buffers are the object's own scratch (run() is const in the interface sense only); the
+  // Impl behind the unique_ptr is never a const object.
+  Impl& m = *impl_;
   Ctx c;
   c.p = im.p;
   c.plan = &im.plan;

@@ -23,7 +23,7 @@
 // table: on a curve that is the calibration Jacobian shape Wᵀ (DESIGN.md §7). The Input domain's
 // v̄ is the state adjoint. A recurrent domain (rows reading rows of the same domain) is refused.
 //
-// Materialisation (D29): the forward pass stores every row value (the last step of every group,
+// Materialisation (D31): the forward pass stores every row value (the last step of every group,
 // the same value buffer layout as exec::Interpreter, batch innermost). Intermediate steps of a
 // group are not stored: the reverse recomputes steps 0 .. last-1 of a tile from the stored
 // operands (gathers of earlier domains, columns, literals) and reads the last step from the

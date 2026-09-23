@@ -291,3 +291,38 @@ under the reference preset it is bitwise and asserts so. A bound of a few ulps o
 kernel that reproduces the reference's operations, which the E0 gate asserts bitwise under every preset
 (`tests/verify/m1_differential_e0_test.cpp`, B = 1 and B = 64, plus the tape replay); M3's E1 rewrites use the
 tolerance each rewrite declares (D8), with `ulps` and `rel` both available and the scale chosen per output.
+
+## D31 — Adjoint: row values kept, intermediates recomputed, pulls in a fixed order (2026-09-23)
+Implements DESIGN.md §7 "Adjoints" (M2/Q3, `include/epykos/adjoint/`, `src/adjoint/`). Three choices:
+1. **What the reverse pass keeps.** The forward pass stores every *row value* (the last step of every group, all
+   domains, batch innermost in one value buffer — the interpreter's layout, but with nothing fused away) and nothing
+   else. The reverse of a group recomputes its intermediate steps 0 .. last−1 per tile from the stored operands
+   (gathers of earlier domains, columns, literals) and reads the group's own value from the buffer, so a group whose
+   value is an `exp` / `log` / `sqrt` (every M1 exp: `exp(mul(neg(@),$))`) never recomputes the libm call; only the
+   arithmetic before it is recomputed, with the forward's bits. Storing every step instead would cost
+   `max_steps × rows × L` doubles (4–6× the value buffer on M1) written in the forward and read back cold in the
+   reverse; recomputing costs one extra pass of cheap arithmetic over operands that the reverse loads anyway for the
+   local rules. Not a checkpointing scheme: at MC scale (M6) this changes.
+2. **No scatter.** Every (gather, row) and every (segment, row) has an *edge slot*; the reverse of the reading group
+   accumulates the operand's adjoint into the slot, and a value's adjoint is later pulled by its own domain as the
+   sum over the "who reads me" CSR built once per Program: output seeds (ordinal order), gather slots (gathers in
+   Program order, rows ascending), Sum member slots (segments in Program order, rows, members), Affine member slots
+   times the member's coefficient — left to right from +0.0. An Affine's reader list is its coefficient table
+   transposed: `Wᵀ`, the calibration Jacobian shape, derived. Within a group: steps from the last to the first,
+   operands in the order a, b, c, each `+=` into the target's running sum (an earlier step's adjoint or an edge slot).
+   The local rules, as evaluated: add `ā += ȳ; b̄ += ȳ`; sub `ā += ȳ; b̄ −= ȳ`; mul `ā += ȳ·b; b̄ += ȳ·a`;
+   div `t = ȳ/b; ā += t; b̄ −= t·y`; neg `ā −= ȳ`; exp `ā += ȳ·y`; log `ā += ȳ/a`; sqrt `ā += (0.5·ȳ)/y`;
+   recip `ā −= (ȳ·y)·y`; fma `ā += ȳ·b; b̄ += ȳ·a; c̄ += ȳ`; select `b̄ += a ? ȳ : 0; c̄ += a ? 0 : ȳ` (the
+   predicate and the comparisons receive nothing); Sum / Affine store `ȳ` in the row's segment slot and the members
+   pull it (Affine: times the coefficient); Input writes `state_bar[ordinal]`. These orders need not match any other
+   implementation (the forward-mode and FD checks are tolerance gates) but are fixed, so the adjoint is deterministic.
+3. **Bits are independent of B, tile and lane_tile by construction**, and the kernel TU is `src/adjoint/adjoint_e0.cpp`
+   (the D25 pin), so the E0 gates — forward bitwise vs the replay / oracle / interpreter, B = 64 lane for lane the 64
+   B = 1 runs (outputs and state adjoints), every tile in {1, 7, 128, 256, 512, 4096} × lane tile in {1, 3, 4, 8, 16,
+   32, 64}, odd B — hold under the release preset as well as the reference one. Every loop is per (row, lane): no
+   cross-lane or cross-row reduction, and the pull of a row does not see tile boundaries.
+Measured on the M1 book (tests/adjoint/): d(book)/dz vs central FD (h = 1e-6) of `price_book<double>` at the record
+point and 8 M2-ball states within 2.9e-9 relative (worst component; gate 1e-6 with floor 1e-9); the 50 swaps of
+sub-stream 300000 at 3 states within 1.7e-8 (one lane per swap, out_bar = e_i); linearity 1.3e-14 (gate 1e-13);
+zero allocations in run(). Adjoint-vs-Dual (1e-12) lands with Q2. Buffers at lane tile 8: values + adjoints 5.4 MB,
+edge slots 3.9 MB (56,937 gather + 4,500 segment slots), tables 1.1 MB.

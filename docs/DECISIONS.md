@@ -231,3 +231,37 @@ uses it, and its test moves with it to `tests/maths/`; `hand/m1_hand_kernel.hpp`
 hand kernel's E0 mode is still bitwise the contraction-free oracle on both compilers. Evidence: 24/24 ctest under
 the release and the reference preset before and after (the same executables; `hand_exp_poly_test` is now
 `maths_exp_poly_test`), every E0 gate bitwise, the benchmarks build and run, `bench/results/` untouched.
+
+## D29 — Benchmark results format, baselines and the performance gate; Python for scripts (2026-09-23)
+Implements DESIGN.md §11's performance gate (M2/Q5) and turns D9/D13's "per fingerprint, never across" into tooling.
+(1) **Results.** Every benchmark run is written by `bench/run.sh <binary> [args]` as
+`bench/results/<fingerprint-id>/<name>.json` (format `epykos-bench 1`, defined in `scripts/bench_results.py`): the
+fingerprint, the 1-minute load before and after, git commit and branch, preset, the `EPYKOS_*` environment, each
+benchmark's parameters (tile, lane_tile, exp, B, ...) and min / median / p90 / max / mean over the Google Benchmark
+repetitions with the raw repetition times — the M1/P6 definitions (p90 nearest rank; statistics of repetition means,
+`WORKLOADS.md` "Terms"). The raw Google Benchmark output stays in `tmp/` (gitignored). `run.sh` refuses to run (exit
+2) when the 1-minute load exceeds cores/2 (logical). Its default protocol is the M1 one (20 repetitions x 0.2 s); the
+>= 200 timed evaluations WORKLOADS asks for remain owed and are one `--repetitions` away.
+(2) **Baseline.** `bench/results/<id>/baseline.json` (format `epykos-baseline 1`) holds the accepted median per
+benchmark for that fingerprint, changed only by `scripts/perf_gate.py --accept` in a perf commit whose message states
+before/after. Seeded for d448afd70180 from the M1 result (D27: P6 attempt 5, engine b32182a): the raw files P6
+committed are converted into the run format (`hand_m1_hand.json`, `exec_m1_interp.json`, marked `migrated_from`,
+statistics identical to `m1.json`); the M1 evidence files stay as they are. The hand kernel's rows are in the
+baseline too, so a change in the gate's denominator is caught as well.
+(3) **Gate.** `scripts/perf_gate.py RUN...` compares fresh runs with the baseline of the same fingerprint only: a
+median above 1.25x its baseline fails (exit 1), below 0.8x is reported as faster, new and unmeasured benchmarks are
+reported; the absolute targets of `bench/targets.json` (`ROADMAP.md`: M1 <= 1.3x / 1.1x the hand kernel under the
+D27 pairing, M3 <= 1.05x, M5 < 1 s; the M3/M5 run and benchmark names are provisional until those benches land)
+are checked whenever every side is measured on the fingerprint — a run given on the command line, else the
+committed `<run>.json` of the directory, which must pass the load rule too — and a miss fails (exit 1). The gate
+refuses (exit 2) a run whose load before or after the measurement exceeded cores/2, runs or a baseline of another
+fingerprint, a run without a baseline entry, and malformed input. Reference kernels remain informational rows (D9):
+the hand kernel enters the gate only as the denominator of the ROADMAP ratios.
+(4) **Python.** Tooling under `scripts/` may be Python 3 standard library (3.8+; this is the decision entry the
+CLAUDE.md rule requires): `scripts/bench_results.py`, `scripts/perf_gate.py`; `bench/run.sh` stays bash and calls
+them. No third-party Python, no Python in the engine, tests or benches. `bench/results/m1_summarise.py` (M1/P6)
+predates this entry and stays as the generator of the M1 evidence tables.
+Tests: `tests/scripts/perf_gate_test.cpp` (ctest `scripts_perf_gate_test`) drives the scripts on synthetic JSON —
+regression detected, cross-fingerprint refused, load refused, `--accept` seeding and updating, ratio and time targets
+including a committed denominator, the summariser's statistics and name parsing, and `run.sh` end to end on the
+scaffold benchmark — and skips only when no `python3` is on the PATH.

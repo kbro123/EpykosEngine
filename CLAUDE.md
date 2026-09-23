@@ -8,8 +8,10 @@ A financial computation engine that records pricing maths written once (template
 domain-typed array program executed by pre-compiled fused kernels, with mechanically derived adjoints. **No JIT.**
 
 ## Status
-M0 design complete. M1–M5 in progress on branch `integrate/m1-m5` (see `docs/RESUME.md`). Nothing merges to `main`
-without the owner.
+M0 design complete. **M1 (kill test) passed 2026-09-23**: verdict go — the tiled interpreter at 1.044× the hand-fused
+kernel single-state and 1.079× batched on fingerprint d448afd70180, libm `std::exp` on both sides (D27; `docs/RESUME.md`
+§5 "M1 result"). M2–M5 in progress on branch `integrate/m1-m5` (see `docs/RESUME.md`). Nothing merges to `main` without
+the owner.
 
 ## Rules
 - **Decisions are in `docs/DECISIONS.md`.** Changing one means appending a new entry that supersedes it, in the same

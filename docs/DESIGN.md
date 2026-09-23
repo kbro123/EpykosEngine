@@ -1,7 +1,10 @@
 # EpykosEngine — Design
 
-Status: **design only** (M0). Nothing here is built yet. Numbers quoted as *measured* come from the SwapEngine research
-branch `research/aad-graph-kernels` and SwapEngine's gated baselines (see `PRIOR_ART.md`); everything else is a target.
+Status: M0 design; **M1 (kill test) built and passed 2026-09-23** — the recorder, tape passes, signature pass, domain IR,
+tiled interpreter and hand-fused reference exist, and the interpreter is within 1.044× / 1.079× (single-state / batched)
+of the hand kernel (`ROADMAP.md` §M1 result, D27); M2–M5 in progress. Numbers quoted as *measured* without a fingerprint
+come from the SwapEngine research branch `research/aad-graph-kernels` and SwapEngine's gated baselines (see
+`PRIOR_ART.md`); M1's own measurements are in `bench/results/d448afd70180/` and `RESUME.md` §5; everything else is a target.
 
 ---
 
@@ -103,7 +106,9 @@ removes Newton 2-cycles at kinks (see `PRIOR_ART.md`, desk_mixed).
 
 ## 4. Recording
 
-- **`Rec`** is an operator-overloading scalar: `{double v; int id}`, plus an Eigen `NumTraits` specialisation.
+- **`Rec`** is an operator-overloading scalar: `{double v; node_id id; tape_serial tape}` (D14, D24) — it carries the serial
+  of the tape it was recorded on, and using it on another tape, or after a pass or `clear()`, throws `RecordError` — plus an
+  Eigen `NumTraits` specialisation.
 - **Constants are leaves.** `0.25*y` records `mul(const#17, y)`. Eager constant folding into op immediates is forbidden:
   it makes every coupon unique and defeats domain inference. Folding of *uniform* columns happens later, in §6.
 - **No implicit conversion to `double`.** Comparisons return `RecBool`, which does not convert to `bool`, so
@@ -126,8 +131,11 @@ removes Newton 2-cycles at kinks (see `PRIOR_ART.md`, desk_mixed).
 4. Partition by signature: domain = class; rows = instances; constant slots = columns; operands in another domain =
    gather indices; `SUM` children = segment offsets.
 5. Column classification: identical across instances → literal (folded); varying → data column.
-6. **Recurrence detection:** if instances of one class depend on each other, the domain is a `scan` (sequential along
-   the chain; parallel only across the batch axis).
+6. **Recurrence detection:** if instances of one class depend on each other, the class is a `scan` candidate (sequential
+   along the chain; parallel only across the batch axis). As implemented (D23): the class is flagged `scan_class`, its
+   instances are split by dependency level so every domain reads only earlier domains, and `recurrent` (a domain whose
+   rows read that same domain, which the interpreter refuses) is never produced by inference; M1 asserts no scan class
+   on its book.
 7. **Round-trip check:** expand the domain IR back to a scalar tape and compare node-for-node with the recording.
    Identity, not tolerance.
 
@@ -143,7 +151,8 @@ Across recordings the signature → domain map persists: a new trade of a known 
 
 ## 6. Fusion rewrites
 
-Applied in order. Each has an **exactness class**: *E0* bit-identical, *E1* ≤ 1 ulp per op (tolerance-gated).
+Applied in order. Each has an **exactness class**: *E0* bit-identical, *E1* ≤ 1 ulp per op (tolerance-gated; for a value
+that is a difference of terms, such as a swap PV, the tolerance is relative to the scale of the terms, D26).
 
 | # | rule | class | recovers (in SwapEngine terms) |
 |---|---|---|---|
@@ -165,8 +174,9 @@ exceeds a threshold, never on the bit alone.
 
 1. **Catalogue.** Each fused group has a canonical signature. A build-time tool runs the reference workloads, collects hot
    signatures, emits C++, and compiles it into the engine. AOT code generation, not a JIT.
-2. **Tiled interpreter.** For uncatalogued groups: run the group's ops one at a time over a tile (~256 elements) with
-   intermediates in an L1 scratch — dispatch per op per tile, not per element (the X100/DuckDB model).
+2. **Tiled interpreter.** For uncatalogued groups: run the group's ops one at a time over a tile (~256 elements; M1
+   measured 512 best single-state and flat across 128–512 at 32 lanes batched) with intermediates in an L1 scratch —
+   dispatch per op per tile, not per element (the X100/DuckDB model).
 3. **Batch mode.** Batch axis innermost on every domain; each element is a SIMD vector of scenarios, so the interpreter's
    dispatch amortises over the batch as well as the tile.
 
@@ -203,8 +213,9 @@ transpose of each index array (CSR "who reads me"), so adjoint groups are confli
 
 ## 10. Numerics and determinism
 
-- FMA contraction changes bits. Reference TUs used for bit-identity gates build with `-ffp-contract=off`; production builds
-  may contract, and gates then use E1 tolerances.
+- FMA contraction changes bits. Reference TUs used for bit-identity gates build with `-ffp-contract=off`, pinned by name
+  (`src/**/*_e0.cpp`, `tests/**/*_e0_test.cpp`) in every preset on every compiler (D25: a clang pragma is not enough, GCC
+  contracts in ISO C++ mode); production builds may contract, and gates then use E1 tolerances.
 - Every rewrite declares its exactness class; the verifier applies the matching tolerance.
 - `select` evaluates both arms: arms must be NaN-safe (safe-arm discipline; e.g. `m/|m|` → `copysign`).
 - No `-ffast-math`.
@@ -234,7 +245,10 @@ Reference implementations (QuantLib, hand-fused kernels) are informational table
 - **Brownfield**: requires `Scalar`-templated maths; cannot accelerate an existing OO library.
 - **Compiler risk**: bugs are wrong numbers, not crashes. The verification harness precedes the compiler.
 - **Linear-path parity**: the generic path must match a hand-fused kernel; the scalar tape measured 1.5–2.5× behind. M1
-  exists to settle this.
+  settled this on the linear book (2026-09-23, d448afd70180): 1.044× single-state and 1.079× batched with `std::exp` on
+  both sides, after three tile/layout iterations (reduction fusion, fused step pairs, exp tails + inlined producers);
+  E1-vs-E1 against the hand kernel's polynomial exp it is 1.240× batched, the residual being E0 arithmetic (two IEEE
+  divisions per forward, three-rounding coupons) that R4b and fma contraction address in M3.
 - **Adjoint MC at scale** (checkpointing, per-thread accumulators) is unbuilt.
 
 ## 13. Non-goals

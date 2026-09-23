@@ -23,6 +23,7 @@ Build the minimum to answer the one question that decides the architecture. Fixt
 **Go:** interpreter within **1.3×** of the hand-fused kernel single-state, within **1.1×** batched.
 **Kill / redesign:** > 2× single-state ⇒ rethink tile size and intermediate layout before anything else (at most
 three iterations, each recorded); if still > 2×, the catalogue carries the design and M3 moves ahead of M2 (D18).
+**Result (2026-09-23): go.** On fingerprint `d448afd70180` (Xeon W-3223, 8 cores / 16 threads, Apple clang 21, `-O3 -march=x86-64-v3 -fno-math-errno`, load 2.4/16) the interpreter is **1.044×** the hand-fused kernel single-state (56.60 vs 54.23 µs, ≤ 1.3) and **1.079×** batched (1584.0 vs 1467.7 µs per 64 states at tile 256 / lane tile 32, ≤ 1.1), libm `std::exp` on both sides (D27; E1-vs-E1 with the hand kernel's polynomial exp 1.077 / 1.240, informational), after three kill-path iterations (1.291 / 1.905 → 1.207 / 1.340 → 1.101 / 1.126 → 1.047 / 1.075, re-measured 1.044 / 1.079 at b32182a, the first commit with green CI); round-trip identity and the E0 / E1 gates pass under the reference preset; `docs/RESUME.md` §5 "M1 result", `bench/results/d448afd70180/README.md`.
 
 ## M2 — Verification harness and adjoints
 Fixture: `WORKLOADS.md` §M2.

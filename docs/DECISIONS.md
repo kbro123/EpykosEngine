@@ -193,3 +193,19 @@ well-conditioned states and 1.46e-12 over all 65 (7 states have `|book| < 1e-2·
 6.15e-13, per-row-division variant 2.4e-13 / 8.1e-13. Read literally, "E1 vs P1 double (≤ 1e-12)" is therefore
 violated at those states; the RESUME M1 table now states the scaled gate. If the owner wants the literal bound, P5
 is failed at those states and the hand kernel's fused arithmetic would need the oracle's operation order there.
+
+## D27 — The M1 gate pairing and verdict (2026-09-23)
+Refines D9 and closes the question the M1/P7 review left open (`bench/results/d448afd70180/README.md`, "Read first").
+`ROADMAP.md` §M1 names no hand-kernel variant or exp implementation. The M1 go criterion is read like for like: the
+interpreter in its gated E0 mode (scalar libm `std::exp`) against the hand-fused kernel using the same scalar libm
+`std::exp` (variant 2: fused, shared reciprocal, `std::exp`), so that the ratio measures the generic program's
+arithmetic and data movement and not the choice of exp implementation, which both sides can change identically (a
+cross-lane exp is an M3 catalogue decision, E1). Under this pairing M1 passes on d448afd70180: 1.044 single-state
+(≤ 1.3) and 1.079 batched (≤ 1.1), measured at b32182a (P6 attempt 5, results 097d54b). The other pairings stay as
+informational rows in every M1 result (D9): E1 vs E1 (interpreter exp_poly vs the hand default variant 0) 1.077 /
+1.240, the batched row outside 1.1 — the gap is the E0 arithmetic the hand kernel replaces in E1 (two IEEE divisions
+per forward element vs one shared reciprocal, three-rounding coupons vs gather → fma → segment_sum) and is M3's R4b and
+fma-contraction work, each with its E1 differential test; gated E0 vs the hand default 1.219 / 2.235; vs the hand
+reference-arithmetic variant 3 (the interpreter's own operation order) 0.859 / 0.705. Verdict: **go**, recorded by the
+orchestrator at M1 close; M2 starts (D18). The owner may supersede this entry; if the E1-vs-E1 pairing is preferred,
+M1's batched criterion is not met and the kill path's remaining option is M3 before M2.

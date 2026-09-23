@@ -118,15 +118,15 @@ LoadAccKernel load_acc_kernel(int v, Kind k, bool affine, bool ind) { EPYKOS_EXE
 OpKernel pair_kernel(int v, Op op, PK ka, PK kb, Op op2, PK kc, bool pr, bool ind) { EPYKOS_EXEC_DISPATCH(v, pair(op, ka, kb, op2, kc, pr, ind)) }
 AccKernel pair_acc_kernel(int v, Op op, PK ka, PK kb, Op op2, PK kc, bool pr, bool affine) { EPYKOS_EXEC_DISPATCH(v, pair_acc(op, ka, kb, op2, kc, pr, affine)) }
 
-void copy_out(int v, const double* values, const std::int32_t* outputs, int n_out, double* out, int B, int b0, int L) {
+void copy_out(int v, const double* values, const std::int32_t* ids, const std::int32_t* ords, int n_out, double* out, int B, int b0, int L) {
   switch (v) {
-    case 0: return KernelTable<0>::copy_out(values, outputs, n_out, out, B, b0, L);
-    case 1: return KernelTable<1>::copy_out(values, outputs, n_out, out, B, b0, L);
-    case 2: return KernelTable<4>::copy_out(values, outputs, n_out, out, B, b0, L);
-    case 3: return KernelTable<8>::copy_out(values, outputs, n_out, out, B, b0, L);
-    case 4: return KernelTable<16>::copy_out(values, outputs, n_out, out, B, b0, L);
-    case 5: return KernelTable<32>::copy_out(values, outputs, n_out, out, B, b0, L);
-    case 6: return KernelTable<64>::copy_out(values, outputs, n_out, out, B, b0, L);
+    case 0: return KernelTable<0>::copy_out(values, ids, ords, n_out, out, B, b0, L);
+    case 1: return KernelTable<1>::copy_out(values, ids, ords, n_out, out, B, b0, L);
+    case 2: return KernelTable<4>::copy_out(values, ids, ords, n_out, out, B, b0, L);
+    case 3: return KernelTable<8>::copy_out(values, ids, ords, n_out, out, B, b0, L);
+    case 4: return KernelTable<16>::copy_out(values, ids, ords, n_out, out, B, b0, L);
+    case 5: return KernelTable<32>::copy_out(values, ids, ords, n_out, out, B, b0, L);
+    case 6: return KernelTable<64>::copy_out(values, ids, ords, n_out, out, B, b0, L);
     default: return;
   }
 }
@@ -165,6 +165,15 @@ constexpr double fuse_max_kept_fraction = 0.5;
 // row it is materialised instead.
 constexpr double inline_max_refs_per_row = 1.25;
 
+// Output rows of a fused producer are emitted from the reduction blocks (rather than kept and
+// copied from the value buffer) only when the region they would otherwise occupy, rows × lanes
+// × 8 bytes, is at least this large: below it the region stays cache-resident and the member
+// buffer path's extra kernel calls (one per producer run) cost more than the write it avoids;
+// above it the write goes to lines evicted since the previous run (measured: 969 swap PVs at
+// 32 lanes, 248 KB, 49 us as a pass + 31 us to copy vs 17 us less in all emitted; at 1 lane,
+// 7.7 KB, emitting cost 0.9 us more).
+constexpr std::size_t emit_min_bytes = std::size_t{64} << 10;
+
 }  // namespace
 
 struct Interpreter::Impl {
@@ -181,6 +190,8 @@ struct Interpreter::Impl {
   std::vector<GroupPlan> groups;
   std::vector<char> fused;              // per domain: evaluated inside its consumers' reductions
   std::vector<std::vector<std::int32_t>> keep_rows;  // per fused domain: rows materialised anyway
+  std::vector<char> emitted;            // per value: an output written by the reduction block that computes it
+  std::vector<std::int32_t> late_ids, late_ords;   // outputs copied from the value buffer after each chunk
   std::vector<std::int32_t> inlined_into;   // per domain: the consumer whose tiles evaluate it, or -1
   struct InlineRef { std::size_t gather; std::int32_t producer; };
   std::vector<std::vector<InlineRef>> inline_refs;   // per consumer: its inlined gathers
@@ -236,45 +247,70 @@ Operand Interpreter::Impl::resolve(const ir::Slot& s) const {
 // elementwise group (not itself a whole-domain reduction), non-recurrent, with rows, read as
 // members of whole-domain Sum / Affine groups with at most fuse_max_refs_per_row member
 // references per row, and with at most fuse_max_kept_fraction of its rows read any other way
-// (gather, output, per-row Sum / Affine) — those rows are kept: evaluated separately and
-// written to the value buffer. A structure-only decision; the arithmetic is the same either way.
+// (gather, per-row Sum / Affine, or an output that is not such a member) — those rows are kept:
+// evaluated separately and written to the value buffer. An output row that is a member is not
+// kept when the domain's region is at least emit_min_bytes: the reduction block that computes
+// it writes it to `out` (emitted). On the M1 book at 32 lanes the swap PVs (969 + 31 rows, all
+// outputs, members of the book sum) are emitted from the book sum's blocks and never occupy
+// the value buffer; at 1 lane they are a pass and a copy as before. A structure-only decision;
+// the arithmetic is the same either way.
 void Interpreter::Impl::decide_fusion() {
   const ir::Program& prog = *p;
   const std::size_t nd = prog.domains.size();
+  const std::size_t nv = prog.num_values();
   fused.assign(nd, 0);
   keep_rows.assign(nd, {});
-  if (!opt.fuse_reductions) return;
-  std::vector<char> marked(prog.num_values(), 0);   // value read other than as a whole-domain member
-  std::vector<std::size_t> member_refs(nd, 0);
-  auto dom_of = [&](ir::value_id v) { return static_cast<std::size_t>(prog.domain_of(v)); };
-  for (const ir::Gather& g : prog.gathers) {
-    for (ir::value_id v : g.index) marked[static_cast<std::size_t>(v)] = 1;
-  }
-  for (ir::value_id v : prog.outputs) marked[static_cast<std::size_t>(v)] = 1;
-  for (const ir::Segment& seg : prog.segments) {
-    const bool whole = is_whole_segment(prog.groups[static_cast<std::size_t>(seg.domain)]);
-    for (ir::value_id v : seg.members) {
-      if (whole) {
-        ++member_refs[dom_of(v)];
-      } else {
-        marked[static_cast<std::size_t>(v)] = 1;
+  emitted.assign(nv, 0);
+  std::vector<char> is_output(nv, 0);
+  for (ir::value_id v : prog.outputs) is_output[static_cast<std::size_t>(v)] = 1;
+  if (opt.fuse_reductions) {
+    std::vector<char> marked(nv, 0);         // value read by a gather or a per-row Sum / Affine
+    std::vector<char> whole_member(nv, 0);   // value is a member of a whole-domain reduction
+    std::vector<std::size_t> member_refs(nd, 0);
+    auto dom_of = [&](ir::value_id v) { return static_cast<std::size_t>(prog.domain_of(v)); };
+    for (const ir::Gather& g : prog.gathers) {
+      for (ir::value_id v : g.index) marked[static_cast<std::size_t>(v)] = 1;
+    }
+    for (const ir::Segment& seg : prog.segments) {
+      const bool whole = is_whole_segment(prog.groups[static_cast<std::size_t>(seg.domain)]);
+      for (ir::value_id v : seg.members) {
+        if (whole) {
+          ++member_refs[dom_of(v)];
+          whole_member[static_cast<std::size_t>(v)] = 1;
+        } else {
+          marked[static_cast<std::size_t>(v)] = 1;
+        }
       }
     }
-  }
-  for (std::size_t d = 0; d < nd; ++d) {
-    const ir::Domain& dom = prog.domains[d];
-    if (dom.recurrent || dom.rows < 1 || member_refs[d] == 0) continue;
-    if (is_whole_segment(prog.groups[d])) continue;
-    if (static_cast<double>(member_refs[d]) > fuse_max_refs_per_row * static_cast<double>(dom.rows)) continue;
-    std::vector<std::int32_t> keep;
-    for (std::int32_t r = 0; r < dom.rows; ++r) {
-      if (marked[static_cast<std::size_t>(dom.value_base + r)]) keep.push_back(r);
+    for (std::size_t d = 0; d < nd; ++d) {
+      const ir::Domain& dom = prog.domains[d];
+      if (dom.recurrent || dom.rows < 1 || member_refs[d] == 0) continue;
+      if (is_whole_segment(prog.groups[d])) continue;
+      if (static_cast<double>(member_refs[d]) > fuse_max_refs_per_row * static_cast<double>(dom.rows)) continue;
+      const bool emit_ok = static_cast<std::size_t>(dom.rows) * static_cast<std::size_t>(Lt) * sizeof(double) >= emit_min_bytes;
+      std::vector<std::int32_t> keep;
+      for (std::int32_t r = 0; r < dom.rows; ++r) {
+        const std::size_t v = static_cast<std::size_t>(dom.value_base + r);
+        if (marked[v] || (is_output[v] && !(emit_ok && whole_member[v]))) keep.push_back(r);
+      }
+      if (static_cast<double>(keep.size()) > fuse_max_kept_fraction * static_cast<double>(dom.rows)) continue;
+      fused[d] = 1;
+      fused_values += static_cast<std::size_t>(dom.rows) - keep.size();
+      for (std::int32_t r = 0; r < dom.rows; ++r) {
+        const std::size_t v = static_cast<std::size_t>(dom.value_base + r);
+        if (is_output[v] && emit_ok && whole_member[v] && !marked[v]) emitted[v] = 1;
+      }
+      keep_rows[d] = std::move(keep);
     }
-    if (static_cast<double>(keep.size()) > fuse_max_kept_fraction * static_cast<double>(dom.rows)) continue;
-    fused[d] = 1;
-    fused_values += static_cast<std::size_t>(dom.rows) - keep.size();
-    keep_rows[d] = std::move(keep);
   }
+  // The outputs still copied from the value buffer after each chunk.
+  for (std::size_t o = 0; o < prog.outputs.size(); ++o) {
+    const ir::value_id v = prog.outputs[o];
+    if (emitted[static_cast<std::size_t>(v)]) continue;
+    late_ids.push_back(v);
+    late_ords.push_back(static_cast<std::int32_t>(o));
+  }
+  table_bytes += (late_ids.size() + late_ords.size()) * sizeof(std::int32_t);
 }
 
 // Which domains are evaluated per tile of the one elementwise domain that gathers them
@@ -529,7 +565,10 @@ void Interpreter::Impl::build_segment(std::int32_t consumer, const ir::Segment& 
     for (const StepPlan& s : g.steps) {
       if (s.op == Op::Sum || s.op == Op::Affine) fp.block_mode = false;
     }
-    if (!fp.block_mode) continue;
+    if (!fp.block_mode) {
+      fp.has_outputs = g.emitted > 0;
+      continue;
+    }
     const std::size_t total = static_cast<std::size_t>(count[pi]);
     std::vector<std::int32_t> rowsP(total);
     for (const SegBlock& blk : sp.blocks) {
@@ -542,6 +581,12 @@ void Interpreter::Impl::build_segment(std::int32_t consumer, const ir::Segment& 
       }
     }
     fp.steps = g.steps;
+    for (std::size_t m = 0; m < total; ++m) fp.has_outputs |= g.emit_ordinal[static_cast<std::size_t>(rowsP[m])] >= 0;
+    if (fp.has_outputs) {
+      fp.out_ordinal.resize(total);
+      for (std::size_t m = 0; m < total; ++m) fp.out_ordinal[m] = g.emit_ordinal[static_cast<std::size_t>(rowsP[m])];
+      table_bytes += total * sizeof(std::int32_t);
+    }
     std::size_t n_cols = 0, n_gats = 0;
     auto count_kind = [&](const Operand& o) {
       n_cols += o.kind == Kind::Col ? 1 : 0;
@@ -840,6 +885,17 @@ void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
   g.keep = keep_rows[d];
   g.inlined_into = inlined_into[d];
   table_bytes += g.keep.size() * sizeof(std::int32_t);
+  if (g.fused) {
+    g.emit_ordinal.assign(static_cast<std::size_t>(g.rows), -1);
+    for (std::size_t o = 0; o < p->outputs.size(); ++o) {
+      const ir::value_id v = p->outputs[o];
+      if (v >= g.value_base && v < g.value_base + g.rows && emitted[static_cast<std::size_t>(v)]) {
+        g.emit_ordinal[static_cast<std::size_t>(v - g.value_base)] = static_cast<std::int32_t>(o);
+        ++g.emitted;
+      }
+    }
+    table_bytes += g.emit_ordinal.size() * sizeof(std::int32_t);
+  }
   if (dom.recurrent) {
     throw std::invalid_argument("exec: domain " + std::to_string(d) + " (" + dom.name +
                                 ") is recurrent; scan domains are not supported by this interpreter");
@@ -1004,7 +1060,6 @@ void Interpreter::run(const double* state, int B, double* out) const {
     throw std::invalid_argument("exec: B must be in [1, max_batch] (" + std::to_string(B) + " vs " +
                                 std::to_string(im.opt.max_batch) + ")");
   }
-  const ir::Program& p = *im.p;
   const int tile = im.opt.tile;
   double* values = im.values.data();
   for (int b0 = 0; b0 < B; b0 += im.Lt) {
@@ -1012,6 +1067,7 @@ void Interpreter::run(const double* state, int B, double* out) const {
     RunCtx ctx;
     ctx.values = values;
     ctx.state = state;
+    ctx.out = out;
     ctx.B = B;
     ctx.b0 = b0;
     ctx.L = L;
@@ -1051,7 +1107,7 @@ void Interpreter::run(const double* state, int B, double* out) const {
     }
     {
       EPYKOS_EXEC_PROFILE_SCOPE(63);
-      copy_out(ctx.v, values, p.outputs.data(), static_cast<int>(p.outputs.size()), out, B, b0, L);
+      copy_out(ctx.v, values, im.late_ids.data(), im.late_ords.data(), static_cast<int>(im.late_ids.size()), out, B, b0, L);
     }
   }
   EPYKOS_EXEC_PROFILE_RUN();
@@ -1120,6 +1176,7 @@ std::string Interpreter::describe() const {
           for (const StepPlan& s : g.steps) total_calls += tiles * static_cast<std::size_t>(1 + s.n_pre);
           total_tiles += tiles;
         }
+        if (g.emitted > 0) os << "; " << g.emitted << " output rows written from the reduction blocks";
         os << "): ";
       } else {
         const std::size_t tiles = (static_cast<std::size_t>(dom.rows) + static_cast<std::size_t>(im.opt.tile) - 1) /
@@ -1145,7 +1202,9 @@ std::string Interpreter::describe() const {
     os << '\n';
   }
   os << "  per lane chunk: " << total_tiles << " tile passes, " << total_calls
-     << " kernel calls outside reductions; outputs " << p.outputs.size() << ", inputs " << p.inputs.size() << '\n';
+     << " kernel calls outside reductions; outputs " << p.outputs.size() << " (" << im.late_ids.size()
+     << " copied from the value buffer, " << p.outputs.size() - im.late_ids.size() << " emitted by reduction blocks), inputs "
+     << p.inputs.size() << '\n';
   return os.str();
 }
 

@@ -91,6 +91,7 @@ using LoadAccKernel = void (*)(const Operand& src, const RunCtx& ctx, int r0, co
 struct RunCtx {
   double* values = nullptr;         // the value buffer of the current chunk, stride L
   const double* state = nullptr;    // inputs, state[k·B + b]
+  double* out = nullptr;            // outputs, out[o·B + b] (reduction blocks emit the outputs of their fused producers)
   int B = 0;                        // batch width of the run
   int b0 = 0;                       // first lane of the chunk
   int L = 0;                        // lanes in the chunk
@@ -158,10 +159,12 @@ struct StepPlan {
 struct FusedProducer {
   std::int32_t domain = -1;
   bool block_mode = false;
+  bool has_outputs = false;                       // some member rows are outputs: emitted from the member buffer
   std::vector<StepPlan> steps;
   std::vector<std::vector<double>> cols;         // permuted columns, one per Col operand
   std::vector<std::vector<std::int32_t>> gats;   // permuted gather indices, one per Gat operand
   std::vector<std::int32_t> ordinal;              // permuted input ordinals (Input steps)
+  std::vector<std::int32_t> out_ordinal;          // permuted output ordinal per member (-1: none), block mode
 };
 
 struct SegPlan {
@@ -230,6 +233,11 @@ struct GroupPlan {
   bool fused = false;
   std::vector<std::int32_t> keep;        // rows materialised anyway
   std::vector<std::int32_t> consumers;   // the reduction domains that evaluate it (describe)
+  // Output rows of a fused group that are not kept are written to `out` by the reduction blocks
+  // that compute them, from the member buffer (emit_ordinal: the row's output ordinal, or -1);
+  // every other output is copied from the value buffer after the chunk (Impl::late_outputs).
+  std::vector<std::int32_t> emit_ordinal;
+  std::size_t emitted = 0;               // rows emitted this way (describe)
   // Producers evaluated per tile of this group (InlinedProducer), and the tile row of each of
   // this group's rows (r mod tile) their operands gather through. A group that inlines producers
   // is only ever evaluated in the contiguous row mode.
@@ -291,8 +299,10 @@ struct KernelTable {
   // or Neg. nullptr when the shape is not one of these.
   static OpKernel pair(Op op, PK ka, PK kb, Op op2, PK kc, bool prev_right, bool ind);
   static AccKernel pair_acc(Op op, PK ka, PK kb, Op op2, PK kc, bool prev_right, bool affine);
-  // out[o·B + b0 + l] = values[outputs[o]·L + l] for l < L (the output copy of a lane chunk).
-  static void copy_out(const double* values, const std::int32_t* outputs, int n_out, double* out, int B, int b0, int lanes);
+  // out[ordinals[o]·B + b0 + l] = values[ids[o]·L + l] for l < L (the output copy of a lane chunk).
+  static void copy_out(const double* values, const std::int32_t* ids, const std::int32_t* ordinals, int n_out, double* out, int B, int b0, int lanes);
+  // out[ordinals[t]·B + b0 + l] = member[t·L + l] for the t < n with ordinals[t] >= 0 (outputs emitted from a reduction block).
+  static void emit_out(const double* member, const std::int32_t* ordinals, int n, double* out, int B, int b0, int lanes);
 };
 
 extern template struct KernelTable<0>;

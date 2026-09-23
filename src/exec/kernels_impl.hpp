@@ -716,6 +716,28 @@ void k_konst_acc(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_
   k_load_acc<KK, L, Affine, false>(s.konst, ctx, r0, idx, n, kr, first, coef, acc);
 }
 
+// Outputs among a producer run's members, written from the member buffer to `out` (kept out of
+// line: inlined into the block driver, this rarely taken path cost the driver's hot loop its
+// register allocation, measured at B = 1). Block mode: ordinals in member order from the run's
+// offset; otherwise by member id through the group's per-row table.
+template <int L>
+__attribute__((noinline, cold)) void emit_run_outputs(const FusedProducer& fp, const GroupPlan& g, const RunCtx& ctx, int r0,
+                                                      const std::int32_t* mem, int n_rows) {
+  const int LL = lanes<L>(ctx);
+  if (fp.block_mode) {
+    KernelTable<L>::emit_out(ctx.member, fp.out_ordinal.data() + r0, n_rows, ctx.out, ctx.B, ctx.b0, LL);
+    return;
+  }
+  const std::size_t LLs = static_cast<std::size_t>(LL);
+  for (int t = 0; t < n_rows; ++t) {
+    const std::int32_t ord = g.emit_ordinal[static_cast<std::size_t>(mem[t] - g.value_base)];
+    if (ord < 0) continue;
+    const double* src = ctx.member + static_cast<std::size_t>(t) * LLs;
+    double* dst = ctx.out + static_cast<std::size_t>(ord) * static_cast<std::size_t>(ctx.B) + static_cast<std::size_t>(ctx.b0);
+    for (std::size_t l = 0; l < LLs; ++l) dst[l] = src[l];
+  }
+}
+
 // A block with fused producers: for each chunk of kc member positions and each run of positions
 // with the same producer, the producer's earlier steps are evaluated over the run's member rows
 // (indirect row mode, tile row kk·n + i) into their scratch and its last step through its
@@ -755,7 +777,8 @@ inline void seg_block_fused(const SegPlan& sp, const SegBlock& blk, const RunCtx
         const int n_rows = kr * n;
         if (fp.block_mode) {
           // The producer's operands are laid out in this reduction's member order: contiguous
-          // rows from the run's offset.
+          // rows from the run's offset. Members that are outputs go through the member buffer
+          // and are emitted from it (KernelTable::emit_out) after the fold.
           const int r0 = sp.prod_off[blk.prod + static_cast<std::size_t>(k)];
           const std::size_t n_steps = fp.steps.size();
           for (std::size_t j = 0; j < n_steps; ++j) {
@@ -765,7 +788,7 @@ inline void seg_block_fused(const SegPlan& sp, const SegBlock& blk, const RunCtx
             }
             if (j + 1 < n_steps) {
               s.fn[row_contiguous][v](s, ctx, r0, nullptr, n_rows, s.out);
-            } else if (s.acc_fn[Affine ? 1 : 0][v] != nullptr) {
+            } else if (s.acc_fn[Affine ? 1 : 0][v] != nullptr && !fp.has_outputs) {
               s.acc_fn[Affine ? 1 : 0][v](s, ctx, r0, nullptr, n, kr, first, coef, acc);
             } else {
               s.fn[row_contiguous][v](s, ctx, r0, nullptr, n_rows, ctx.member);
@@ -773,6 +796,7 @@ inline void seg_block_fused(const SegPlan& sp, const SegBlock& blk, const RunCtx
               o.kind = Kind::Vec;
               o.data = ctx.member;
               sp.load_acc_vec[v](o, ctx, 0, nullptr, n, kr, first, coef, acc);
+              if (fp.has_outputs) [[unlikely]] emit_run_outputs<L>(fp, ctx.groups[fp.domain], ctx, r0, mem, n_rows);
             }
           }
         } else {
@@ -784,6 +808,7 @@ inline void seg_block_fused(const SegPlan& sp, const SegBlock& blk, const RunCtx
           o.kind = Kind::Vec;
           o.data = ctx.member;
           sp.load_acc_vec[v](o, ctx, 0, nullptr, n, kr, first, coef, acc);
+          if (fp.has_outputs) [[unlikely]] emit_run_outputs<L>(fp, g, ctx, 0, mem, n_rows);
         }
       } else {
         Operand o;
@@ -1522,14 +1547,14 @@ AccKernel KernelTable<L>::pair_acc(Op op, PK ka, PK kb, Op op2, PK kc, bool prev
 // ---- output copy -----------------------------------------------------------------------------
 
 template <int L>
-void KernelTable<L>::copy_out(const double* values, const std::int32_t* outputs, int n_out, double* out, int B, int b0,
-                              int L_) {
+void KernelTable<L>::copy_out(const double* values, const std::int32_t* ids, const std::int32_t* ordinals, int n_out,
+                              double* out, int B, int b0, int L_) {
   const std::size_t Bs = static_cast<std::size_t>(B);
   if constexpr (L > 0) {
     (void)L_;
     for (int o = 0; o < n_out; ++o) {
-      const double* src = values + static_cast<std::size_t>(outputs[o]) * static_cast<std::size_t>(L);
-      double* dst = out + static_cast<std::size_t>(o) * Bs + static_cast<std::size_t>(b0);
+      const double* src = values + static_cast<std::size_t>(ids[o]) * static_cast<std::size_t>(L);
+      double* dst = out + static_cast<std::size_t>(ordinals[o]) * Bs + static_cast<std::size_t>(b0);
       double t[L];
       for (int l = 0; l < L; ++l) t[l] = src[l];
       for (int l = 0; l < L; ++l) dst[l] = t[l];
@@ -1537,8 +1562,34 @@ void KernelTable<L>::copy_out(const double* values, const std::int32_t* outputs,
   } else {
     const std::size_t LL = static_cast<std::size_t>(L_);
     for (int o = 0; o < n_out; ++o) {
-      const double* src = values + static_cast<std::size_t>(outputs[o]) * LL;
-      double* dst = out + static_cast<std::size_t>(o) * Bs + static_cast<std::size_t>(b0);
+      const double* src = values + static_cast<std::size_t>(ids[o]) * LL;
+      double* dst = out + static_cast<std::size_t>(ordinals[o]) * Bs + static_cast<std::size_t>(b0);
+      for (int l = 0; l < L_; ++l) dst[l] = src[l];
+    }
+  }
+}
+
+template <int L>
+void KernelTable<L>::emit_out(const double* member, const std::int32_t* ordinals, int n, double* out, int B, int b0, int L_) {
+  const std::size_t Bs = static_cast<std::size_t>(B);
+  if constexpr (L > 0) {
+    (void)L_;
+    for (int t = 0; t < n; ++t) {
+      const std::int32_t ord = ordinals[t];
+      if (ord < 0) continue;
+      const double* src = member + static_cast<std::size_t>(t) * static_cast<std::size_t>(L);
+      double* dst = out + static_cast<std::size_t>(ord) * Bs + static_cast<std::size_t>(b0);
+      double v[L];
+      for (int l = 0; l < L; ++l) v[l] = src[l];
+      for (int l = 0; l < L; ++l) dst[l] = v[l];
+    }
+  } else {
+    const std::size_t LL = static_cast<std::size_t>(L_);
+    for (int t = 0; t < n; ++t) {
+      const std::int32_t ord = ordinals[t];
+      if (ord < 0) continue;
+      const double* src = member + static_cast<std::size_t>(t) * LL;
+      double* dst = out + static_cast<std::size_t>(ord) * Bs + static_cast<std::size_t>(b0);
       for (int l = 0; l < L_; ++l) dst[l] = src[l];
     }
   }

@@ -26,7 +26,18 @@ int CurveSet::add_curve(CurveSpec spec) {
     throw std::invalid_argument("CurveSet: curve '" + spec.name + "' start has " + std::to_string(spec.start.size()) + " values for " +
                                 std::to_string(spec.knot_t.size()) + " knots");
   }
-  if (spec.scheme != "linear") throw std::invalid_argument("CurveSet: scheme '" + spec.scheme + "' is not available (linear only until G1)");
+  if (spec.regions.empty()) {
+    if (spec.scheme != "linear") {
+      throw std::invalid_argument("CurveSet: scheme '" + spec.scheme + "' needs regions (a curve with no regions is the linear zero-rate one)");
+    }
+  } else {
+    // A Composite over the same knots; std::invalid_argument on a bad definition (composite.hpp).
+    spec.composite = curve::Composite(spec.knot_t, spec.regions);
+    spec.scheme = "composite";
+    for (std::size_t r = 0; r < spec.regions.size(); ++r) {
+      spec.scheme += std::string(r == 0 ? ":" : ",") + curve::to_string(spec.regions[r].scheme) + "/" + curve::to_string(spec.regions[r].variable);
+    }
+  }
   curves_.push_back(std::move(spec));
   return static_cast<int>(curves_.size()) - 1;
 }
@@ -63,12 +74,14 @@ std::vector<std::vector<int>> CurveSet::instrument_reads() const {
       Tape::Scope scope(scratch);
       CurveStates<Rec> s;
       s.specs = &curves_;
-      s.z.resize(curves_.size());
+      s.resize(curves_.size());
       for (std::size_t c = 0; c < curves_.size(); ++c) {
+        std::vector<Rec> zc;
         for (double v : curves_[c].start) {
           curve_of_ordinal.push_back(static_cast<int>(c));
-          s.z[c].push_back(make_input(scratch, v));
+          zc.push_back(make_input(scratch, v));
         }
+        s.set(static_cast<int>(c), zc);
       }
       curve_of_ordinal.push_back(-1);
       const Rec q = make_input(scratch, 0.0);
@@ -156,7 +169,7 @@ CurveSet::Calibration CurveSet::calibrate(Tape& tape, ImplicitRegistry& registry
   }
   Calibration cal;
   cal.states.specs = &curves_;
-  cal.states.z.resize(curves_.size());
+  cal.states.resize(curves_.size());
   for (const std::vector<int>& block : blocks(mode)) {
     std::vector<double> z0;
     std::string name;
@@ -180,7 +193,7 @@ CurveSet::Calibration CurveSet::calibrate(Tape& tape, ImplicitRegistry& registry
           std::size_t off = 0;
           for (int c : block) {
             const std::size_t nk = curves_[idx(c)].knot_t.size();
-            s.z[idx(c)].assign(z + off, z + off + nk);
+            s.set(c, z + off, nk);
             off += nk;
           }
           for (std::size_t m = 0; m < insts.size(); ++m) {
@@ -192,7 +205,7 @@ CurveSet::Calibration CurveSet::calibrate(Tape& tape, ImplicitRegistry& registry
     std::size_t off = 0;
     for (int c : block) {
       const std::size_t nk = curves_[idx(c)].knot_t.size();
-      cal.states.z[idx(c)].assign(r.z.begin() + static_cast<std::ptrdiff_t>(off), r.z.begin() + static_cast<std::ptrdiff_t>(off + nk));
+      cal.states.set(c, r.z.data() + off, nk);
       off += nk;
     }
     cal.results.push_back(std::move(r));
@@ -213,11 +226,11 @@ CurveStates<double> CurveSet::states_at(std::span<const double> z_all) const {
   if (static_cast<int>(z_all.size()) != n_knots_total()) throw std::invalid_argument("CurveSet::states_at: wrong length");
   CurveStates<double> s;
   s.specs = &curves_;
-  s.z.resize(curves_.size());
+  s.resize(curves_.size());
   std::size_t off = 0;
   for (std::size_t c = 0; c < curves_.size(); ++c) {
     const std::size_t nk = curves_[c].knot_t.size();
-    s.z[c].assign(z_all.begin() + static_cast<std::ptrdiff_t>(off), z_all.begin() + static_cast<std::ptrdiff_t>(off + nk));
+    s.set(static_cast<int>(c), z_all.data() + off, nk);
     off += nk;
   }
   return s;

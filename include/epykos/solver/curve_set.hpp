@@ -1,10 +1,11 @@
 // EpykosEngine — a set of named curves calibrated together through implicit nodes (M3/G4;
 // PROBLEM.md §5 "curves depend on each other through the implicit node").
 //
-// A CurveSet holds curve definitions (name, knot times, start values; the scheme is the
-// linear-in-zero-rate one of maths/curve/linear.hpp until G1's family lands, and the field is
-// where G1 plugs in) and calibration instruments. An instrument belongs to the curve it
-// calibrates and is a residual written once on Scalar,
+// A CurveSet holds curve definitions (name, knot times, start values and the curve's scheme:
+// by default the linear-in-zero-rate one of maths/curve/linear.hpp, or — since M3/G5 — any
+// composite of G1's family, maths/curve/composite.hpp, given as its regions) and calibration
+// instruments. An instrument belongs to the curve it calibrates and is a residual written once
+// on Scalar,
 //
 //     Scalar residual(const CurveStates<Scalar>& states, const Scalar& quote)
 //
@@ -29,6 +30,15 @@
 // discount factors (ONE TAPE; ir/sharing.hpp checks it). The residual maths is stored in both its
 // Rec and its double instantiation, so residuals(states, quotes) evaluates the same maths on
 // double for oracles.
+//
+// Schemes (M3/G5). A CurveSpec with no regions is the M1 linear zero-rate curve, statement for
+// statement (curve::linear::df; the G4 fixtures and their pinned node counts are unchanged). A
+// CurveSpec with regions is a curve::Composite over the same knots (one region = one scheme and
+// variable, bitwise Curve<S, V> and, for {linear, zero}, bitwise the M1 curve, D38): the knot
+// values are then in each region's variable (zero rate, log DF or forward), the state is
+// prepared ONCE per curve and state (CurveStates::set: the MonotoneCubic tangents, the cubic's
+// second derivatives) and every df(slot, t) reads that prepared state, so a Hyman limiter's
+// Selects are recorded once per block and shared by the residuals and the book through cse.
 #pragma once
 
 #include <cstddef>
@@ -40,6 +50,7 @@
 #include <utility>
 #include <vector>
 
+#include "epykos/maths/curve/composite.hpp"
 #include "epykos/maths/curve/linear.hpp"
 #include "epykos/scalar/rec.hpp"
 #include "epykos/solver/implicit.hpp"
@@ -50,16 +61,22 @@ namespace epykos::solver {
 struct CurveSpec {
   std::string name;
   std::vector<double> knot_t;   // ascending knot times (years)
-  std::vector<double> start;    // one per knot: the start of every solve (record and run time)
-  std::string scheme = "linear";  // linear zero rate, flat beyond the ends (G1 adds the family)
+  std::vector<double> start;    // one per knot: the start of every solve (record and run time), in the knot's variable
+  std::string scheme = "linear";  // descriptive: "linear" (no regions) or the composite's regions (set by add_curve)
+  std::vector<curve::RegionSpec> regions;   // empty: the M1 linear zero-rate curve; else a Composite of these regions
+  curve::Composite composite;               // built by CurveSet::add_curve when `regions` is given
+
+  bool is_composite() const noexcept { return !regions.empty(); }
 };
 
 // Every curve's knot values on one Scalar. A curve of a block not yet solved has no values;
-// reading it throws (the dependency order is wrong).
+// reading it throws (the dependency order is wrong). Values are written through set(), which
+// prepares the composite's state (its coefficients) once for the curve and state.
 template <class Scalar>
 struct CurveStates {
   const std::vector<CurveSpec>* specs = nullptr;
-  std::vector<std::vector<Scalar>> z;  // per curve, per knot
+  std::vector<std::vector<Scalar>> z;                          // per curve, per knot
+  std::vector<curve::Composite::State<Scalar>> prepared;       // per curve (composite curves only)
 
   int n_curves() const noexcept { return static_cast<int>(z.size()); }
   const CurveSpec& spec(int i) const { return (*specs)[static_cast<std::size_t>(i)]; }
@@ -69,6 +86,21 @@ struct CurveStates {
     }
     return -1;
   }
+  void resize(std::size_t n_curves) {
+    z.resize(n_curves);
+    prepared.resize(n_curves);
+  }
+  // Sets curve i's knot values (n = its knot count) and prepares its scheme's state.
+  void set(int i, const Scalar* v, std::size_t n) {
+    const CurveSpec& s = spec(i);
+    if (n != s.knot_t.size()) {
+      throw std::invalid_argument("CurveStates::set: curve '" + s.name + "': " + std::to_string(n) + " values for " +
+                                  std::to_string(s.knot_t.size()) + " knots");
+    }
+    z.at(static_cast<std::size_t>(i)).assign(v, v + n);
+    if (s.is_composite()) prepared.at(static_cast<std::size_t>(i)) = s.composite.template prepare<Scalar>(v);
+  }
+  void set(int i, const std::vector<Scalar>& v) { set(i, v.data(), v.size()); }
   const std::vector<Scalar>& curve(int i) const {
     const std::vector<Scalar>& v = z.at(static_cast<std::size_t>(i));
     if (v.empty()) {
@@ -81,13 +113,27 @@ struct CurveStates {
     if (i < 0) throw std::invalid_argument("CurveStates: no curve named '" + std::string(name) + "'");
     return curve(i);
   }
-  // The scheme: linear zero rate with flat extrapolation; DF(t) = exp(−z(t)·t).
+  // The zero rate of a curve with no regions (linear zero rate with flat extrapolation).
+  // Throws std::logic_error for a composite curve (its variable is per region: use log_df).
   Scalar zero_rate(int i, double t) const {
     const CurveSpec& s = spec(i);
+    if (s.is_composite()) throw std::logic_error("CurveStates::zero_rate: curve '" + s.name + "' is a composite (use log_df / df)");
     return curve::linear::zero_rate(s.knot_t.data(), curve(i).data(), static_cast<int>(s.knot_t.size()), t);
   }
+  // log DF(t) of curve i.
+  Scalar log_df(int i, double t) const {
+    const CurveSpec& s = spec(i);
+    if (s.is_composite()) return s.composite.log_df(prepared.at(static_cast<std::size_t>(i)), t);
+    const Scalar zt = curve::linear::zero_rate(s.knot_t.data(), curve(i).data(), static_cast<int>(s.knot_t.size()), t);
+    return -zt * t;
+  }
+  // DF(t) of curve i: exp(−z(t)·t) on a linear zero-rate curve, the composite's df otherwise.
   Scalar df(int i, double t) const {
     const CurveSpec& s = spec(i);
+    if (s.is_composite()) {
+      (void)curve(i);   // a block not yet solved throws here
+      return s.composite.df(prepared.at(static_cast<std::size_t>(i)), t);
+    }
     return curve::linear::df(s.knot_t.data(), curve(i).data(), static_cast<int>(s.knot_t.size()), t);
   }
 };
@@ -103,8 +149,8 @@ class CurveSet {
  public:
   enum class Mode : int { sequential = 0, joint = 1 };
 
-  // Throws std::invalid_argument for a duplicate name, non-ascending knots or a start vector
-  // of the wrong length. Returns the curve index.
+  // Throws std::invalid_argument for a duplicate name, non-ascending knots, a start vector
+  // of the wrong length or regions the Composite rejects. Returns the curve index.
   int add_curve(CurveSpec spec);
 
   // f: Scalar(const CurveStates<Scalar>&, const Scalar& quote), instantiable on Rec and double

@@ -1,7 +1,7 @@
 {
  "format": "epykos-exec-coverage 1",
  "profile_runs": 116,
- "profile_runs_used": 100,
+ "profile_runs_used": 116,
  "domains": [
   {
    "domain": 0,
@@ -36,7 +36,7 @@
     "gather_refs": 140
    },
    "reason": "78 of its rows are outputs; gathered by 5 domains {d1 d7 d12 d57 d66}: the inliner needs exactly one consumer",
-   "profile_us": 0.522
+   "profile_us": 1.06
   },
   {
    "domain": 1,
@@ -69,7 +69,7 @@
     "gather_refs": 177
    },
    "reason": "inlinable into d3, but row fusion is off at lane tile 8 (row_fusion_pays: L = 1 or L >= 16)",
-   "profile_us": 0.35960000000000003
+   "profile_us": 0.66
   },
   {
    "domain": 2,
@@ -108,7 +108,7 @@
     "gather_refs": 1102
    },
    "reason": "read by scan domain(s) {d10} (a scan is never fused or inlined into)",
-   "profile_us": 0.7192000000000001
+   "profile_us": 1.25
   },
   {
    "domain": 3,
@@ -147,7 +147,7 @@
     "gather_refs": 7918
    },
    "reason": "gathered by 7 domains {d6 d8 d26 d32 d37 d42 d45}: the inliner needs exactly one consumer",
-   "profile_us": 1.8096
+   "profile_us": 2.33
   },
   {
    "domain": 4,
@@ -180,7 +180,7 @@
     "gather_refs": 16917
    },
    "reason": null,
-   "profile_us": 38.5468
+   "profile_us": 65.01
   },
   {
    "domain": 5,
@@ -221,7 +221,7 @@
     "gather_refs": 62518
    },
    "reason": "gathered by 9 domains {d6 d8 d16 d26 d32 d37 d42 d45 d55}: the inliner needs exactly one consumer",
-   "profile_us": 103.6692
+   "profile_us": 99.37
   },
   {
    "domain": 6,
@@ -260,7 +260,7 @@
     "gather_refs": 22907
    },
    "reason": "gathered by 3 domains {d7 d8 d12}: the inliner needs exactly one consumer",
-   "profile_us": 42.01519999999999
+   "profile_us": 44.83
   },
   {
    "domain": 7,
@@ -293,7 +293,7 @@
     "gather_refs": 0
    },
    "reason": "4 of its rows are outputs",
-   "profile_us": 0.24359999999999998
+   "profile_us": 0.54
   },
   {
    "domain": 8,
@@ -351,7 +351,7 @@
     "gather_refs": 366
    },
    "reason": "226 of its rows are outputs; read by scan domain(s) {d13} (a scan is never fused or inlined into); gathered by 8 domains {d16 d29 d30 d33 d43 d53 d58 d66}: the inliner needs exactly one consumer",
-   "profile_us": 38.465599999999995
+   "profile_us": 51.35
   },
   {
    "domain": 9,
@@ -405,7 +405,7 @@
     "gather_refs": 257924
    },
    "reason": null,
-   "profile_us": 66.8972
+   "profile_us": 85.13
   },
   {
    "domain": 10,
@@ -443,7 +443,7 @@
     "gather_refs": 1240
    },
    "reason": null,
-   "profile_us": 1193.7676
+   "profile_us": 1755.88
   },
   {
    "domain": 11,
@@ -478,7 +478,7 @@
     "gather_refs": 8
    },
    "reason": null,
-   "profile_us": 0.5451999999999999
+   "profile_us": 1.16
   },
   {
    "domain": 12,
@@ -513,7 +513,7 @@
     "gather_refs": 0
    },
    "reason": "16 of its rows are outputs",
-   "profile_us": 0.5684
+   "profile_us": 1.44
   },
   {
    "domain": 13,
@@ -550,7 +550,7 @@
     "gather_refs": 8
    },
    "reason": null,
-   "profile_us": 0.8467999999999999
+   "profile_us": 1.3
   },
   {
    "domain": 14,
@@ -585,7 +585,7 @@
     "gather_refs": 1
    },
    "reason": "read by scan domain(s) {d15} (a scan is never fused or inlined into)",
-   "profile_us": 0.24359999999999998
+   "profile_us": 0.4
   },
   {
    "domain": 15,
@@ -622,7 +622,7 @@
     "gather_refs": 1
    },
    "reason": null,
-   "profile_us": 4.651599999999999
+   "profile_us": 4.77
   },
   {
    "domain": 16,
@@ -665,7 +665,7 @@
     "gather_refs": 0
    },
    "reason": null,
-   "profile_us": 0.24359999999999998
+   "profile_us": 0.27
   },
   {
    "domain": 17,
@@ -708,7 +708,7 @@
     "gather_refs": 7
    },
    "reason": null,
-   "profile_us": 0.9048
+   "profile_us": 1.59
   },
   {
    "domain": 18,
@@ -741,7 +741,7 @@
     "gather_refs": 0
    },
    "reason": null,
-   "profile_us": 0.1508
+   "profile_us": 0.19
   },
   {
    "domain": 19,
@@ -777,7 +777,7 @@
     "gather_refs": 103
    },
    "reason": "gathered by 2 domains {d20 d21}: the inliner needs exactly one consumer",
-   "profile_us": 0.58
+   "profile_us": 1.02
   },
   {
    "domain": 20,
@@ -812,7 +812,7 @@
     "gather_refs": 0
    },
    "reason": null,
-   "profile_us": 0.0928
+   "profile_us": 0.09
   },
   {
    "domain": 21,
@@ -848,7 +848,7 @@
     "gather_refs": 94
    },
    "reason": "gathered by 2 domains {d22 d32}: the inliner needs exactly one consumer",
-   "profile_us": 0.2668
+   "profile_us": 0.57
   },
   {
    "domain": 22,
@@ -881,7 +881,7 @@
     "gather_refs": 0
    },
    "reason": null,
-   "profile_us": 0.0696
+   "profile_us": 0.07
   },
   {
    "domain": 23,
@@ -910,7 +910,7 @@
     "gather_refs": 0
    },
    "reason": null,
-   "profile_us": 0.20879999999999999
+   "profile_us": 0.3
   },
   {
    "domain": 24,
@@ -947,7 +947,7 @@
     "gather_refs": 15358
    },
    "reason": null,
-   "profile_us": 10.671999999999999
+   "profile_us": 17.88
   },
   {
    "domain": 25,
@@ -980,7 +980,7 @@
     "gather_refs": 15358
    },
    "reason": "its only reader d26 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
-   "profile_us": 13.8504
+   "profile_us": 20.08
   },
   {
    "domain": 26,
@@ -1029,7 +1029,7 @@
     "gather_refs": 30
    },
    "reason": null,
-   "profile_us": 0.6844
+   "profile_us": 1.4
   },
   {
    "domain": 27,
@@ -1080,7 +1080,7 @@
     "gather_refs": 2208
    },
    "reason": null,
-   "profile_us": 22.5156
+   "profile_us": 32.47
   },
   {
    "domain": 28,
@@ -1120,7 +1120,7 @@
     "gather_refs": 7
    },
    "reason": null,
-   "profile_us": 0.348
+   "profile_us": 0.69
   },
   {
    "domain": 29,
@@ -1161,7 +1161,7 @@
     "gather_refs": 605
    },
    "reason": "605 of its rows are outputs; gathered by d36 and also a member of reduction(s) {d56}",
-   "profile_us": 1.6935999999999998
+   "profile_us": 3.25
   },
   {
    "domain": 30,
@@ -1198,7 +1198,7 @@
     "gather_refs": 11
    },
    "reason": "11 of its rows are outputs; gathered by d31 and also a member of reduction(s) {d56}",
-   "profile_us": 0.19720000000000001
+   "profile_us": 0.31
   },
   {
    "domain": 31,
@@ -1236,7 +1236,7 @@
     "gather_refs": 1395
    },
    "reason": "11 of its rows are outputs; gathered by d32 and also a member of reduction(s) {d59 d61}",
-   "profile_us": 1.682
+   "profile_us": 2.36
   },
   {
    "domain": 32,
@@ -1281,7 +1281,7 @@
     "gather_refs": 26
    },
    "reason": null,
-   "profile_us": 0.4524
+   "profile_us": 0.81
   },
   {
    "domain": 33,
@@ -1317,7 +1317,7 @@
     "gather_refs": 0
    },
    "reason": "40 of its rows are outputs",
-   "profile_us": 0.22039999999999998
+   "profile_us": 0.46
   },
   {
    "domain": 34,
@@ -1350,7 +1350,7 @@
     "gather_refs": 0
    },
    "reason": null,
-   "profile_us": 0.08120000000000001
+   "profile_us": 0.1
   },
   {
    "domain": 35,
@@ -1397,7 +1397,7 @@
     "gather_refs": 6389
    },
    "reason": null,
-   "profile_us": 6.67
+   "profile_us": 14.38
   },
   {
    "domain": 36,
@@ -1435,7 +1435,7 @@
     "gather_refs": 6384
    },
    "reason": "605 of its rows are outputs; gathered by d37 and also a member of reduction(s) {d59 d61}",
-   "profile_us": 7.5748
+   "profile_us": 11.7
   },
   {
    "domain": 37,
@@ -1487,7 +1487,7 @@
     "gather_refs": 150
    },
    "reason": null,
-   "profile_us": 1.7052
+   "profile_us": 2.95
   },
   {
    "domain": 38,
@@ -1536,7 +1536,7 @@
     "gather_refs": 20
    },
    "reason": null,
-   "profile_us": 0.5916
+   "profile_us": 1.4
   },
   {
    "domain": 39,
@@ -1586,7 +1586,7 @@
     "gather_refs": 1387
    },
    "reason": null,
-   "profile_us": 3.5496
+   "profile_us": 6.65
   },
   {
    "domain": 40,
@@ -1623,7 +1623,7 @@
     "gather_refs": 4
    },
    "reason": null,
-   "profile_us": 0.19720000000000001
+   "profile_us": 0.31
   },
   {
    "domain": 41,
@@ -1656,7 +1656,7 @@
     "gather_refs": 13
    },
    "reason": "its only reader d42 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
-   "profile_us": 0.1392
+   "profile_us": 0.22
   },
   {
    "domain": 42,
@@ -1696,7 +1696,7 @@
     "gather_refs": 0
    },
    "reason": null,
-   "profile_us": 0.0696
+   "profile_us": 0.13
   },
   {
    "domain": 43,
@@ -1739,7 +1739,7 @@
     "gather_refs": 37
    },
    "reason": "589 of its rows are outputs; gathered by d52 and also a member of reduction(s) {d56 d59 d61}",
-   "profile_us": 1.0324
+   "profile_us": 2.25
   },
   {
    "domain": 44,
@@ -1772,7 +1772,7 @@
     "gather_refs": 1203
    },
    "reason": "its only reader d45 is itself fused into reductions (evaluated per reduction block: no tiles of its own to inline into)",
-   "profile_us": 1.5428
+   "profile_us": 2.29
   },
   {
    "domain": 45,
@@ -1812,7 +1812,7 @@
     "gather_refs": 22
    },
    "reason": null,
-   "profile_us": 0.348
+   "profile_us": 0.5
   },
   {
    "domain": 46,
@@ -1845,7 +1845,7 @@
     "gather_refs": 0
    },
    "reason": null,
-   "profile_us": 0.0464
+   "profile_us": 0.04
   },
   {
    "domain": 47,
@@ -1897,7 +1897,7 @@
     "gather_refs": 771
    },
    "reason": null,
-   "profile_us": 8.526
+   "profile_us": 13.64
   },
   {
    "domain": 48,
@@ -1946,7 +1946,7 @@
     "gather_refs": 11
    },
    "reason": null,
-   "profile_us": 0.9976
+   "profile_us": 1.59
   },
   {
    "domain": 49,
@@ -1995,7 +1995,7 @@
     "gather_refs": 270
    },
    "reason": null,
-   "profile_us": 6.0552
+   "profile_us": 8.5
   },
   {
    "domain": 50,
@@ -2034,7 +2034,7 @@
     "gather_refs": 261
    },
    "reason": "1249 of its rows are outputs; gathered by d51 and also a member of reduction(s) {d56 d59 d61}",
-   "profile_us": 1.2528
+   "profile_us": 2.08
   },
   {
    "domain": 51,
@@ -2068,7 +2068,7 @@
     "gather_refs": 0
    },
    "reason": "261 of its rows are outputs",
-   "profile_us": 0.32480000000000003
+   "profile_us": 0.41
   },
   {
    "domain": 52,
@@ -2106,7 +2106,7 @@
     "gather_refs": 7
    },
    "reason": "37 of its rows are outputs; gathered by d55 and also a member of reduction(s) {d59 d61}",
-   "profile_us": 0.1508
+   "profile_us": 0.3
   },
   {
    "domain": 53,
@@ -2149,7 +2149,7 @@
     "gather_refs": 2
    },
    "reason": "50 of its rows are outputs; gathered by d54 and also a member of reduction(s) {d56 d59 d61}",
-   "profile_us": 0.33640000000000003
+   "profile_us": 0.43
   },
   {
    "domain": 54,
@@ -2183,7 +2183,7 @@
     "gather_refs": 0
    },
    "reason": "2 of its rows are outputs",
-   "profile_us": 0.0928
+   "profile_us": 0.17
   },
   {
    "domain": 55,
@@ -2220,7 +2220,7 @@
     "gather_refs": 2
    },
    "reason": null,
-   "profile_us": 0.174
+   "profile_us": 0.24
   },
   {
    "domain": 56,
@@ -2281,7 +2281,7 @@
     "gather_refs": 11
    },
    "reason": null,
-   "profile_us": 3.7120000000000006
+   "profile_us": 4.73
   },
   {
    "domain": 57,
@@ -2334,7 +2334,7 @@
     "gather_refs": 0
    },
    "reason": "9 of its rows are outputs",
-   "profile_us": 0.3016
+   "profile_us": 0.81
   },
   {
    "domain": 58,
@@ -2374,7 +2374,7 @@
     "gather_refs": 0
    },
    "reason": "530 of its rows are outputs",
-   "profile_us": 0.7772
+   "profile_us": 1.13
   },
   {
    "domain": 59,
@@ -2431,7 +2431,7 @@
     "gather_refs": 2
    },
    "reason": null,
-   "profile_us": 3.8047999999999997
+   "profile_us": 4.34
   },
   {
    "domain": 60,
@@ -2466,7 +2466,7 @@
     "gather_refs": 0
    },
    "reason": "10 of its rows are outputs",
-   "profile_us": 0.10439999999999999
+   "profile_us": 0.21
   },
   {
    "domain": 61,
@@ -2525,7 +2525,7 @@
     "gather_refs": 2
    },
    "reason": null,
-   "profile_us": 8.6072
+   "profile_us": 8.39
   },
   {
    "domain": 62,
@@ -2564,7 +2564,7 @@
     "gather_refs": 2
    },
    "reason": null,
-   "profile_us": 0.2668
+   "profile_us": 0.5
   },
   {
    "domain": 63,
@@ -2601,7 +2601,7 @@
     "gather_refs": 1
    },
    "reason": null,
-   "profile_us": 0.1392
+   "profile_us": 0.24
   },
   {
    "domain": 64,
@@ -2638,7 +2638,7 @@
     "gather_refs": 1
    },
    "reason": null,
-   "profile_us": 0.1392
+   "profile_us": 0.26
   },
   {
    "domain": 65,
@@ -2673,7 +2673,7 @@
     "gather_refs": 1
    },
    "reason": null,
-   "profile_us": 0.1508
+   "profile_us": 0.28
   },
   {
    "domain": 66,
@@ -2746,7 +2746,7 @@
     "gather_refs": 0
    },
    "reason": "41 of its rows are outputs",
-   "profile_us": 0.39440000000000003
+   "profile_us": 0.91
   }
  ]
 }

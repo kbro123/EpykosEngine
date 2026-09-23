@@ -1,6 +1,6 @@
 {
  "preset": "reference (-O3 -march=x86-64-v3 -fno-math-errno -ffp-contract=off)",
- "commit": "363321f",
+ "commit": "40af34e",
  "roundtrip_ok": true,
  "e0_ok": true,
  "hand_e1_ok": true,
@@ -11,10 +11,10 @@
   "ctest_release": "100% tests passed out of 23"
  },
  "evidence": {
-  "ir_roundtrip_test": "exit 0; [  PASSED  ] 5 tests",
-  "exec_m1_interp_e0_test": "exit 0; [  PASSED  ] 5 tests",
-  "hand_m1_hand_test": "exit 0; [  PASSED  ] 9 tests",
-  "hand_m1_hand_e0_test": "exit 0; [  PASSED  ] 4 tests",
-  "exec_interp_test": "exit 0; [  PASSED  ] 6 tests"
+  "ir_roundtrip_test": "exit 0; [  PASSED  ] 5 tests.",
+  "exec_m1_interp_e0_test": "exit 0; [  PASSED  ] 5 tests.",
+  "hand_m1_hand_test": "exit 0; [  PASSED  ] 9 tests.",
+  "hand_m1_hand_e0_test": "exit 0; [  PASSED  ] 4 tests.",
+  "exec_interp_test": "exit 0; [  PASSED  ] 6 tests."
  }
 }

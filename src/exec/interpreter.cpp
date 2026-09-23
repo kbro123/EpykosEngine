@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "epykos/mutation/mutation.hpp"
 #include "epykos/tape/op.hpp"
 #include "plan.hpp"
 
@@ -1069,6 +1070,9 @@ void Interpreter::run(const double* state, int B, double* out) const {
   }
   const int tile = im.opt.tile;
   double* values = im.values.data();
+  // Mutant interpreter.tile_boundary: the last row of every elementwise tile is skipped (its slot
+  // keeps whatever the value buffer held). Constexpr 0 outside the mutation build.
+  const int trim = mutant("interpreter.tile_boundary") ? 1 : 0;
   for (int b0 = 0; b0 < B; b0 += im.Lt) {
     const int L = std::min(im.Lt, B - b0);
     RunCtx ctx;
@@ -1108,7 +1112,7 @@ void Interpreter::run(const double* state, int B, double* out) const {
         continue;
       }
       for (int r0 = 0; r0 < g.rows; r0 += tile) {
-        const int n = std::min(tile, g.rows - r0);
+        const int n = std::min(tile, g.rows - r0) - trim;
         eval_group(g, ctx, r0, nullptr, n, dom + static_cast<std::size_t>(r0) * Ls);
       }
     }

@@ -39,12 +39,22 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "EPYKOS_REFERENCE": "OFF"
       }
+    },
+    {
+      "name": "mutation",
+      "displayName": "mutation: reference flags + EPYKOS_MUTATIONS=ON (scripts/mutation_test.sh)",
+      "description": "The reference build with the registered mutants compiled in; EPYKOS_MUTANT=<name> selects one at run time (D29). Never a gated or measured build.",
+      "inherits": "reference",
+      "cacheVariables": {
+        "EPYKOS_MUTATIONS": "ON"
+      }
     }
   ],
   "buildPresets": [
     { "name": "release",   "configurePreset": "release" },
     { "name": "reference", "configurePreset": "reference" },
-    { "name": "debug",     "configurePreset": "debug" }
+    { "name": "debug",     "configurePreset": "debug" },
+    { "name": "mutation",  "configurePreset": "mutation" }
   ],
   "testPresets": [
     {
@@ -55,6 +65,7 @@
     },
     { "name": "release",   "inherits": "base", "configurePreset": "release" },
     { "name": "reference", "inherits": "base", "configurePreset": "reference" },
-    { "name": "debug",     "inherits": "base", "configurePreset": "debug" }
+    { "name": "debug",     "inherits": "base", "configurePreset": "debug" },
+    { "name": "mutation",  "inherits": "base", "configurePreset": "mutation" }
   ]
 }

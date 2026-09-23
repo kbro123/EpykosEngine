@@ -1,11 +1,15 @@
 #include "epykos/tape/passes.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include "epykos/mutation/mutation.hpp"
 
 namespace epykos {
 
@@ -161,6 +165,10 @@ PassResult cse(Tape& tape) {
   seen.reserve(old.size());
   std::size_t merged = 0;
   const auto& nodes = old.nodes();
+  // Mutant cse.merge_nonequal: a Const operand contributes no identity to the key (which constant
+  // it is, i.e. its bit pattern, is ignored), so nodes that differ only in a constant merge.
+  const bool merge_nonequal = mutant("cse.merge_nonequal");
+  auto operand_key = [&](node_id x) { return merge_nonequal && nodes[idx(x)].op == Op::Const ? node_id{-2} : rb.mapped(x); };
   for (std::size_t i = 0; i < nodes.size(); ++i) {
     const node_id o = static_cast<node_id>(i);
     const Node& n = nodes[i];
@@ -179,9 +187,9 @@ PassResult cse(Tape& tape) {
       key.kbits = bits_of(n.konst);
     } else {
       const int arity = op_arity(n.op);
-      if (arity >= 1) key.a = rb.mapped(n.a);
-      if (arity >= 2) key.b = rb.mapped(n.b);
-      if (arity >= 3) key.c = rb.mapped(n.c);
+      if (arity >= 1) key.a = operand_key(n.a);
+      if (arity >= 2) key.b = operand_key(n.b);
+      if (arity >= 3) key.c = operand_key(n.c);
       if (op_is_commutative(n.op) && key.b < key.a) std::swap(key.a, key.b);
     }
     auto it = seen.find(key);
@@ -256,6 +264,7 @@ PassResult fold_sum(Tape& tape, FoldSumOptions options) {
 
   std::vector<char> absorbed(n_nodes, 0);
   std::vector<std::vector<node_id>> chain(n_nodes);  // head -> addends in fold order
+  const bool wrong_order = mutant("fold_sum.wrong_order");  // Mutant: the Sum's operands in reverse fold order
   for (std::size_t i = 0; i < n_nodes; ++i) {
     const node_id o = static_cast<node_id>(i);
     if (!is_chain_op(o) || is_inner(o)) continue;
@@ -280,6 +289,7 @@ PassResult fold_sum(Tape& tape, FoldSumOptions options) {
       }
     }
     if (static_cast<int>(terms.size()) < min_terms) continue;
+    if (wrong_order) std::reverse(terms.begin(), terms.end());
     chain[i] = std::move(terms);
     for (std::size_t s = 1; s < spine.size(); ++s) absorbed[idx(spine[s])] = 1;
   }
@@ -490,6 +500,10 @@ PassResult affine_collapse(Tape& tape) {
   std::vector<node_id> args;
   std::vector<double> coefs;
   std::size_t changed = 0;
+  // Mutants. affine.wrong_coefficient: the first coefficient of the first Affine this pass emits
+  // is one ulp too large. affine.drop_offset: the leading constant c_0 is dropped (-0.0 emitted).
+  bool perturb_coefficient = mutant("affine.wrong_coefficient");
+  const bool drop_offset = mutant("affine.drop_offset");
   for (std::size_t i = 0; i < n_nodes; ++i) {
     const node_id o = static_cast<node_id>(i);
     if (absorbed[i]) {
@@ -504,7 +518,8 @@ PassResult affine_collapse(Tape& tape) {
         args.push_back(rb.mapped(t.atom));
         coefs.push_back(t.coef);
       }
-      rb.set(o, rb.out().variadic(Op::Affine, args, coefs, sp.konst));
+      if (perturb_coefficient) { coefs[0] = std::nextafter(coefs[0], std::numeric_limits<double>::infinity()); perturb_coefficient = false; }
+      rb.set(o, rb.out().variadic(Op::Affine, args, coefs, drop_offset ? -0.0 : sp.konst));
       ++changed;
       continue;
     }

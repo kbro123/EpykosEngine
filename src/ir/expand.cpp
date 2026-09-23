@@ -8,6 +8,8 @@
 #include <string>
 #include <utility>
 
+#include "epykos/mutation/mutation.hpp"
+
 namespace epykos::ir {
 
 namespace {
@@ -45,6 +47,10 @@ Tape expand(const Program& p) {
   std::vector<node_id> node_of(p.num_values(), invalid_node);
   std::vector<std::int32_t> ordinal_of(p.num_values(), -1);
   for (size_t k = 0; k < p.inputs.size(); ++k) ordinal_of[idx(p.inputs[k])] = static_cast<std::int32_t>(k);
+  // Mutants. expander.drop_gather: gather 0 reads value id r (the identity index) instead of its
+  // index[r]. expander.segment_off_by_one: every segment loses its last member.
+  const bool drop_gather = mutant("expander.drop_gather");
+  const bool segment_off_by_one = mutant("expander.segment_off_by_one");
 
   std::vector<node_id> scratch;
   std::vector<node_id> members;
@@ -68,7 +74,8 @@ Tape expand(const Program& p) {
           case SlotKind::Literal:
           case SlotKind::Column: return t.constant(value_of_slot(s));
           case SlotKind::Gather: {
-            const node_id n = node_of[idx(p.gathers[idx(s.index)].index[idx(r)])];
+            const value_id target = (drop_gather && s.index == 0) ? static_cast<value_id>(r) : p.gathers[idx(s.index)].index[idx(r)];
+            const node_id n = node_of[idx(target)];
             if (n == invalid_node) fail("gather reads a value that has not been emitted");
             return n;
           }
@@ -95,7 +102,8 @@ Tape expand(const Program& p) {
             const Segment& seg = p.segments[idx(s.a.index)];
             members.clear();
             coefs.clear();
-            for (std::int32_t m = seg.offsets[idx(r)]; m < seg.offsets[idx(r) + 1]; ++m) {
+            const std::int32_t end = seg.offsets[idx(r) + 1] - (segment_off_by_one ? 1 : 0);
+            for (std::int32_t m = seg.offsets[idx(r)]; m < end; ++m) {
               const node_id n = node_of[idx(seg.members[idx(m)])];
               if (n == invalid_node) fail("segment reads a value that has not been emitted");
               members.push_back(n);

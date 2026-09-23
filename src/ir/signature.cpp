@@ -10,6 +10,8 @@
 #include <unordered_set>
 #include <utility>
 
+#include "epykos/mutation/mutation.hpp"
+
 namespace epykos::ir {
 
 namespace {
@@ -111,7 +113,7 @@ class Inference {
   void compute_deep();
   void promote_shared();
   uint64_t token(node_id c) const noexcept {
-    if (is_const_[idx(c)]) return tok_const_;
+    if (is_const_[idx(c)]) return merge_classes_ ? tok_ref_ : tok_const_;  // mutant: a constant slot hashes as a reference
     if (boundary_[idx(c)]) return tok_ref_;
     return h_[idx(c)];
   }
@@ -135,6 +137,11 @@ class Inference {
   std::vector<uint64_t> h_;     // local tree hash (stops at boundaries)
   uint64_t tok_const_ = mix(k_seed, 1);
   uint64_t tok_ref_ = mix(k_seed, 2);
+  // Mutant signature.merge_classes: the const-slot pattern is not part of the signature. A
+  // constant slot hashes like a reference (token) and two trees with the same hash and the same
+  // slot counts are one class (class_for), so sub($, @) and sub(@, $) share a class and the
+  // second shape is emitted with the first's operand order.
+  const bool merge_classes_ = mutant("signature.merge_classes");
 
   std::vector<Class> classes_;
   std::unordered_map<uint64_t, std::vector<std::int32_t>> class_by_hash_;
@@ -328,6 +335,7 @@ std::int32_t Inference::class_for(const Extract& ex, uint64_t hash) {
   std::vector<std::int32_t>& cands = class_by_hash_[hash];
   for (std::int32_t c : cands) {
     if (classes_[idx(c)].proto == ex.proto) return c;
+    if (merge_classes_ && classes_[idx(c)].n_const == static_cast<std::int32_t>(ex.consts.size()) && classes_[idx(c)].n_ref == static_cast<std::int32_t>(ex.refs.size())) return c;
   }
   Class cl;
   cl.hash = hash;

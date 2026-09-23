@@ -18,11 +18,14 @@
 //   inputs    value id of every Input ordinal (they are rows of the Input domain).
 //   outputs   value id of every output ordinal.
 //
-// Rows of a domain never read other rows of the same domain in M1. A class whose instances read
-// each other directly is a recurrence (DESIGN.md §5.6) and is flagged `recurrent`; supporting it as
-// a `scan` is M5 work, so M1 consumers assert `recurrent_domains(program).empty()`. Classes that
-// depend on each other through other classes (legs -> swaps -> book) are split by dependency level
-// so that every domain is evaluable in one pass (domain.level; see signature.hpp).
+// Rows of a domain never read other rows of the same domain in a program infer() produces: a
+// class whose instances read each other directly (a recurrence, DESIGN.md §5.6) is split by
+// dependency level like any class in a cycle, and every level-domain carries `scan_class` (the
+// M5 scan candidate; M1 consumers assert `scan_class_domains(program).empty()` on the M1 book).
+// `recurrent` is the per-domain fact — the rows of this domain read this domain (earlier rows) —
+// which validate() permits and exec::Interpreter refuses; infer() never sets it (D22, D23).
+// Classes that depend on each other through other classes (legs -> swaps -> book) are split by
+// level the same way, so every domain is evaluable in one pass (domain.level; see signature.hpp).
 //
 // Evaluation contract (P4 and evaluate.hpp): iterate `domains` in order; for each row evaluate
 // the group's steps in order; the row's value is the last step's value; store it at
@@ -85,8 +88,9 @@ struct Domain {
   std::int32_t rows = 0;
   value_id value_base = 0;  // value id of row 0
   std::int32_t level = 0;   // dependency level inside a class cycle (0 when the class has none)
-  bool recurrent = false;   // rows read rows of this same domain directly (a scan candidate)
+  bool recurrent = false;   // rows read earlier rows of this same domain (never set by infer())
   std::vector<domain_id> reads;  // domains this domain's gathers / segments read (sorted, unique)
+  bool scan_class = false;  // the class this domain was split from reads itself (a scan candidate)
   bool operator==(const Domain&) const = default;
 };
 
@@ -134,6 +138,8 @@ struct Program {
 
 // Domains flagged recurrent (rows reading rows of their own domain).
 std::vector<domain_id> recurrent_domains(const Program& p);
+// Domains of a self-reading class (scan candidates), i.e. those with scan_class set.
+std::vector<domain_id> scan_class_domains(const Program& p);
 
 // The rows of a domain: helpers for tests and consumers.
 inline value_id value_of(const Program& p, domain_id d, row_id r) noexcept {
@@ -158,8 +164,10 @@ void validate(const Program& p);
 std::string to_string(const Program& p);
 void dump(const Program& p, std::ostream& os);
 
-// Exact text serialisation (doubles as hexadecimal bit patterns). deserialize(serialize(p)) == p.
+// Exact text serialisation (doubles as hexadecimal bit patterns; format "epykos-ir 2").
+// deserialize(serialize(p)) == p.
 std::string serialize(const Program& p);
+
 Program deserialize(const std::string& text);  // throws std::runtime_error on malformed text
 
 }  // namespace epykos::ir

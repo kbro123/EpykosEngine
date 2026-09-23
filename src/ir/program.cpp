@@ -166,6 +166,14 @@ std::vector<domain_id> recurrent_domains(const Program& p) {
   return out;
 }
 
+std::vector<domain_id> scan_class_domains(const Program& p) {
+  std::vector<domain_id> out;
+  for (size_t d = 0; d < p.domains.size(); ++d) {
+    if (p.domains[d].scan_class) out.push_back(static_cast<domain_id>(d));
+  }
+  return out;
+}
+
 std::string shape_string(const Program& p, domain_id d) {
   const Group& g = p.groups[idx(d)];
   if (g.steps.empty()) return "<empty>";
@@ -332,6 +340,7 @@ void dump(const Program& p, std::ostream& os) {
     const Group& g = p.groups[d];
     os << "d" << d << " rows=" << dom.rows << " base=" << dom.value_base << " level=" << dom.level;
     if (dom.recurrent) os << " recurrent";
+    if (dom.scan_class) os << " scan-class";
     os << " reads={";
     for (size_t i = 0; i < dom.reads.size(); ++i) os << (i ? "," : "") << 'd' << dom.reads[i];
     os << "} steps=" << g.steps.size() << ' ' << dom.name << '\n';
@@ -429,14 +438,14 @@ void expect(std::istream& is, const char* word) {
 
 std::string serialize(const Program& p) {
   std::ostringstream os;
-  os << "epykos-ir 1\n";
+  os << "epykos-ir 2\n";
   os << "literals " << p.literals.size();
   for (double v : p.literals) os << ' ' << hex(v);
   os << '\n';
   os << "domains " << p.domains.size() << '\n';
   for (const Domain& d : p.domains) {
     os << "domain " << d.rows << ' ' << d.value_base << ' ' << d.level << ' ' << (d.recurrent ? 1 : 0) << ' '
-       << d.reads.size();
+       << (d.scan_class ? 1 : 0) << ' ' << d.reads.size();
     for (domain_id r : d.reads) os << ' ' << r;
     // The name is one whitespace-delimited token (deserialize reads it with >>).
     for (char c : d.name) {
@@ -496,7 +505,7 @@ Program deserialize(const std::string& text) {
   std::istringstream is(text);
   Program p;
   expect(is, "epykos-ir");
-  if (get<int>(is, "version") != 1) fail("deserialize: unsupported version");
+  if (get<int>(is, "version") != 2) fail("deserialize: unsupported version");
   expect(is, "literals");
   {
     const size_t n = get<size_t>(is, "literal count");
@@ -512,7 +521,9 @@ Program deserialize(const std::string& text) {
       d.value_base = get<value_id>(is, "base");
       d.level = get<std::int32_t>(is, "level");
       d.recurrent = get<int>(is, "recurrent") != 0;
+      d.scan_class = get<int>(is, "scan_class") != 0;
       const size_t nr = get<size_t>(is, "reads count");
+
       for (size_t k = 0; k < nr; ++k) d.reads.push_back(get<domain_id>(is, "read"));
       d.name = get<std::string>(is, "name");
       if (d.name == "-") d.name.clear();

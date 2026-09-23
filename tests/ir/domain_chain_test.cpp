@@ -149,6 +149,8 @@ TEST(IrDomainChain, PrintsTheChain) {
 TEST(IrDomainChain, NoScanDomainsAndTenDomains) {
   const Fixture& f = fixture();
   EXPECT_TRUE(ir::recurrent_domains(f.program).empty());
+  EXPECT_TRUE(ir::scan_class_domains(f.program).empty()) << "no class of the M1 book reads itself (D16, D22)";
+
   EXPECT_EQ(f.program.domains.size(), 10u);
   EXPECT_EQ(f.stats.classes, 8u);   // input, affine, DF, const-rate coupon, forward, float coupon, sum, swap
   EXPECT_EQ(f.stats.domains, 10u);  // sum and swap split by level: legs / book, T==1 / T>=2

@@ -677,7 +677,7 @@ Program Inference::assemble() {
     dom.rows = static_cast<std::int32_t>(n_rows);
     dom.value_base = base;
     dom.level = key.level;
-    dom.recurrent = class_recurrent_[idx(key.cls)] != 0;
+    dom.scan_class = class_recurrent_[idx(key.cls)] != 0;  // the class-level fact (D23)
     base += dom.rows;
 
     // Per-slot data over this domain's rows.
@@ -755,8 +755,13 @@ Program Inference::assemble() {
       g.steps.push_back(s);
     }
     dom.reads.assign(reads.begin(), reads.end());
+    // Per domain: do this domain's rows read this domain? Never after level splitting (a row of
+    // a self-reading class reads rows of a lower level, i.e. another domain), but computed, not
+    // copied from the class (D23).
+    dom.recurrent = reads.count(d_src) != 0;
     // reads are source-domain ids in creation order; convert to evaluation positions.
     p.domains.push_back(std::move(dom));
+
     p.groups.push_back(std::move(g));
   }
   // Domain ids in `reads` were creation ids; map to positions.

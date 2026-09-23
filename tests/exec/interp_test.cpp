@@ -217,7 +217,71 @@ TEST(Interp, HandBuiltProgramSumFallbackConstAndAffine) {
   }
 }
 
+// A class whose rows read rows of the same class is split by level into domains that read only
+// earlier domains (D23): Domain::recurrent is false on each, Domain::scan_class records the
+// class-level fact, and the interpreter runs the program bitwise against the replay. Before D23
+// the class flag was copied into every level-domain and the interpreter refused these programs.
+TEST(Interp, SameClassChainsSplitByLevelRunBitwise) {
+  // exp(exp(x)) with the inner exp registered as an output: exp@L0 reads inputs, exp@L1 reads exp@L0.
+  {
+    Tape tape;
+    {
+      Tape::Scope scope(tape);
+      for (int r = 0; r < 4; ++r) {
+        const Rec x = epykos::make_input(tape, 0.1 + 0.2 * r);
+        const Rec inner = exp(x);
+        epykos::register_output(tape, inner);
+        epykos::register_output(tape, exp(inner));
+      }
+    }
+    const ir::Program program = ir::infer(tape);
+    EXPECT_TRUE(ir::recurrent_domains(program).empty()) << ir::to_string(program);
+    EXPECT_EQ(ir::scan_class_domains(program).size(), 2u) << ir::to_string(program);
+    std::vector<std::vector<double>> states;
+    for (int b = 0; b < 3; ++b) states.push_back({0.1 + 0.01 * b, 0.3 - 0.02 * b, 0.5 + 0.03 * b, 0.7 - 0.04 * b});
+    EXPECT_EQ(check_against_replay(tape, program, states), 0u);
+  }
+  // (a*b)*c with a*b shared (an output): the mul class reads itself through the shared product.
+  {
+    Tape tape;
+    {
+      Tape::Scope scope(tape);
+      const Rec a = epykos::make_input(tape, 1.5);
+      const Rec b = epykos::make_input(tape, 2.5);
+      const Rec c = epykos::make_input(tape, 3.5);
+      const Rec ab = a * b;
+      epykos::register_output(tape, ab);
+      epykos::register_output(tape, ab * c);
+    }
+    const ir::Program program = ir::infer(tape);
+    EXPECT_TRUE(ir::recurrent_domains(program).empty()) << ir::to_string(program);
+    EXPECT_EQ(ir::scan_class_domains(program).size(), 2u) << ir::to_string(program);
+    EXPECT_EQ(check_against_replay(tape, program, {{1.5, 2.5, 3.5}, {-1.0, 0.25, 8.0}}), 0u);
+  }
+  // A 5-step recurrence x_j = x_{j-1}*c_j + d_j (every x_j an output): five level-domains of one row.
+  {
+    Tape tape;
+    {
+      Tape::Scope scope(tape);
+      Rec x = epykos::make_input(tape, 1.0);
+      for (int j = 1; j <= 5; ++j) {
+        x = x * (1.0 + 0.1 * j) + (0.01 * j);
+        epykos::register_output(tape, x);
+      }
+    }
+    const ir::Program program = ir::infer(tape);
+    EXPECT_TRUE(ir::recurrent_domains(program).empty()) << ir::to_string(program);
+    EXPECT_EQ(ir::scan_class_domains(program).size(), 5u) << ir::to_string(program);
+    for (int lane_tile : {1, 3}) {
+      exec::Options o;
+      o.lane_tile = lane_tile;
+      EXPECT_EQ(check_against_replay(tape, program, {{2.0}, {1.5}, {-0.5}}, o), 0u) << "lane_tile " << lane_tile;
+    }
+  }
+}
+
 TEST(Interp, OptionsAndBatchWidthAreValidated) {
+
   const m1::Book book = m1::make_m1_book();
   const Tape tape = m1::record_m1(book);
   const ir::Program program = ir::infer(tape);

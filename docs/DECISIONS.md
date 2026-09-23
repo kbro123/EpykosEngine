@@ -135,3 +135,15 @@ book `sum`(1)@L2. The seasoned-first coupon N·τ·R·DF(e) and the fixed coupon
 one constant slot and share a class: hash-consing modulo constants cannot separate them (the WORKLOADS.md
 expectation holds against the float class, not the fixed class). Not changed: P2's affine pass; a single-term
 absorption of `Neg(Input)` would fold the three knot-time DFs into the affine domain and is left to M3 (R1/R3).
+
+## D23 — Recurrence flags after level splitting (2026-09-23)
+Refines D22 rule 4 (M1/P7 review). `Domain::recurrent` means what its name says: the rows of this domain read
+(earlier) rows of this same domain, which is what `ir::validate` permits and what `exec::Interpreter` refuses.
+`infer()` never sets it: a class whose rows read rows of the same class directly is split by dependency level like
+any class in a cycle, so every domain it produces reads only earlier domains and is evaluable in one pass. The
+class-level fact is carried separately as `Domain::scan_class`, set on every level-domain of such a class: that is
+the M5 scan candidate, and it is what M1 asserts absent on the M1 book (`scan_class_domains(program).empty()`).
+Before this entry the class flag was copied into `recurrent`, so the interpreter refused ordinary acyclic programs
+such as exp(exp(x)) with the inner exp registered as an output (both level-domains of the exp class were marked
+recurrent although neither reads itself) while `ir::Evaluator` evaluated them correctly. The IR text format becomes
+`epykos-ir 2` (one more domain field); nothing persisted uses the old one.

@@ -20,11 +20,14 @@
 // id per row); Sum / Affine operands become segments. Const nodes that are themselves Sum
 // members or outputs form the "const" domain (one Const step, one column).
 //
-// Recurrences: classes whose rows read rows of the same class directly are flagged `recurrent`
-// (a scan in DESIGN.md §5.6; unsupported until M5). Classes that reach themselves only through
-// other classes (legs -> swaps -> book) are split by dependency level within their cycle so that
+// Recurrences: a class whose rows read rows of the same class directly is a scan candidate
+// (DESIGN.md §5.6; a `scan` domain is M5 work). Like any class in a cycle it is split by
+// dependency level, and every level-domain carries `Domain::scan_class`; no domain infer()
+// produces reads itself, so `Domain::recurrent` is never set (D22, D23). Classes that reach
+// themselves only through other classes (legs -> swaps -> book) are split the same way, so that
 // every domain is evaluable in one pass; domains are then ordered topologically (ties by first
 // appearance on the tape).
+
 //
 // Reserved ops (Gather … Pin) are rejected with std::invalid_argument; the tape is validated
 // first (RecordError on a malformed tape).

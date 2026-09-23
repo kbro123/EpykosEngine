@@ -201,7 +201,7 @@ TEST(IrProgram, ConstantMembersAndConstantOutputsAreRowsOfTheConstDomain) {
   EXPECT_EQ(bits(out[1]), bits(-1.0));
 }
 
-TEST(IrProgram, DirectRecurrenceIsFlaggedAndSplitByLevel) {
+TEST(IrProgram, DirectRecurrenceIsAScanClassSplitByLevel) {
   // x_j = x_{j-1} * c_j + d_j, every x_j an output: one class whose rows read their own class.
   Tape t;
   const int n = 5;
@@ -215,11 +215,17 @@ TEST(IrProgram, DirectRecurrenceIsFlaggedAndSplitByLevel) {
   }
   ir::InferStats stats;
   const ir::Program p = ir::infer(t, &stats);
-  const std::vector<ir::domain_id> rec = ir::recurrent_domains(p);
-  EXPECT_EQ(rec.size(), static_cast<std::size_t>(n)) << "one level per step";
-  for (ir::domain_id d : rec) {
-    EXPECT_EQ(p.domains[static_cast<std::size_t>(d)].rows, 1);
-    EXPECT_TRUE(p.domains[static_cast<std::size_t>(d)].recurrent);
+  // The class reads itself, so every level-domain carries scan_class; after the split no domain
+  // reads itself, so none is recurrent (D23) and every domain reads only earlier domains.
+  EXPECT_TRUE(ir::recurrent_domains(p).empty());
+  const std::vector<ir::domain_id> scan = ir::scan_class_domains(p);
+  EXPECT_EQ(scan.size(), static_cast<std::size_t>(n)) << "one level per step";
+  for (ir::domain_id d : scan) {
+    const ir::Domain& dom = p.domains[static_cast<std::size_t>(d)];
+    EXPECT_EQ(dom.rows, 1);
+    EXPECT_TRUE(dom.scan_class);
+    EXPECT_FALSE(dom.recurrent);
+    for (ir::domain_id r : dom.reads) EXPECT_LT(r, d);
   }
   EXPECT_EQ(stats.classes, 2u);
   EXPECT_EQ(stats.domains, static_cast<std::size_t>(n) + 1);
@@ -254,6 +260,7 @@ TEST(IrProgram, IndirectCycleIsSplitByLevelWithoutARecurrence) {
   epykos::standard_passes(t);
   const ir::Program p = check(t, "indirect cycle");
   EXPECT_TRUE(ir::recurrent_domains(p).empty());
+  EXPECT_TRUE(ir::scan_class_domains(p).empty());
   int sums = 0, levels_seen = 0;
   for (std::size_t d = 0; d < p.domains.size(); ++d) {
     if (p.groups[d].steps.back().op == Op::Sum) {
@@ -299,8 +306,10 @@ TEST(IrProgram, ValidateRejectsCorruptPrograms) {
     bad.outputs.push_back(static_cast<ir::value_id>(bad.num_values()));
     EXPECT_THROW(ir::validate(bad), std::runtime_error);
   }
-  EXPECT_THROW(ir::deserialize("epykos-ir 2\n"), std::runtime_error);
+  EXPECT_THROW(ir::deserialize("epykos-ir 1\n"), std::runtime_error);  // an older format version
+  EXPECT_THROW(ir::deserialize("epykos-ir 2\n"), std::runtime_error);  // truncated
   EXPECT_THROW(ir::deserialize("nonsense"), std::runtime_error);
+
 }
 
 TEST(IrProgram, SerialisationIsExactOnTheM1Book) {

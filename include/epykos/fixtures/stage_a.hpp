@@ -225,26 +225,32 @@ StageA make_stage_a(const StageAOptions& options = {});
 
 // ---- the book on any Scalar --------------------------------------------------------------------
 
-// A memoising df(slot, t): the value of each (slot, t) is computed once through `inner`.
+// A memoising df(slot, t): the value of each (slot, t) is computed once through `inner` (one
+// table per slot, keyed by the bit pattern of t).
 template <class Scalar, class Inner>
 class DfMemo {
  public:
   explicit DfMemo(Inner inner) : inner_(std::move(inner)) {}
   Scalar operator()(int slot, double t) {
-    std::uint64_t bits;
-    std::memcpy(&bits, &t, sizeof bits);
-    const std::uint64_t key = (static_cast<std::uint64_t>(static_cast<std::uint32_t>(slot)) << 60) ^ bits;
-    auto it = memo_.find(key);
-    if (it != memo_.end()) return it->second;
+    std::uint64_t key;
+    std::memcpy(&key, &t, sizeof key);
+    if (static_cast<std::size_t>(slot) >= memo_.size()) memo_.resize(static_cast<std::size_t>(slot) + 1);
+    std::unordered_map<std::uint64_t, Scalar>& table = memo_[static_cast<std::size_t>(slot)];
+    auto it = table.find(key);
+    if (it != table.end()) return it->second;
     const Scalar v = inner_(slot, t);
-    memo_.emplace(key, v);
+    table.emplace(key, v);
     return v;
   }
-  std::size_t size() const noexcept { return memo_.size(); }
+  std::size_t size() const noexcept {
+    std::size_t n = 0;
+    for (const auto& table : memo_) n += table.size();
+    return n;
+  }
 
  private:
   Inner inner_;
-  std::unordered_map<std::uint64_t, Scalar> memo_;
+  std::vector<std::unordered_map<std::uint64_t, Scalar>> memo_;
 };
 
 template <class Scalar>

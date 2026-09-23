@@ -170,7 +170,10 @@ if(EPYKOS_MUTATIONS)
 endif()
 target_compile_definitions(epykos PRIVATE
   EPYKOS_BUILD_CONFIG="${CMAKE_BUILD_TYPE}"
-  EPYKOS_BUILD_FLAGS="${EPYKOS_CXX_FLAGS}")
+  EPYKOS_BUILD_FLAGS="${EPYKOS_CXX_FLAGS}"
+  # Definitions are data (D36): blueprints/ of this source tree is the default location of the
+  # conventions registry (epykos::conventions::Registry::default_dir); EPYKOS_BLUEPRINTS overrides it.
+  EPYKOS_BLUEPRINTS_DIR="${CMAKE_SOURCE_DIR}/blueprints")
 
 if(EPYKOS_BUILD_TESTS)
   enable_testing()

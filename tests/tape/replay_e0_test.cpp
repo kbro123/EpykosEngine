@@ -108,10 +108,17 @@ TEST(ReplayE0, HandWrittenFunctionMatchesDoubleBitwise) {
   Rec rec_out;
   {
     Tape::Scope scope(t);
-    rec_out = hand_function(epykos::make_input(1.3), epykos::make_input(0.7), epykos::make_input(2.1));
+    // One statement per input: the order of evaluation of function arguments is unspecified
+    // (GCC evaluates them right to left), and the input ordinals must be x, y, z.
+    const Rec x = epykos::make_input(1.3);
+    const Rec y = epykos::make_input(0.7);
+    const Rec z = epykos::make_input(2.1);
+    rec_out = hand_function(x, y, z);
     epykos::register_output(rec_out);
+    EXPECT_EQ(t.inputs(), (std::vector<epykos::node_id>{x.id, y.id, z.id})) << "input ordinals are x, y, z";
   }
   EXPECT_NO_THROW(t.validate());
+
   // Every op family is on the tape.
   for (Op op : {Op::Add, Op::Sub, Op::Mul, Op::Div, Op::Neg, Op::Exp, Op::Log, Op::Sqrt, Op::Recip,
                 Op::Fma, Op::Select, Op::CmpLt, Op::CmpLe, Op::CmpGt, Op::CmpGe, Op::CmpEq}) {
@@ -142,9 +149,12 @@ TEST(ReplayE0, RunDoesNotAllocate) {
   Tape t;
   {
     Tape::Scope scope(t);
-    epykos::register_output(hand_function(epykos::make_input(1.3), epykos::make_input(0.7),
-                                          epykos::make_input(2.1)));
+    const Rec x = epykos::make_input(1.3);  // separate statements: argument order is unspecified
+    const Rec y = epykos::make_input(0.7);
+    const Rec z = epykos::make_input(2.1);
+    epykos::register_output(hand_function(x, y, z));
   }
+
   epykos::standard_passes(t);
   Replayer rp(t);
   double out = 0.0;

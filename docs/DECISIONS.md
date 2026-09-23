@@ -393,3 +393,13 @@ the adjoint mutants by the adjoint gates only — `wrong_transpose`, `drop_broad
 the M1 gates (FD and linearity; vs forward mode) and by the near-miss gate (after the passes; on the raw near-miss
 recording gather 0 is the identity index, where `wrong_transpose` is a no-op), `select_wrong_arm` and
 `recip_rule_sign` by the near-miss gate alone. The harness table is in `RESUME.md` §5 (M2/Q4b).
+
+## D28 — The desk problem is the fixture; milestones re-sequenced (2026-09-23)
+Supersedes the M3–M5 milestone definitions of `ROADMAP.md` as first written (rewrites on the M1 book, curves as a
+separate fixture, MC as a separate fixture). Optimising stages in isolation bakes in boundaries that hide the
+cross-stage reuse the engine exists to exploit. From M3 onward the fixture is the desk problem of `docs/PROBLEM.md`:
+outputs O1–O6 produced by one recording per stage, with real instruments, real conventions and every interpolation
+type. Order: M3 groundwork and the Stage A tape (USD + EUR), M4 optimise the totality (rewrites, cost model,
+equality saturation, catalogue), M5 Stages B and C with streaming, M6 Monte Carlo, MX the SwapEngine comparison.
+Owner choices: Stage A is USD + EUR; futures without convexity, stated; 1,000 fully recalibrated scenarios; O5
+includes CVA delta. M2 is unaffected.

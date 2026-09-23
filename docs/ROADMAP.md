@@ -34,44 +34,63 @@ Fixture: `WORKLOADS.md` §M2.
 
 **Exit gate:** adjoint vs FD at 1e-6 rel, vs forward mode at 1e-12; every mutated rule caught.
 
-## M3 — Fusion rewrites and the catalogue
-Fixture: `WORKLOADS.md` §M3.
-- Rewrites R1–R7 with exactness classes, each with its differential test and mutation test.
-- Catalogue generator under `tools/catalogue/` (hot signatures → emitted C++ under `src/catalogue/generated/`,
-  committed; CI checks regeneration is a no-op).
-- Coverage report: which groups ran on the interpreter.
+## M3 — Groundwork and the Stage A tape (`PROBLEM.md` §4 Stage A; D28)
+Supersedes the island M3–M5 first written here (rewrites, curves, MC as separate fixtures); their content moves
+into M4–M6 below, applied to the desk problem.
+- Conventions layer (structure only): calendars from published rules (NY/SIFMA, TARGET), day counts, rolls, spot /
+  payment / fixing lags, IMM dates, schedules with stubs and end-of-month, observation shift / lookback / lockout
+  windows, fixings history; sources in `docs/G4_BUNDLE.md`.
+- Curve schemes as templated maths: Flat, Linear, Hermite, NaturalCubic, MonotoneCubic (Hyman via `select`),
+  BSpline; interpolation variables `zero` / `logdf` / `forward`; composite curves by region. Eigen on the `double`
+  side only (D14).
+- Instruments as templated maths over convention tables: RFR compounded (natural product recurrence → `scan`),
+  RFR averaging, term-rate legs with fixing in advance, fixed legs, OIS / IBOR / tenor-basis swaps, deposits,
+  futures (convexity 0, stated); par rates and residuals.
+- `scan` domains: recurrence detection, interpreter and reverse-scan adjoint.
+- `implicit` node with multi-curve dependencies inside the tape; residual sub-program sharing the DF domains with
+  the book (`PROBLEM.md` §5).
+- The Stage A fixture from the seed (synthetic quotes, ~2,000 trades, 1,000 scenarios) recorded as **one tape**
+  producing O1–O4 and O6.
 
-**Exit gate:** hand-fused parity (≤ 1.05×) on catalogued groups; E0/E1 parity per rule.
+**Exit gate:** every `PROBLEM.md` §6 gate on the Stage A tape; the IR shows one DF domain read by both the residual
+and the book; conventions match published examples. Timings recorded as the M4 baseline (informational).
 
-## M4 — Curves and calibration
-Fixture: `WORKLOADS.md` §M4. Full scope, in this order: schemes + variables + composite → `implicit` → `pin` + `rank_update`.
-- Region schemes as templated maths (Flat, Linear, Hermite, NaturalCubic, MonotoneCubic, BSpline); linear ones collapse
-  to `linmap`, value-dependent ones through `select`. Eigen on the `double` side only (D14).
-- Interpolation variable per scheme (`zero`, `logdf`, `forward` where closed-form) and composite curves built by
-  region, each region its own scheme and variable, boundaries folded as structure (`WORKLOADS.md` §M4).
-- `implicit` node: least-squares calibration with IFT risk (`dx/dq`).
-- `pin` + `rank_update`: band edges and interpolation kinks as one active set; frozen-Newton streaming.
+## M4 — Optimise the totality (`PROBLEM.md` §7)
+- Rewrites R1–R7 with exactness classes, differential and mutation tests; the interpreter's planner decisions
+  re-expressed as rules of the same kind.
+- Cost model calibrated from the per-domain profiling timers, per fingerprint; validated by prediction error.
+- Equality saturation over the domain IR; extraction by cost at the requested exactness class; AD mode per Jacobian
+  block as a rule; cross-stage sharing rules (DF domain, factored Jacobian across lanes).
+- Catalogue generated from the Stage A tape's hot groups; coverage report; regeneration no-op in CI.
 
-**Exit gate:** calibration first-order optimality (`‖Jᵀr‖∞`), IFT risk vs bump-and-recalibrate at 1e-6, a kink
-2-cycle repro that converges without a forced refresh.
+**Exit gate:** the search rediscovers M1's three kill-path fusions with the planner's hard-coded rules switched off;
+finds at least one cross-stage optimisation the greedy pipeline cannot express; every extracted program passes
+`PROBLEM.md` §6 at its declared class; self-regression gate (D9) against the M3 baseline. Informational rows: the
+M1 sub-book vs the hand kernel under every D27 pairing; adjoint risk vs bump-and-recalibrate.
 
-## M5 — Batch axis, scan domains, Monte Carlo exposure
-Fixture: `WORKLOADS.md` §M5.
-- Recurrence detection → `scan` domains.
-- Affine short-rate models, Hull–White 1F **and** LGM sharing one kernel: `log P(t,T) = A − B·x_t` as a batched
-  `linmap`, the time step an affine `scan` (D19).
-- `std::thread` pool and counter-based RNG with inverse-CDF Gaussians; bit-identical across tile size and thread
-  count (D17).
-- Exposure grid (paths × dates × book), tiled; per-date structure representation measured, not assumed.
+## M5 — Stages B and C, streaming (`PROBLEM.md` §4 Stages B, C)
+- EURUSD MtM-resetting xccy basis swaps, FX spot as input, EUR discounting under USD collateral, FX delta.
+- GBP (SONIA) and JPY (TONA) with their calendars and conventions; GBPUSD and USDJPY xccy; the ~5,000-trade book.
+- `pin` + `rank_update` + hysteresis: frozen-Newton streaming; a kink 2-cycle fixture on a composite curve that
+  fails without `pin` and converges with it.
+- The optimiser and catalogue re-run on the Stage C tape.
 
-**Exit gate:** 10k paths × 100 dates × 1k swaps under 1 s on 8 threads; per-path parity E0 with a scalar reference
-under `-ffp-contract=off`, expected exposure to 1e-12.
+**Exit gate:** `PROBLEM.md` §6 on the Stage C tape; kink fixture converges within 5 iterations and no forced
+refresh; self-regression gate.
 
-## M6 — XVA and sensitivities
-- CVA/FVA with adjoint sensitivities to market quotes through the calibration `implicit` node.
-- LSM with `frozen` regression; checkpointed adjoint MC.
+## M6 — Stage D: Monte Carlo exposure and MC risk (`PROBLEM.md` §4 Stage D)
+- `std::thread` pool and counter-based RNG with inverse-CDF Gaussians (D17); fixed-order reductions.
+- Hull–White 1F and LGM per currency sharing one affine kernel (D19), calibrated to O1.
+- Exposure grid on the Stage C book: EE / PFE per netting set and trade; CVA delta to quotes through the adjoint of
+  the simulation and the IFT.
 
-**Exit gate:** adjoint CVA sensitivities vs bump at 1e-4 rel; cost ≤ 5× one valuation.
+**Exit gate:** per-path E0 vs a scalar reference; EE to 1e-12; bit-identical across thread counts and tiles; CVA
+delta vs bump at 1e-4 relative; absolute timing target stated as an estimate until measured (10k paths × 100 dates
+× the Stage C book on 8 threads).
+
+## MX — Stretch: the SwapEngine comparison on Stage C (D21)
+The same bundle, instruments, portfolio and scenarios on SwapEngine as a black box, one fingerprint, each engine's
+own timing harness; an informational table with like-for-like caveats under `bench/compare/`. No gate.
 
 ## Later
 Payoff scripting language targeting the op set; vol surfaces/cubes; SIMM and marginal (pre-trade) analytics; portable
@@ -90,13 +109,3 @@ kernel serialisation; GPU backend for the batch axis.
 | adjoint memory at MC scale | M6 | batch-lane adjoints, per-thread accumulators, binomial checkpointing |
 | code size for irregular payoffs | Later | signature reuse; interpreter; JIT only by explicit decision |
 
-## MX — Stretch: G4 multi-currency bundle, EpykosEngine vs SwapEngine
-Only after M5 passes. Fixture: `WORKLOADS.md` §MX.
-- A realistic G4 (USD, EUR, GBP, JPY) curve bundle built from researched market conventions: OIS curves (SOFR, €STR,
-  SONIA, TONA), tenor-basis curves where the market still has them (EURIBOR 3M/6M vs €STR; JPY TIBOR if warranted),
-  cross-currency basis (EURUSD, GBPUSD, USDJPY, MtM-resetting) — each from its correct instruments with correct day
-  counts, lags, calendars and roll rules. Sources cited in `docs/G4_BUNDLE.md`.
-- Calibration, risk ladder and a portfolio scenario run on both engines, as like-for-like as the two designs allow
-  (D21), under one fingerprint. Differences in what is priced are stated, not hidden.
-
-**Exit:** a report table (informational, D9) with the like-for-like caveats; no gate.

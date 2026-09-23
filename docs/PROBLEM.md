@@ -1,6 +1,6 @@
 # EpykosEngine — The desk problem (the total tape)
 
-Status: **draft for owner review (2026-09-23)**. Once agreed, this replaces the island fixtures of M3–M5 as the
+Status: **agreed by the owner (2026-09-23; D28)**. This replaces the island fixtures of M3–M5 as the
 thing every later milestone builds, verifies and optimises. `WORKLOADS.md` §M1/§M2 stay as the kill-test and
 verification fixtures; everything from M3 onward is a stage of this problem.
 
@@ -23,7 +23,7 @@ one recorded program produces:
 | O2 | priced book | PV per trade in trade currency and in USD; per-leg PVs and accrued; aggregates per currency and per netting set |
 | O3 | risk ladder | par-delta of every trade and of the book to every calibrating quote of every curve (adjoint through the IFT), FX delta; units: PV change per 1 bp / per 1 % FX |
 | O4 | scenario grid | book and per-trade PV under `S` quote scenarios, each = shocked quotes → recalibration → repricing (batch lanes); parallel, twist, butterfly and per-curve shocks |
-| O5 | MC exposure (Stage E) | EE / PFE profiles per netting set and per trade from a short-rate model calibrated to O1; MC-based risk (CVA delta to quotes) via the adjoint through the simulation |
+| O5 | MC exposure (Stage D) | EE / PFE profiles per netting set and per trade from a short-rate model calibrated to O1; MC-based risk (CVA delta to quotes) via the adjoint through the simulation |
 | O6 | diagnostics | select masks, margins and arm gaps; per-output-group timings; structure-churn statistics |
 
 A stage passes only when every output it claims is produced by the **same recording** and verified (§6).
@@ -53,11 +53,13 @@ Every item below is *structure*: computed at table-build time from conventions a
 
 | stage | adds | curves | book | outputs |
 |---|---|---|---|---|
-| **A** | USD, one currency, every single-curve mechanism | SOFR OIS (linear zero *and* log-DF *and* monotone cubic *and* composite variants of the same curve) | OIS compounded (shift, lockout, delay), SOFR averaging swaps, seasoned trades; ~2,000 trades | O1–O4 |
-| **B** | EUR: multi-curve | €STR OIS; EURIBOR 3M and 6M projection curves calibrated to tenor-basis swaps | EURIBOR swaps (fixing in advance), 3s6s basis swaps | O1–O4 |
-| **C** | cross-currency | EURUSD xccy basis curve; EUR discounting under USD collateral | MtM-resetting EURUSD basis swaps; book valued in USD; FX delta | O1–O4 |
-| **D** | G4 breadth | GBP (SONIA, ACT/365F, T+0), JPY (TONA, ACT/365F, Tokyo), GBPUSD and USDJPY xccy | ~5,000 trades across four currencies (the `WORKLOADS.md` §MX portfolio) | O1–O4 |
-| **E** | Monte Carlo | Hull–White / LGM per currency calibrated to O1 | exposure grid on the Stage D book | O5 |
+| **A** | USD + EUR: every single-curve mechanism and multi-curve dependence | SOFR OIS; €STR OIS; EURIBOR 3M and 6M projection curves calibrated to tenor-basis swaps and EURIBOR swaps; deposits / fixings and futures (convexity 0, stated) on the front year; each curve on a stated scheme, and the SOFR curve also recorded on log-DF, monotone cubic and a composite variant | ~2,000 trades: SOFR OIS compounded (shift, lockout, payment delay), SOFR averaging swaps, €STR OIS, EURIBOR swaps (fixing in advance), 3s6s basis swaps; seasoned trades with fixings history | O1–O4 |
+| **B** | cross-currency | EURUSD xccy basis curve; EUR discounting under USD collateral; FX spot input | MtM-resetting EURUSD basis swaps; book valued in USD; FX delta | O1–O4 |
+| **C** | G4 breadth | GBP (SONIA, ACT/365F, T+0), JPY (TONA, ACT/365F, Tokyo), GBPUSD and USDJPY xccy | ~5,000 trades across four currencies (the `WORKLOADS.md` §MX portfolio) | O1–O4 |
+| **D** | Monte Carlo | Hull–White / LGM per currency calibrated to O1 | exposure grid on the Stage C book; CVA delta to quotes | O5 |
+
+Scenario grid (O4): `S = 1,000` scenarios, each a full recalibration of every curve followed by repricing, as batch
+lanes; first-order (IFT) scenario PVs are an informational row, never the definition.
 
 Quotes are synthetic from the seed (stated as synthetic); conventions and tenor sets are researched with sources
 (`docs/G4_BUNDLE.md`).
@@ -65,7 +67,7 @@ Quotes are synthetic from the seed (stated as synthetic); conventions and tenor 
 ## 5. What "one tape" means
 
 - One recording per stage. Inputs: every quote of every curve, FX spots, model parameters. Structure: tables.
-  Outputs: O1–O4 (O5 in Stage E).
+  Outputs: O1–O4 (O5 in Stage D).
 - The implicit node lives **inside** the tape. Its residual sub-program shares the Times / DF domains with the
   pricing of the book; the calibration's final discount factors are the ones the book prices off.
 - Curves depend on each other through the implicit node (projection on OIS; xccy on both OIS curves); the
@@ -97,22 +99,23 @@ rediscovers M1's three kill-path fusions unaided, finds at least one cross-stage
 cannot express, and every extracted program passes §6 at its declared class. Performance is gated against
 ourselves (D9); the M1 hand kernel and bump-and-recalibrate risk are informational rows.
 
-## 8. Milestones (proposed re-sequencing; supersedes ROADMAP M3–M5 on acceptance)
+## 8. Milestones (D28; supersedes ROADMAP M3–M5 as first written)
 
-- **M3 — groundwork and the Stage A tape**: conventions layer, real instruments, all schemes and composites,
-  the implicit node, scan domains (compounding written naturally records as a recurrence), Stage A recorded as
-  one tape with O1–O4 and every §6 gate.
+- **M3 — groundwork and the Stage A tape**: conventions layer with sources, real instruments, all schemes and
+  composites, scan domains (compounding written naturally records as a recurrence), the implicit node with
+  multi-curve dependencies, Stage A recorded as one tape producing O1–O4, every §6 gate, and the cross-stage
+  sharing visible in the IR.
 - **M4 — optimise the totality**: §7 on the Stage A tape.
-- **M5 — Stages B, C, D** on the same machinery: multi-curve, xccy, G4; streaming active sets (`pin`,
-  `rank_update`, kink 2-cycle); the optimiser re-run on the larger tape.
-- **M6 — Stage E**: Monte Carlo exposure and MC risk.
-- **MX — the SwapEngine comparison** on Stage D (D21).
+- **M5 — Stages B and C, streaming**: xccy and G4 on the same machinery; `pin` / `rank_update` active sets and the
+  kink 2-cycle fixture on a composite curve; the optimiser and catalogue re-run on the Stage C tape.
+- **M6 — Stage D**: Monte Carlo exposure and CVA delta through the simulation and the IFT.
+- **MX — the SwapEngine comparison** on Stage C (D21).
 
-## 9. Open choices for the owner
+## 9. Choices made by the owner (2026-09-23)
 
-1. Stage A scope: USD only (as above) or USD + EUR so tenor basis and multi-curve dependence exist before the
-   optimiser first runs?
-2. Calibration instruments in Stage A: OIS swaps only, or also SOFR futures (with stated no-convexity)?
-3. Scenario semantics for O4: full recalibration per scenario (as above) — confirm; and `S` for the gate (1,000?).
-4. Book sizes: Stage A ~2,000 trades, Stage D ~5,000 — confirm or change.
-5. O5 scope: exposure only, or also CVA delta to quotes (MC risk)?
+1. Stage A is USD + EUR, so multi-curve dependence and tenor basis exist before the optimiser first runs.
+2. Calibration instruments include deposits / fixings and futures on the front year with the convexity adjustment
+   set to zero and labelled as a simplification; OIS, EURIBOR and basis swaps beyond.
+3. O4 is 1,000 scenarios with full recalibration each; IFT first-order PVs are informational only.
+4. O5 includes CVA delta to quotes, not just exposure profiles.
+5. Book sizes: ~2,000 trades at Stage A, ~5,000 at Stage C.

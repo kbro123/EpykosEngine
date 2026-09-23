@@ -78,42 +78,54 @@ Order: P0 → {P1, P2, P5} → P3 → P4 → P6 → P7. Kill path: > 2× ⇒ up 
 | Q5 perf gate tooling | baselines per fingerprint, self-regression 1.25×, absolute targets, report | M1 numbers become the baseline |
 | Q6 review | adversarial review of Q3/Q4 | findings fixed or filed |
 
-### M3 — rewrites and catalogue (`WORKLOADS.md` §M3)
-| pkg | deliverable | gate |
-|---|---|---|
-| R-a | R1, R2, R3 (uniform columns, buckets, trivial maps) with E0 diff + mutation tests | E0 |
-| R-b | R4a, R4b (push unary through gathers; recip), R5 (group formation) | E0 / E1 |
-| R-c | R6 (materialise at boundaries), R7 (block linmap) | E0 |
-| C1 catalogue generator | hot signatures → C++ → committed; regeneration no-op check in CI; coverage report | catalogued groups ≤ 1.05× hand-fused |
-| C2 review | rewrites reviewed for hidden exactness violations | fixed or filed |
+### Re-plan (2026-09-23, D28): from here the fixture is the desk problem (`docs/PROBLEM.md`)
+M1 and M2 stand as written. M3–M6 below supersede the island tables first written here.
 
-### M4 — curves and calibration (`WORKLOADS.md` §M4)
+### M3 — groundwork and the Stage A tape (`PROBLEM.md` §4 Stage A, §5, §6)
 | pkg | deliverable | gate |
 |---|---|---|
-| S1 linear schemes | Flat, Linear, NaturalCubic, BSpline as templated maths; collapse to `linmap` | round-trip; linmap recovered |
-| S2 value-dependent | Hermite, MonotoneCubic (Hyman via `select`); mask/margin/arm-gap export | round-trip; select buckets |
-| S3 variables + regions | interpolation variable (`zero`/`logdf`/`forward`) per scheme; composite curve by region, boundaries as structure | round-trip; no `select` on linear regions; composite calibrates |
-| I1 implicit | `implicit` node; least-squares calibration to the 12 quotes; IFT risk | `‖Jᵀr‖∞ < 1e-12`; IFT vs bump 1e-6 |
-| A1 active set | `pin`, `rank_update`, hysteresis; frozen-Newton streaming | kink 2-cycle fixture on the composite: failure shown, then converges ≤ 5 iters |
-| M4 review | | fixed or filed |
+| G0 conventions | calendars (NY/SIFMA, TARGET) from published rules, day counts, rolls, lags, IMM, schedules with stubs/EOM, observation shift / lookback / lockout windows, fixings history tables; `docs/G4_BUNDLE.md` USD+EUR sections with sources | unit tests vs published examples |
+| G1 curves | scheme family + variables + composite (the old S1/S2/S3), the M1 linear curve as one member, unchanged bits | round-trip; linear schemes → affine; MonotoneCubic → select with exports |
+| G3 scan | recurrence detection → `scan` domains; interpreter + reverse-scan adjoint | round-trip on a compounding fixture; E0; adjoint vs Dual |
+| G4 implicit | `implicit` node with multi-curve dependencies inside one tape; IFT risk; residual shares DF domains with pricing | optimality; IFT vs bump 1e-6 on the M1 book; tape length independent of iterations |
+| G2 instruments | templated maths over G0 tables: RFR compounded (shift, lockout, delay, realised fixings), RFR averaging, term-rate legs, fixed legs, OIS / IBOR / basis swaps, deposits, futures (no convexity, stated); par rates / residuals | closed forms; hand-computed coupons; double oracle |
+| G5 Stage A tape | seeded quotes, ~2,000 trades, 1,000 scenarios; ONE recording producing O1–O4 + O6; cross-stage sharing visible | records; round-trip; IR shows one DF domain for residual and book |
+| G6 gate | every `PROBLEM.md` §6 gate on the Stage A tape; timings per output group as the M4 baseline | pass |
+| G7 review ×2, fix, close | | |
+Order: {G0, G1, G3, G4} → G2 → G5 → G6 → review → fix → close.
 
-### M5 — batch axis, scan, exposure (`WORKLOADS.md` §M5)
+### M4 — optimise the totality (`PROBLEM.md` §7)
 | pkg | deliverable | gate |
 |---|---|---|
-| T1 scan | recurrence detection → `scan` domains; reverse scan adjoint | round-trip on a compounding fixture |
-| T2 parallel | thread pool; Philox RNG; AS241 inverse CDF; fixed-order reductions | bit-identical across threads/tiles |
-| T3 models | Hull–White 1F + LGM sharing the affine kernel; `A`, `B` from the M4 curve | LGM = HW to 1e-12 |
-| T4 grid | exposure grid tables (per-date vs mask measured); EE via `select` | per-path E0 vs scalar reference; EE 1e-12 |
-| T5 bench | 10k × 100 × 1k, 8 threads, fingerprinted | **< 1 s** |
-| M5 review | | fixed or filed |
+| R0 | rewrite framework; planner decisions (reduction fusion, pairs, tails, inlining, emit) re-expressed as rules with exactness classes | verifier catches a wrong rule |
+| CM | cost model from EPYKOS_EXEC_PROFILE timers per fingerprint; prediction error reported | predicts per-domain time within a stated error on Stage A |
+| R-a / R-b / R-c | R1–R3 / R4–R5 / R6–R7 with E0/E1 diff + mutation tests, fired on the Stage A tape | E0 / E1; mutants caught |
+| EG | e-graph over the domain IR; saturation bound; extraction by cost at E0 or E1; AD-mode-per-block rule; cross-stage sharing rules | rediscovers M1's three fusions with the planner's hard-coded rules off; ≥ 1 cross-stage win; extracted programs pass §6 |
+| C1 | catalogue from the Stage A hot groups; regen no-op; coverage | ≥ stated coverage of evaluation time |
+| M4 gate, review ×2, fix, close | | self-regression vs the M3 baseline; informational rows per D27 pairings |
+Order: {R0, CM} → {R-a, R-b, R-c, EG} → C1 → gate → review → fix → close.
 
-### MX — stretch: G4 bundle comparison (`WORKLOADS.md` §MX, `ROADMAP.md` §MX, D21) — only after M5 passes
+### M5 — Stages B and C, streaming
 | pkg | deliverable | gate |
 |---|---|---|
-| X1 research | `docs/G4_BUNDLE.md`: per-currency build characteristics, instruments, conventions, calendars, with sources | reviewed for correctness by a second agent |
-| X2 conventions | calendars, rolls, day counts, lags, IMM as templated-free data + code | unit tests vs published examples |
-| X3 bundle | curves, instruments, joint calibration in EpykosEngine; portfolio + scenarios | calibrates; risk ladder vs bump 1e-6 |
-| X4 compare | SwapEngine built and run as a black box on the same bundle; report under `bench/compare/` | informational table with caveats |
+| B1 xccy | EURUSD MtM-resetting basis swaps, FX spot input, EUR discounting under USD collateral, FX delta | §6 on Stage B |
+| C1 G4 | GBP/JPY conventions and calendars (sources), GBPUSD/USDJPY xccy, ~5,000-trade book | §6 on Stage C |
+| A1 streaming | `pin`, `rank_update`, hysteresis; kink 2-cycle fixture on a composite | fails without pin; converges ≤ 5 iterations with it |
+| O1 re-optimise | EG + catalogue re-run on the Stage C tape | self-regression; coverage |
+| gate, review ×2, fix, close | | |
+
+### M6 — Stage D: Monte Carlo
+| pkg | deliverable | gate |
+|---|---|---|
+| T2 parallel | thread pool, Philox path RNG, AS241, fixed-order reductions | bit-identical across threads / tiles |
+| T3 models | Hull–White 1F + LGM per currency, one affine kernel, calibrated to O1 | LGM = HW 1e-12; P(0,T) = DF |
+| T4 grid | exposure grid on the Stage C book; EE / PFE; CVA delta via adjoint through simulation + IFT | per-path E0; EE 1e-12; CVA delta vs bump 1e-4 |
+| T5 gate, review ×2, fix, close | | timing target stated as estimate until measured |
+
+### MX — the SwapEngine comparison on Stage C (D21)
+| pkg | deliverable | gate |
+|---|---|---|
+| X4 compare | SwapEngine built and run as a black box on the Stage C bundle; `bench/compare/` report with caveats | informational |
 
 ## 4. Environment
 Mac Pro, Xeon W-3223 (8 cores / 16 threads, x86-64-v3 + AVX-512), Apple clang 21, cmake 4.4, ninja 1.13, Docker

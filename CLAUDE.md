@@ -25,7 +25,8 @@ the owner.
 - **Verification before features:** round-trip identity and differential tests land with the pass that needs them.
 - **Performance claims are measured**, per machine+toolchain fingerprint, never compared across fingerprints; state load
   and flags alongside any number. Estimates are labelled as estimates.
-- **Fixtures are generated from the seed in `docs/WORKLOADS.md`.** No data files in the repo.
+- **Fixtures are generated from the seed in `docs/WORKLOADS.md`.** No data files in the repo, except definitions:
+  conventions, curve definitions and instrument blueprints are JSON under `blueprints/` (D29).
 - **Dependencies are fixed by D12.** Adding one needs a decision entry.
 - **Keep the docs current:** a change to the op set, the pipeline or a milestone updates `docs/DESIGN.md` /
   `docs/ROADMAP.md` in the same commit.

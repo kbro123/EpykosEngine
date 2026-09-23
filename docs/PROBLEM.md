@@ -31,7 +31,8 @@ A stage passes only when every output it claims is produced by the **same record
 ## 3. Realism checklist (what "real instruments" means here)
 
 Every item below is *structure*: computed at table-build time from conventions and calendars, never a branch on a
-`Scalar`. Each is exercised by at least one instrument in the stage that introduces it.
+`Scalar`. Definitions are data (D29): conventions, curve definitions and instrument blueprints live in JSON under
+`blueprints/`; the rule kinds and coupon mechanics are code. Each is exercised by at least one instrument in the stage that introduces it.
 
 - compounded-in-arrears RFR coupons (SOFR, €STR, SONIA, TONA) with **observation shift / lookback** and **lockout**;
 - **arithmetic-average** RFR coupons (SOFR averaging swaps) — do not telescope, so they exercise per-day domains;

@@ -9,7 +9,8 @@ This is the launch brief for the M1–M5 run and the handoff for the morning. Ag
 ## 1. Rules for every agent
 - **No SwapEngine (D11).** Do not open `../SwapEngine` or any other checkout. Everything is written from these docs.
 - Maths once, templated on `Scalar`; recording discipline as in `CLAUDE.md`; verification before features (D10).
-- Fixtures come from the seed in `WORKLOADS.md`; no data files.
+- Fixtures come from the seed in `WORKLOADS.md`; no data files, except definitions under `blueprints/` (D29:
+  conventions registry, calendar rule lists, curve definitions, instrument blueprints as JSON; mechanics in code).
 - Dependencies are fixed by D12: Eigen (double side only), GoogleTest, Google Benchmark, nothing else.
 - Numbers: fingerprinted (`scripts/fingerprint.sh`), load-checked, flags stated; estimates labelled (D9, D13).
 - Git: work on a package branch cut from `integrate/m1-m5`; commit as `type(scope): summary`; no model identifiers;

@@ -422,3 +422,14 @@ baseline names any entry that holds the same binary under another name. Applied:
 with identical medians (perf commit, before → after in the message); `tests/scripts/perf_gate_test.cpp` pins the
 rule on the committed results (every baseline run keyed by its derived name, its file present under that name and
 gated) and on synthetic JSON (the refusal names the ad hoc entry; `--accept` records the arguments).
+
+## D29 — Definitions are data; mechanics are code (2026-09-23)
+Conventions (calendar rule lists, day counts, roll rules, lags, observation windows, index definitions), curve
+definitions (scheme, variable, regions, knot tenors, calibration instrument sets) and instrument blueprints (legs as
+lists of coupon rows with a coupon-kind tag and parameters) are **data**, in JSON files under `blueprints/`, read by
+a small strict in-house JSON reader (no third-party dependency, D12). The rule kinds (a business-day convention, a
+day count, a holiday rule type) and the coupon mechanics (a compounded-in-arrears coupon with shift and lockout, an
+averaging coupon, a term-rate coupon) are **code**, templated on `Scalar`, because recording runs C++ templates.
+A trade of a known kind is a row; a new coupon kind or a new op is code, once. `blueprints/` are definitions, not
+fixtures: quotes, fixings and trade populations stay seeded (D16). A payoff language interpreted at record time into
+the op set remains a later item; the record cycle makes it performance-neutral by construction.

@@ -837,3 +837,65 @@ Implements `PROBLEM.md` §6 for M3/G6 (`tests/stage_a/gate_*_test.cpp`, `bench/s
    joins a plan, the IR facts per domain (readers through gathers / segments, scan readers, output rows) and a
    profile into the coverage table, and states for each plain-tile domain which of the two fusion rules' conditions
    it fails.
+
+## D46 — GCC's cross-TU FMA contraction reaches header-only Scalar templates, not just the reference TUs D25 names (2026-09-24)
+Refines D25 (M4 CI fix, unrelated to the M4 packages otherwise). D25 pinned the reference TUs (fixture generators,
+the hand-fused kernel, the interpreter kernels) to `-ffp-contract=off` in every preset because GCC's ISO-mode
+default contracts multiply-add pairs across statements even in C++, and it named the E0 gates that broke before
+that fix. Two more assertions broke the same way without being E0 gates at all, and without anyone noticing: CI on
+`ubuntu-latest / release` and `ubuntu-latest / reference` has been red on every push to `integrate/m1-m5` since
+5a5fea4 (the G4 implicit-node package) at `tests/solver/m1_implicit_vs_dual_test.cpp:130`
+(`EXPECT_EQ(out[...], pv[...].v)`) and `tests/stage_a/definition_test.cpp:141` (`EXPECT_EQ(exact.quotes[k++], p)`).
+Both compare a value produced inside an E0-pinned TU against a *second*, independent instantiation of the same
+header-only `Scalar`-templated function, freshly compiled in the comparing (non-`_e0`) test TU: contraction is a
+per-TU, context-sensitive compiler decision (D25's own finding), so GCC is free to round the second instantiation's
+arithmetic differently from the first even though the source is identical, while Apple clang in this configuration
+happens to contract (or not) the two instantiations alike. Two fixes, one of each kind D25 already allows:
+1. **`m1_implicit_vs_dual_test.cpp` (tolerance, not pinning).** The failing check compares
+   `ImplicitProgram::adjoint`'s forward replay (E0-pinned, `src/adjoint/adjoint_e0.cpp`, D31.3) against
+   `price_book<Dual<12>>` instantiated fresh in this test TU — the same crossing the M2/Q1 differential tester
+   treats as an E1 tolerance under the release preset and bitwise only under reference (D30), and this file's own
+   D33 classification already puts it in the mutation harness's *tolerance* gate class (`*_vs_dual_test$`, not
+   `_e0_test$`): the value-channel sanity check was simply never brought up to the standard the rest of the file,
+   and D33, already hold it to. Pinning it properly would mean forcing the Newton solve (`solve_newton`,
+   `implicit_dual`) under `-ffp-contract=off` for the whole file, which is exactly the "genuine reason not to" the
+   task instructions ask for: it would fight D33's own design of this file as a tolerance gate. Fixed to
+   `epykos::verify::within(a, d, Tolerance::e1_relative(1e-12), scale)` with D26's leg scale (`|fixed_i| + |float_i|`
+   per swap, `Σ|pv_i|` for the book) — the bound the same file already uses two paragraphs below for the Jacobian.
+2. **`definition_test.cpp` (pinning, not tolerance).** "Quotes equal the generating par quotes exactly at zero
+   noise" is a real invariant, not an accident of rounding (`include/epykos/fixtures/stage_a.hpp`'s
+   `quote_noise_bp` comment: "0 = the generating curves' par quotes exactly (the O1 recovery gate)"), so the fix
+   keeps it bitwise. Added `fixtures::stage_a_generating_par_quotes` (declared in
+   `include/epykos/fixtures/stage_a.hpp`, defined in the already-pinned `src/fixtures/stage_a_e0.cpp`), a thin
+   wrapper around the identical `instrument::par_quotes(cs, df)` call `make_stage_a` uses internally to build
+   `StageA::quotes`; the test now calls this pinned wrapper instead of `epykos::instrument::par_quotes` directly,
+   so both sides of the comparison run the same compiled object code instead of two separate template
+   instantiations.
+Other files: grepped every non-`_e0_test.cpp` file under `tests/` for a bitwise `EXPECT_EQ` / `ASSERT_EQ` of two
+independently-computed floating-point paths (~90 matches across 50+ files). The `*_vs_dual_test` / `*_adjoint_test`
+files elsewhere already do this correctly — `tests/adjoint/m1_adjoint_vs_dual_test.cpp`,
+`adjoint/scan_adjoint_vs_dual_test.cpp`, `instrument/sample_adjoint_vs_dual_test.cpp`,
+`curve/composite_vs_dual_test.cpp` gate their value/Jacobian channels at D26's tolerance and `EXPECT_EQ` only
+integer failure counters — so the bug was specific to the two files above, both from the newer G4/G5 packages that
+had not yet been through a D25-style review. Every `bits(a[k]) == bits(b[k])` round-trip comparison
+(`tests/ir/`, `tests/tape/`, `instrument/sample_roundtrip_test.cpp`, `ir/scan_roundtrip_test.cpp`) compares
+non-template, once-compiled evaluators (`Replayer`, `ir::Evaluator`, the E0-pinned interpreter kernels) whose
+object code is fixed per preset regardless of which TU calls them, so none of them carry this risk, which is
+presumably why the P7-fix GCC audit that produced D25 did not flag them. `tests/tape/record_test.cpp` and
+`tests/scalar/dual_test.cpp` compare single, isolated operations (no adjacent multiply + add for contraction to
+act on) against a literal computed the same way in the same statement: safe by construction. One finding is
+accepted risk, not changed here: `tests/curve/composite_test.cpp`'s `SingleRegionEqualsTheCurveTemplateOnDouble`
+and `tests/curve/schemes_test.cpp`'s `Linear` vs. `curve::linear::zero_rate` check bitwise-compare a
+`curve::Curve<Scheme, Variable>` / `Scheme` instantiation against an independent equivalent, both freshly
+instantiated in that (non-`_e0`) test TU — the same shape of risk as the two bugs fixed above. D38.6 already names
+`curve_record_e0_test` as the real pinned bitwise gate for the template-vs-`Composite` equivalence; both checks
+passed on GCC 13 throughout M3 and passed again in this fix's own full GCC 13 run (below), so they are left for a
+follow-up (pin, or fold into `curve_record_e0_test`) rather than changed under this fix's scope.
+Verification (fingerprints d448afd70180-equivalent hosts; no performance claim, tests only): GCC 13.5.0 in Docker
+(`gcc:13`, reproducing `ubuntu-latest`), release and reference presets, 80/80 `ctest` both; Apple clang 21 on the
+M1-M5 development machine, release and reference presets, 80/80 both (a first attempt using a non-standard build
+directory produced one unrelated failure, `scripts_perf_gate_test` — `run.sh` cannot infer a preset name from a
+path outside `build/<preset>/` — which disappeared building into the standard `build/release` / `build/reference`
+directories D13 names); `scripts/mutation_test.sh` on GCC 13 in Docker, all registered mutants caught against the
+40-test gate set (D33's regex), matching `RESUME.md`'s existing M3 mutation count. No engine, maths or kernel code
+changed; no gate weakened; no new dependency; no `-ffast-math`.

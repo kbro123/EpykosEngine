@@ -354,3 +354,15 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
 - Not done in M3 (by design, `PROBLEM.md` §8): Stages B/C/D (M5/M6); the optimiser, cost model and catalogue (M4);
   the per-domain `EPYKOS_EXEC_PROFILE` timers were run twice as an ad hoc, non-gated coverage check (G5, G6), never
   as a checked-in preset or G6's own baseline instrument.
+
+2026-09-24  CI fix (unreported red since 5a5fea4)  `ubuntu-latest / release` and `/ reference` had been red on
+  every `integrate/m1-m5` push since the G4 implicit-node package: two bitwise `EXPECT_EQ`s
+  (`tests/solver/m1_implicit_vs_dual_test.cpp:130`, `tests/stage_a/definition_test.cpp:141`) compared a value from
+  an E0-pinned TU against a second, unpinned instantiation of the same header-only `Scalar` template, which GCC's
+  cross-TU FMA contraction is free to round differently from the first (D25 extended to templates, not just the
+  named reference TUs; D46). Fixed one of each way D25 allows: the vs-dual value check to D26's tolerance (D33
+  already classes `*_vs_dual_test` as a tolerance gate), the stage_a quotes check kept bitwise behind a new
+  E0-pinned helper (`fixtures::stage_a_generating_par_quotes`, `src/fixtures/stage_a_e0.cpp`). GCC 13.5.0 (Docker)
+  80/80 `ctest` release and reference; Apple clang 21, 80/80 both under the standard preset build dirs;
+  `scripts/mutation_test.sh` on GCC 13: all registered mutants caught against the 40-gate set. No engine or maths
+  code touched.  (this commit)

@@ -15,6 +15,15 @@
 // from the flat start is checked against the recorded solve as well (an independent O1 oracle).
 //
 // Named *_vs_dual_test: it is in the mutation harness's gate set (D33).
+//
+// The value channel (out[] vs pv[].v) is compared at D26's leg-scale tolerance, not bitwise:
+// out[] replays the recorded tape through the E0-pinned kernels (D25; adjoint/adjoint_e0.cpp,
+// D31.3), while pv[].v runs price_book<Wide> instantiated in this TU (not an _e0_test.cpp), so
+// the two sides can round differently in the last bit under GCC's cross-statement FMA
+// contraction (D25) even though they compute the same maths — the same reason the M2/Q1
+// differential tester (D30) is a tolerance gate under the release preset rather than a bitwise
+// one. A swap's value is `side·(fixed − float)`, so its scale is |fixed| + |float| (D26); the
+// book's is the sum of the swap PVs.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -29,9 +38,11 @@
 #include "epykos/scalar/dual.hpp"
 #include "epykos/solver/implicit_program.hpp"
 #include "epykos/solver/tangent.hpp"
+#include "epykos/verify/differential.hpp"
 
 namespace fixtures = epykos::fixtures;
 namespace solver = epykos::solver;
+namespace verify = epykos::verify;
 using epykos::Dual;
 
 namespace {
@@ -105,6 +116,14 @@ TEST(M1ImplicitVsDual, FullJacobianOfEveryOutputMatchesForwardModeThroughTheCali
     fixed[static_cast<std::size_t>(i)] = fixtures::fixed_leg_pv<Wide>(f.book, i, zd.data());
     flt[static_cast<std::size_t>(i)] = fixtures::float_leg_pv<Wide>(f.book, i, zd.data());
   }
+  // The value-channel scale (D26): a swap's is |fixed| + |float|, the book's the sum over swaps.
+  std::vector<double> value_scale(static_cast<std::size_t>(n_out));
+  double book_value_scale = 0.0;
+  for (int i = 0; i < f.book.n_swaps; ++i) book_value_scale += std::fabs(pv[static_cast<std::size_t>(i)].v);
+  for (int o = 0; o < n_out; ++o) {
+    value_scale[static_cast<std::size_t>(o)] =
+        o < f.book.n_swaps ? std::fabs(fixed[static_cast<std::size_t>(o)].v) + std::fabs(flt[static_cast<std::size_t>(o)].v) : book_value_scale;
+  }
   // The adjoint of every output, one lane per output.
   std::vector<double> jac(static_cast<std::size_t>(n_out) * n_knots);
   const int chunk = prog.max_batch();
@@ -127,7 +146,14 @@ TEST(M1ImplicitVsDual, FullJacobianOfEveryOutputMatchesForwardModeThroughTheCali
     for (std::size_t b = 0; b < Bs; ++b) {
       const int o = o0 + static_cast<int>(b);
       const int ord = o == f.book.n_swaps ? f.cal.book_pv : f.cal.swap_pv_begin + o;
-      EXPECT_EQ(out[static_cast<std::size_t>(ord) * Bs + b], pv[static_cast<std::size_t>(o)].v) << "output " << o << ": the values differ";
+      {
+        const double a_val = out[static_cast<std::size_t>(ord) * Bs + b];
+        const double d_val = pv[static_cast<std::size_t>(o)].v;
+        const double scale = value_scale[static_cast<std::size_t>(o)];
+        EXPECT_TRUE(verify::within(a_val, d_val, verify::Tolerance::e1_relative(1e-12), scale))
+            << "output " << o << ": adjoint " << a_val << " vs dual " << d_val << " differ by " << verify::relative_error(a_val, d_val, scale)
+            << " of scale " << scale;
+      }
       for (std::size_t k = 0; k < static_cast<std::size_t>(n_knots); ++k) jac[static_cast<std::size_t>(o) * n_knots + k] = q_bar[k * Bs + b];
     }
   }

@@ -138,7 +138,13 @@ TEST(StageADefinition, QuotesAreParPlusNoiseAtPlausibleLevels) {
   const fixtures::StageA exact = fixtures::make_stage_a(o);
   k = 0;
   for (std::size_t c = 0; c < exact.sets.size(); ++c) {
-    for (double p : epykos::instrument::par_quotes(exact.sets[c], [&](int slot, double t) { return exact.generating_df(slot, t); })) EXPECT_EQ(exact.quotes[k++], p);
+    // D25: stage_a_generating_par_quotes is the E0-pinned par_quotes instantiation make_stage_a
+    // itself used to build exact.quotes (noise 0). Calling epykos::instrument::par_quotes
+    // directly here would compile a second, unpinned instantiation of the same header-only
+    // template in this test TU, which GCC's cross-statement FMA contraction is free to round
+    // differently from the pinned one bit for bit even though the maths is identical.
+    for (double p : fixtures::stage_a_generating_par_quotes(exact.sets[c], [&](int slot, double t) { return exact.generating_df(slot, t); }))
+      EXPECT_EQ(exact.quotes[k++], p);
   }
 }
 

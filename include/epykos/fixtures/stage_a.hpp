@@ -223,6 +223,15 @@ struct StageA {
 // resolve (a missing fixing, an unknown blueprint).
 StageA make_stage_a(const StageAOptions& options = {});
 
+// The generating curves' par quotes, E0-pinned (D25): the identical `instrument::par_quotes`
+// instantiation make_stage_a uses to build StageA::quotes when quote_noise_bp == 0, compiled in
+// this TU's -ffp-contract=off object code. A test comparing StageA::quotes against a freshly
+// computed par_quotes(cs, df) must call this rather than epykos::instrument::par_quotes directly:
+// that template is header-only, so calling it from a non-_e0 test TU compiles a second
+// instantiation that GCC's cross-statement FMA contraction (D25) is free to round differently
+// from the one make_stage_a used, even though both compute the same maths.
+std::vector<double> stage_a_generating_par_quotes(const instrument::CalibrationSet& cs, const std::function<double(int, double)>& df);
+
 // ---- the book on any Scalar --------------------------------------------------------------------
 
 // A memoising df(slot, t): the value of each (slot, t) is computed once through `inner` (one

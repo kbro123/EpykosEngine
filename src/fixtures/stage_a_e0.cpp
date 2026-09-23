@@ -244,6 +244,8 @@ double clip(double x, double lo, double hi) { return x < lo ? lo : (x > hi ? hi 
 
 }  // namespace
 
+std::vector<double> stage_a_generating_par_quotes(const CalibrationSet& cs, const std::function<double(int, double)>& df) { return par_quotes(cs, df); }
+
 StageA make_stage_a(const StageAOptions& options) {
   StageA s;
   s.options = options;

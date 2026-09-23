@@ -9,13 +9,19 @@
 // evaluated. run(state, B, out) splits B into chunks of at most `lane_tile` lanes and, for each
 // chunk, evaluates the whole program (domains in dependency order) for those lanes:
 //
-//   * an elementwise group runs one op at a time over a tile of `tile` rows × L lanes; every
+//   * an elementwise group runs one kernel at a time over a tile of `tile` rows × L lanes; every
 //     intermediate is a contiguous vector of tile·L doubles in a preallocated scratch (L1-sized
-//     at the default tile for small L), the last step writes straight into the value buffer.
-//     Each step's kernel is picked at construction from (op, operand kinds, L): a kernel loops
-//     over rows and lanes with the operand sources (earlier step / literal / column / gather)
-//     resolved at compile time, so there is no per-element dispatch. For L = 1 the row loop is
-//     the vector axis; for L > 1 the lane loop is;
+//     at the default tile for small L), the last kernel writes straight into the value buffer.
+//     Each kernel is picked at construction from (op, operand kinds, L): it loops over rows and
+//     lanes with the operand sources (earlier step / literal / column / gather) resolved at
+//     compile time, so there is no per-element dispatch. For L = 1 the row loop is the vector
+//     axis; for L > 1 the lane loop is. Two consecutive steps that form a chain nobody else
+//     reads — t = op(x, y) then op2(t, z) or op2(z, t), with op, op2 among add / sub / mul / div
+//     / neg and x, y, z literals, columns or gathers — are one kernel (a fused pair): both
+//     operations run in registers per lane, in the recorded order with the recorded roundings,
+//     and t is never stored. A longer chain is a pair followed by single steps. On the M1 book
+//     the forwards, the exp argument, the float coupons and the swap PVs are pairs.
+//     Options::fuse_pairs switches it off (one kernel per step);
 //   * a Sum / Affine group is a whole-domain pass: rows are bucketed by segment length (a
 //     structure-only permutation of independent rows) and the members of each bucket are stored
 //     transposed, so fold step k is one vector op across the bucket's rows — each row's fold
@@ -64,6 +70,7 @@ struct Options {
   int lane_tile = 8;                 // lanes per chunk (B is split into chunks of at most this many)
   ExpMode exp = ExpMode::std_exp;    // std_exp: E0; poly: E1 (exp_poly), timing only
   bool fuse_reductions = true;       // evaluate reduction-only elementwise domains inside the reductions (E0); false: materialise every domain
+  bool fuse_pairs = true;            // evaluate two consecutive chained steps in one kernel with the middle value in registers (E0); false: one kernel per step
 };
 
 class Interpreter {

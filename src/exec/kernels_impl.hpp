@@ -36,11 +36,17 @@
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <type_traits>
 
 #include "epykos/hand/exp_poly.hpp"
 #include "plan.hpp"
 
 namespace epykos::exec::detail {
+
+// The per-row helpers (row groups of a reduction, the fold epilogues) must be inlined into the
+// kernel that calls them: as separate functions they take a dozen arguments through the stack
+// per row, which at 32 lanes per row costs as much as the row's arithmetic (measured).
+#define EPYKOS_EXEC_INLINE inline __attribute__((always_inline))
 
 // Rows per block when L = 1 (the row axis is the vector axis).
 inline constexpr int row_block = 16;
@@ -335,7 +341,7 @@ void k_input(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* i
 // accumulator per row. The fold order per row is member 0 (Sum) or c_0 (Affine), then members
 // 1, 2, ... exactly as recorded.
 template <bool Affine, int L, int RJ>
-inline void seg_group(int i, int nj, int n, int len, const double* values, const std::int32_t* rows,
+EPYKOS_EXEC_INLINE void seg_group(int i, int nj, int n, int len, const double* values, const std::int32_t* rows,
                       const std::int32_t* memT, const double* coefT, const double* konst, bool konst_is_column,
                       double* dom) {
   static_assert(L > 1);
@@ -377,7 +383,7 @@ inline void seg_group(int i, int nj, int n, int len, const double* values, const
 
 // L = 1: a group of up to RJ rows, the row axis vectorised.
 template <bool Affine, int RJ>
-inline void seg_group1(int i, int nj, int n, int len, const double* values, const std::int32_t* rows,
+EPYKOS_EXEC_INLINE void seg_group1(int i, int nj, int n, int len, const double* values, const std::int32_t* rows,
                        const std::int32_t* memT, const double* coefT, const double* konst, bool konst_is_column,
                        double* dom) {
   double acc[RJ];
@@ -486,7 +492,7 @@ inline constexpr int acc_rows_in_flight = acc_rows_in_flight_for(L == 0 ? 1 : L)
 // L = 1: RJ rows from i0 of a run of kr positions; f(r, t) is the member's value for domain
 // row r at tile row t.
 template <bool Affine, bool Ind, int RJ, class F>
-inline void acc_rows1(F&& f, int r0, const std::int32_t* idx, int n, int i0, int kr, bool first, const double* coef,
+EPYKOS_EXEC_INLINE void acc_rows1(F&& f, int r0, const std::int32_t* idx, int n, int i0, int kr, bool first, const double* coef,
                       double* accbuf) {
   double acc[RJ];
   if (Affine || !first) {
@@ -515,7 +521,7 @@ inline void acc_rows1(F&& f, int r0, const std::int32_t* idx, int n, int i0, int
 
 // L > 1: f(r, t, v) fills the member's L lanes.
 template <bool Affine, bool Ind, int L, int RJ, class F>
-inline void acc_rowsL(F&& f, int r0, const std::int32_t* idx, int n, int i0, int kr, bool first, const double* coef,
+EPYKOS_EXEC_INLINE void acc_rowsL(F&& f, int r0, const std::int32_t* idx, int n, int i0, int kr, bool first, const double* coef,
                       double* accbuf) {
   double acc[RJ][L];
   if (Affine || !first) {
@@ -555,7 +561,7 @@ inline void acc_rowsL(F&& f, int r0, const std::int32_t* idx, int n, int i0, int
 // The rows left after the full groups (nj < RJ), in halving groups: every group has a
 // compile-time row count, so the tail vectorises like the full groups.
 template <bool Affine, bool Ind, int RJ, class F>
-inline void acc_tail1(F&& f, int r0, const std::int32_t* idx, int n, int i0, int nj, int kr, bool first,
+EPYKOS_EXEC_INLINE void acc_tail1(F&& f, int r0, const std::int32_t* idx, int n, int i0, int nj, int kr, bool first,
                       const double* coef, double* accbuf) {
   if constexpr (RJ > 1) {
     constexpr int H = RJ / 2;
@@ -571,7 +577,7 @@ inline void acc_tail1(F&& f, int r0, const std::int32_t* idx, int n, int i0, int
 }
 
 template <bool Affine, bool Ind, int L, int RJ, class F>
-inline void acc_tailL(F&& f, int r0, const std::int32_t* idx, int n, int i0, int nj, int kr, bool first,
+EPYKOS_EXEC_INLINE void acc_tailL(F&& f, int r0, const std::int32_t* idx, int n, int i0, int nj, int kr, bool first,
                       const double* coef, double* accbuf) {
   if constexpr (RJ > 1) {
     constexpr int H = RJ / 2;
@@ -588,7 +594,7 @@ inline void acc_tailL(F&& f, int r0, const std::int32_t* idx, int n, int i0, int
 
 // Runtime lane count: in place on the accumulator, plain loops; f(r, t, l) is one lane.
 template <bool Affine, bool Ind, class F>
-inline void acc_rows0(F&& f, int r0, const std::int32_t* idx, int n, int LL, int kr, bool first, const double* coef,
+EPYKOS_EXEC_INLINE void acc_rows0(F&& f, int r0, const std::int32_t* idx, int n, int LL, int kr, bool first, const double* coef,
                       double* accbuf) {
   const std::size_t LLs = static_cast<std::size_t>(LL);
   for (int k = 0; k < kr; ++k) {
@@ -612,7 +618,7 @@ inline void acc_rows0(F&& f, int r0, const std::int32_t* idx, int n, int LL, int
 }
 
 template <bool Affine, bool Ind, int L, class F1, class FL, class F0>
-inline void acc_run(F1&& f1, FL&& fL, F0&& f0, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, int kr,
+EPYKOS_EXEC_INLINE void acc_run(F1&& f1, FL&& fL, F0&& f0, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, int kr,
                     bool first, const double* coef, double* acc) {
   (void)f1; (void)fL; (void)f0; (void)ctx;
   if constexpr (L == 1) {
@@ -836,6 +842,150 @@ void k_seg_rows(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t
       o[l] = acc;
     }
   }
+}
+
+// ---- fused pairs ---------------------------------------------------------------------------
+//
+// Two consecutive IR steps t = op(x, y); v = op2(t, z) (or op2(z, t)) whose middle value t has
+// no other reader are one kernel: per row and lane, both operations are applied in sequence in
+// registers — the same two IEEE roundings the scalar evaluator performs, in the same order,
+// contraction off — and only v is stored (plain kernel) or folded (reduction epilogue). x, y, z
+// are row-addressed: a per-row scalar (a literal or a column, read as data[row · stride]) or a
+// gathered row of the value buffer; an earlier step's scratch never enters a pair, so a longer
+// chain is a pair followed by single steps. The plan (interpreter.cpp: pair_of) swaps the
+// operands of a commutative op so that a scalar comes first, which is why (S, G), (G, S) and
+// (G, G) are the shapes below; Neg takes one gathered operand.
+
+constexpr bool pair_unary(Op op) noexcept { return op == Op::Neg; }
+
+// L = 1 / runtime L: one element of a pair operand.
+template <PK K>
+EPYKOS_EXEC_INLINE double pget(const double* values, const Operand& o, int r, int l, std::size_t LL) noexcept {
+  if constexpr (K == PK::S) {
+    (void)values; (void)l; (void)LL;
+    return o.data[static_cast<std::size_t>(r) * static_cast<std::size_t>(o.stride)];
+  } else if constexpr (K == PK::G) {
+    return values[static_cast<std::size_t>(o.index[r]) * LL + static_cast<std::size_t>(l)];
+  } else {
+    (void)values; (void)o; (void)r; (void)l; (void)LL;
+    return 0.0;
+  }
+}
+
+// L > 1: a row's view of a pair operand — the scalar, or the base of the gathered row's lanes.
+template <PK K>
+struct PairRow {
+  double s = 0.0;
+  const double* p = nullptr;
+  EPYKOS_EXEC_INLINE static PairRow make(const double* values, const Operand& o, int r, std::size_t LL) noexcept {
+    PairRow v;
+    if constexpr (K == PK::S) {
+      (void)values; (void)LL;
+      v.s = o.data[static_cast<std::size_t>(r) * static_cast<std::size_t>(o.stride)];
+    } else if constexpr (K == PK::G) {
+      v.p = values + static_cast<std::size_t>(o.index[r]) * LL;
+    } else {
+      (void)values; (void)o; (void)r; (void)LL;
+    }
+    return v;
+  }
+  EPYKOS_EXEC_INLINE double get(int l) const noexcept {
+    if constexpr (K == PK::G) {
+      return p[l];
+    } else {
+      (void)l;
+      return s;
+    }
+  }
+};
+
+template <Op op, Op op2, bool PR>
+EPYKOS_EXEC_INLINE double pair_eval(double x, double y, double z) noexcept {
+  double t;
+  if constexpr (pair_unary(op)) {
+    (void)y;
+    t = apply1<op>(x);
+  } else {
+    t = apply2<op>(x, y);
+  }
+  if constexpr (pair_unary(op2)) {
+    (void)z;
+    return apply1<op2>(t);
+  } else if constexpr (PR) {
+    return apply2<op2>(z, t);
+  } else {
+    return apply2<op2>(t, z);
+  }
+}
+
+template <Op op, PK KA, PK KB, Op op2, PK KC, bool PR, int L, bool Ind>
+void k_pair(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out) {
+  const double* values = ctx.values;
+  const Operand& a = s.a;
+  const Operand& b = s.b;
+  const Operand& c = s.c;
+  if constexpr (L == 1) {
+    int i = 0;
+    for (; i + row_block <= n; i += row_block) {
+      double o[row_block];
+      for (int j = 0; j < row_block; ++j) {
+        const int r = row_at<Ind>(r0, idx, i + j);
+        o[j] = pair_eval<op, op2, PR>(pget<KA>(values, a, r, 0, 1), pget<KB>(values, b, r, 0, 1), pget<KC>(values, c, r, 0, 1));
+      }
+      for (int j = 0; j < row_block; ++j) out[i + j] = o[j];
+    }
+    for (; i < n; ++i) {
+      const int r = row_at<Ind>(r0, idx, i);
+      out[i] = pair_eval<op, op2, PR>(pget<KA>(values, a, r, 0, 1), pget<KB>(values, b, r, 0, 1), pget<KC>(values, c, r, 0, 1));
+    }
+  } else if constexpr (L > 1) {
+    for (int i = 0; i < n; ++i) {
+      const int r = row_at<Ind>(r0, idx, i);
+      const PairRow<KA> va = PairRow<KA>::make(values, a, r, L);
+      const PairRow<KB> vb = PairRow<KB>::make(values, b, r, L);
+      const PairRow<KC> vc = PairRow<KC>::make(values, c, r, L);
+      double o[L];
+      for (int l = 0; l < L; ++l) o[l] = pair_eval<op, op2, PR>(va.get(l), vb.get(l), vc.get(l));
+      double* dst = out + static_cast<std::size_t>(i) * static_cast<std::size_t>(L);
+      for (int l = 0; l < L; ++l) dst[l] = o[l];
+    }
+  } else {
+    const std::size_t LL = static_cast<std::size_t>(ctx.L);
+    for (int i = 0; i < n; ++i) {
+      const int r = row_at<Ind>(r0, idx, i);
+      double* dst = out + static_cast<std::size_t>(i) * LL;
+      for (int l = 0; l < ctx.L; ++l) {
+        dst[l] = pair_eval<op, op2, PR>(pget<KA>(values, a, r, l, LL), pget<KB>(values, b, r, l, LL), pget<KC>(values, c, r, l, LL));
+      }
+    }
+  }
+}
+
+template <Op op, PK KA, PK KB, Op op2, PK KC, bool PR, int L, bool Affine>
+void k_pair_acc(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, int kr, bool first,
+                const double* coef, double* acc) {
+  const double* values = ctx.values;
+  const Operand& a = s.a;
+  const Operand& b = s.b;
+  const Operand& c = s.c;
+  const std::size_t LL = static_cast<std::size_t>(lanes<L>(ctx));
+  auto f1 = [&](int r, int) {
+    return pair_eval<op, op2, PR>(pget<KA>(values, a, r, 0, 1), pget<KB>(values, b, r, 0, 1), pget<KC>(values, c, r, 0, 1));
+  };
+  auto fL = [&](int r, int, double* v) {
+    if constexpr (L > 1) {
+      const PairRow<KA> va = PairRow<KA>::make(values, a, r, L);
+      const PairRow<KB> vb = PairRow<KB>::make(values, b, r, L);
+      const PairRow<KC> vc = PairRow<KC>::make(values, c, r, L);
+      for (int l = 0; l < L; ++l) v[l] = pair_eval<op, op2, PR>(va.get(l), vb.get(l), vc.get(l));
+    } else {
+      (void)r; (void)v;
+    }
+  };
+  auto f0 = [&](int r, int, int l) {
+    return pair_eval<op, op2, PR>(pget<KA>(values, a, r, l, LL), pget<KB>(values, b, r, l, LL), pget<KC>(values, c, r, l, LL));
+  };
+  acc_run<Affine, false, L>(f1, fL, f0, ctx, r0, idx, n, kr, first, coef, acc);
 }
 
 // ---- tables ----------------------------------------------------------------------------------
@@ -1084,6 +1234,114 @@ template <int L>
 LoadAccKernel KernelTable<L>::load_acc(Kind k, bool affine, bool ind) {
   if (ind) return affine ? pick_load_acc<L, true, true>(k) : pick_load_acc<L, false, true>(k);
   return affine ? pick_load_acc<L, true, false>(k) : pick_load_acc<L, false, false>(k);
+}
+
+// ---- fused pair tables --------------------------------------------------------------------
+//
+// One enumeration serves the four sinks of a pair: the plain kernel in the contiguous (0) and
+// indirect (1) row modes, and the Sum (2) / Affine (3) reduction epilogues. The shapes are those
+// listed at KernelTable::pair; a commutative first op takes (S, G) and (G, G) only (the plan
+// puts the scalar first), so the table holds 11 x 13 shapes per sink.
+
+template <int L, int Sink>
+struct PairSink {
+  using Fn = std::conditional_t<(Sink < 2), OpKernel, AccKernel>;
+  template <Op op, PK KA, PK KB, Op op2, PK KC, bool PR>
+  static Fn get() {
+    if constexpr (Sink == 0) return &k_pair<op, KA, KB, op2, KC, PR, L, false>;
+    else if constexpr (Sink == 1) return &k_pair<op, KA, KB, op2, KC, PR, L, true>;
+    else if constexpr (Sink == 2) return &k_pair_acc<op, KA, KB, op2, KC, PR, L, false>;
+    else return &k_pair_acc<op, KA, KB, op2, KC, PR, L, true>;
+  }
+};
+
+template <int L, int Sink, Op op, PK KA, PK KB, Op op2>
+typename PairSink<L, Sink>::Fn pick_pair_3(PK kc, bool pr) {
+  using PS = PairSink<L, Sink>;
+  if constexpr (op2 == Op::Add || op2 == Op::Mul) {
+    if (pr) return nullptr;  // commutative: the plan puts the pair's value on the left
+    if (kc == PK::S) return PS::template get<op, KA, KB, op2, PK::S, false>();
+    if (kc == PK::G) return PS::template get<op, KA, KB, op2, PK::G, false>();
+    return nullptr;
+  } else {
+    if (kc == PK::S) return pr ? PS::template get<op, KA, KB, op2, PK::S, true>() : PS::template get<op, KA, KB, op2, PK::S, false>();
+    if (kc == PK::G) return pr ? PS::template get<op, KA, KB, op2, PK::G, true>() : PS::template get<op, KA, KB, op2, PK::G, false>();
+    return nullptr;
+  }
+}
+
+template <int L, int Sink, Op op, PK KA, PK KB>
+typename PairSink<L, Sink>::Fn pick_pair_2(Op op2, PK kc, bool pr) {
+  switch (op2) {
+    case Op::Add: return pick_pair_3<L, Sink, op, KA, KB, Op::Add>(kc, pr);
+    case Op::Sub: return pick_pair_3<L, Sink, op, KA, KB, Op::Sub>(kc, pr);
+    case Op::Mul: return pick_pair_3<L, Sink, op, KA, KB, Op::Mul>(kc, pr);
+    case Op::Div: return pick_pair_3<L, Sink, op, KA, KB, Op::Div>(kc, pr);
+    case Op::Neg: return kc == PK::None ? PairSink<L, Sink>::template get<op, KA, KB, Op::Neg, PK::None, false>() : nullptr;
+    default: return nullptr;
+  }
+}
+
+template <int L, int Sink, Op op>
+typename PairSink<L, Sink>::Fn pick_pair_1(PK ka, PK kb, Op op2, PK kc, bool pr) {
+  if constexpr (op == Op::Neg) {
+    if (ka == PK::G && kb == PK::None) return pick_pair_2<L, Sink, Op::Neg, PK::G, PK::None>(op2, kc, pr);
+    return nullptr;
+  } else {
+    if (ka == PK::S && kb == PK::G) return pick_pair_2<L, Sink, op, PK::S, PK::G>(op2, kc, pr);
+    if (ka == PK::G && kb == PK::G) return pick_pair_2<L, Sink, op, PK::G, PK::G>(op2, kc, pr);
+    if constexpr (op == Op::Sub || op == Op::Div) {
+      if (ka == PK::G && kb == PK::S) return pick_pair_2<L, Sink, op, PK::G, PK::S>(op2, kc, pr);
+    }
+    return nullptr;
+  }
+}
+
+template <int L, int Sink>
+typename PairSink<L, Sink>::Fn pick_pair_0(Op op, PK ka, PK kb, Op op2, PK kc, bool pr) {
+  switch (op) {
+    case Op::Add: return pick_pair_1<L, Sink, Op::Add>(ka, kb, op2, kc, pr);
+    case Op::Sub: return pick_pair_1<L, Sink, Op::Sub>(ka, kb, op2, kc, pr);
+    case Op::Mul: return pick_pair_1<L, Sink, Op::Mul>(ka, kb, op2, kc, pr);
+    case Op::Div: return pick_pair_1<L, Sink, Op::Div>(ka, kb, op2, kc, pr);
+    case Op::Neg: return pick_pair_1<L, Sink, Op::Neg>(ka, kb, op2, kc, pr);
+    default: return nullptr;
+  }
+}
+
+template <int L>
+OpKernel KernelTable<L>::pair(Op op, PK ka, PK kb, Op op2, PK kc, bool prev_right, bool ind) {
+  return ind ? pick_pair_0<L, 1>(op, ka, kb, op2, kc, prev_right) : pick_pair_0<L, 0>(op, ka, kb, op2, kc, prev_right);
+}
+
+template <int L>
+AccKernel KernelTable<L>::pair_acc(Op op, PK ka, PK kb, Op op2, PK kc, bool prev_right, bool affine) {
+  return affine ? pick_pair_0<L, 3>(op, ka, kb, op2, kc, prev_right) : pick_pair_0<L, 2>(op, ka, kb, op2, kc, prev_right);
+}
+
+// ---- output copy -----------------------------------------------------------------------------
+
+template <int L>
+void KernelTable<L>::copy_out(const double* values, const std::int32_t* outputs, int n_out, double* out, int B, int b0,
+                              int L_) {
+  const std::size_t Bs = static_cast<std::size_t>(B);
+  if constexpr (L > 0) {
+    (void)L_;
+    for (int o = 0; o < n_out; ++o) {
+      const double* src = values + static_cast<std::size_t>(outputs[o]) * static_cast<std::size_t>(L);
+      double* dst = out + static_cast<std::size_t>(o) * Bs + static_cast<std::size_t>(b0);
+      double t[L];
+      for (int l = 0; l < L; ++l) t[l] = src[l];
+      for (int l = 0; l < L; ++l) dst[l] = t[l];
+    }
+  } else {
+    const std::size_t LL = static_cast<std::size_t>(L_);
+    for (int o = 0; o < n_out; ++o) {
+      const double* src = values + static_cast<std::size_t>(outputs[o]) * LL;
+      double* dst = out + static_cast<std::size_t>(o) * Bs + static_cast<std::size_t>(b0);
+      for (int l = 0; l < L_; ++l) dst[l] = src[l];
+    }
+  }
 }
 
 }  // namespace epykos::exec::detail

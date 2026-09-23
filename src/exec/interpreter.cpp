@@ -40,6 +40,14 @@ const char* to_string(Kind k) noexcept {
   }
   return "?";
 }
+const char* to_string(PK k) noexcept {
+  switch (k) {
+    case PK::S: return "s";
+    case PK::G: return "g";
+    case PK::None: return "-";
+  }
+  return "?";
+}
 }  // namespace detail
 
 namespace {
@@ -70,6 +78,21 @@ AccKernel binary_acc_kernel(int v, Op op, Kind ka, Kind kb, bool affine) { EPYKO
 AccKernel unary_acc_kernel(int v, Op op, Kind ka, bool affine) { EPYKOS_EXEC_DISPATCH(v, unary_acc(op, ka, affine)) }
 AccKernel konst_acc_kernel(int v, Kind kk, bool affine) { EPYKOS_EXEC_DISPATCH(v, konst_acc(kk, affine)) }
 LoadAccKernel load_acc_kernel(int v, Kind k, bool affine, bool ind) { EPYKOS_EXEC_DISPATCH(v, load_acc(k, affine, ind)) }
+OpKernel pair_kernel(int v, Op op, PK ka, PK kb, Op op2, PK kc, bool pr, bool ind) { EPYKOS_EXEC_DISPATCH(v, pair(op, ka, kb, op2, kc, pr, ind)) }
+AccKernel pair_acc_kernel(int v, Op op, PK ka, PK kb, Op op2, PK kc, bool pr, bool affine) { EPYKOS_EXEC_DISPATCH(v, pair_acc(op, ka, kb, op2, kc, pr, affine)) }
+
+void copy_out(int v, const double* values, const std::int32_t* outputs, int n_out, double* out, int B, int b0, int L) {
+  switch (v) {
+    case 0: return KernelTable<0>::copy_out(values, outputs, n_out, out, B, b0, L);
+    case 1: return KernelTable<1>::copy_out(values, outputs, n_out, out, B, b0, L);
+    case 2: return KernelTable<4>::copy_out(values, outputs, n_out, out, B, b0, L);
+    case 3: return KernelTable<8>::copy_out(values, outputs, n_out, out, B, b0, L);
+    case 4: return KernelTable<16>::copy_out(values, outputs, n_out, out, B, b0, L);
+    case 5: return KernelTable<32>::copy_out(values, outputs, n_out, out, B, b0, L);
+    case 6: return KernelTable<64>::copy_out(values, outputs, n_out, out, B, b0, L);
+    default: return;
+  }
+}
 
 #undef EPYKOS_EXEC_DISPATCH
 
@@ -129,6 +152,7 @@ struct Interpreter::Impl {
   void build_segment(std::int32_t consumer, const ir::Segment& seg, bool affine, const ir::Slot& konst, std::int32_t rows,
                      SegPlan& sp);
   void build_step(const ir::Step& st, std::size_t k, std::size_t n_steps, GroupPlan& g, StepPlan& sp);
+  bool build_pair_step(const ir::Group& grp, const std::vector<int>& uses, std::size_t k, StepPlan& sp);
 };
 
 Operand Interpreter::Impl::resolve(const ir::Slot& s) const {
@@ -141,10 +165,12 @@ Operand Interpreter::Impl::resolve(const ir::Slot& s) const {
     case ir::SlotKind::Literal:
       o.kind = Kind::Lit;
       o.data = &p->literals[static_cast<std::size_t>(s.index)];
+      o.stride = 0;
       break;
     case ir::SlotKind::Column:
       o.kind = Kind::Col;
       o.data = p->columns[static_cast<std::size_t>(s.index)].values.data();
+      o.stride = 1;
       break;
     case ir::SlotKind::Gather:
       o.kind = Kind::Gat;
@@ -548,6 +574,103 @@ void Interpreter::Impl::build_step(const ir::Step& st, std::size_t k, std::size_
   sp.name = name.str();
 }
 
+// Steps k and k + 1 as one fused pair (plan.hpp: StepPlan, kernels_impl.hpp: fused pairs) when
+// step k is Add / Sub / Mul / Div over literals, columns and gathers with at least one gather
+// (or Neg of a gather), step k + 1 is Add / Sub / Mul / Div of step k and one literal / column /
+// gather (or Neg of step k), and nothing else reads step k. A commutative first op has its
+// operands ordered scalar first; a commutative second op keeps the pair's value on the left —
+// both are bit-identical reorderings of IEEE-commutative operations.
+bool Interpreter::Impl::build_pair_step(const ir::Group& grp, const std::vector<int>& uses, std::size_t k, StepPlan& sp) {
+  const ir::Step& s0 = grp.steps[k];
+  const ir::Step& s1 = grp.steps[k + 1];
+  if (uses[k] != 1) return false;
+  auto is_arith = [](Op op) { return op == Op::Add || op == Op::Sub || op == Op::Mul || op == Op::Div; };
+  auto is_commutative = [](Op op) { return op == Op::Add || op == Op::Mul; };
+  auto pk_of = [](const ir::Slot& sl) {
+    switch (sl.kind) {
+      case ir::SlotKind::Literal:
+      case ir::SlotKind::Column: return PK::S;
+      case ir::SlotKind::Gather: return PK::G;
+      default: return PK::None;
+    }
+  };
+  // First step.
+  Operand a, b;
+  PK ka, kb;
+  if (s0.op == Op::Neg) {
+    if (pk_of(s0.a) != PK::G) return false;
+    a = resolve(s0.a);
+    ka = PK::G;
+    kb = PK::None;
+  } else if (is_arith(s0.op)) {
+    ka = pk_of(s0.a);
+    kb = pk_of(s0.b);
+    if (ka == PK::None || kb == PK::None || (ka == PK::S && kb == PK::S)) return false;
+    a = resolve(s0.a);
+    b = resolve(s0.b);
+    if (is_commutative(s0.op) && ka == PK::G && kb == PK::S) {
+      std::swap(a, b);
+      std::swap(ka, kb);
+    }
+  } else {
+    return false;
+  }
+  // Second step.
+  const ir::Slot prev{ir::SlotKind::Step, static_cast<std::int32_t>(k)};
+  Operand c;
+  PK kc = PK::None;
+  bool prev_right = false;
+  if (s1.op == Op::Neg) {
+    if (!(s1.a == prev)) return false;
+  } else if (is_arith(s1.op)) {
+    const bool left = s1.a == prev, right = s1.b == prev;
+    if (left == right) return false;  // neither, or both (t op t)
+    const ir::Slot& other = left ? s1.b : s1.a;
+    kc = pk_of(other);
+    if (kc == PK::None) return false;
+    c = resolve(other);
+    prev_right = right && !is_commutative(s1.op);
+  } else {
+    return false;
+  }
+  sp.op = s0.op;
+  sp.op2 = s1.op;
+  sp.a = a;
+  sp.b = b;
+  sp.c = c;
+  sp.prev_right = prev_right;
+  sp.ir_first = static_cast<int>(k);
+  sp.ir_last = static_cast<int>(k) + 1;
+  for (int v = 0; v < n_lane_variants; ++v) {
+    sp.fn[row_contiguous][v] = pair_kernel(v, s0.op, ka, kb, s1.op, kc, prev_right, false);
+    sp.fn[row_indirect][v] = pair_kernel(v, s0.op, ka, kb, s1.op, kc, prev_right, true);
+    sp.acc_fn[0][v] = pair_acc_kernel(v, s0.op, ka, kb, s1.op, kc, prev_right, false);
+    sp.acc_fn[1][v] = pair_acc_kernel(v, s0.op, ka, kb, s1.op, kc, prev_right, true);
+    if (sp.fn[row_contiguous][v] == nullptr || sp.fn[row_indirect][v] == nullptr || sp.acc_fn[0][v] == nullptr ||
+        sp.acc_fn[1][v] == nullptr) {
+      return false;  // not a tabled shape
+    }
+  }
+  // Name: the second op around the first, operand kinds as the single-step names print them.
+  auto kind_name = [](const Operand& o) { return std::string(to_string(o.kind)); };
+  std::ostringstream inner;
+  inner << to_string(s0.op) << "(" << kind_name(a);
+  if (kb != PK::None) inner << "," << kind_name(b);
+  inner << ")";
+  std::ostringstream name;
+  name << to_string(s1.op) << "(";
+  if (kc == PK::None) {
+    name << inner.str();
+  } else if (prev_right) {
+    name << kind_name(c) << "," << inner.str();
+  } else {
+    name << inner.str() << "," << kind_name(c);
+  }
+  name << ")";
+  sp.name = name.str();
+  return true;
+}
+
 void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
   const ir::Domain& dom = p->domains[d];
   const ir::Group& grp = p->groups[d];
@@ -571,8 +694,27 @@ void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
     for (int v = 0; v < n_lane_variants; ++v) g.seg_fn[v] = seg_whole_kernel(v, affine);
     return;
   }
-  g.steps.resize(grp.steps.size());
-  for (std::size_t k = 0; k < grp.steps.size(); ++k) build_step(grp.steps[k], k, grp.steps.size(), g, g.steps[k]);
+  // Kernel calls: a fused pair where two consecutive steps form a chain nobody else reads
+  // (build_pair_step), otherwise one call per step.
+  std::vector<int> uses(grp.steps.size(), 0);
+  for (const ir::Step& st : grp.steps) {
+    for (const ir::Slot* sl : {&st.a, &st.b, &st.c, &st.konst}) {
+      if (sl->kind == ir::SlotKind::Step) ++uses[static_cast<std::size_t>(sl->index)];
+    }
+  }
+  for (std::size_t k = 0; k < grp.steps.size();) {
+    StepPlan sp;
+    if (opt.fuse_pairs && k + 1 < grp.steps.size() && build_pair_step(grp, uses, k, sp)) {
+      sp.out = (k + 2 == grp.steps.size()) ? nullptr : step_buffer(static_cast<int>(k) + 1);
+      g.steps.push_back(std::move(sp));
+      k += 2;
+    } else {
+      build_step(grp.steps[k], k, grp.steps.size(), g, sp);
+      sp.ir_first = sp.ir_last = static_cast<int>(k);
+      g.steps.push_back(std::move(sp));
+      k += 1;
+    }
+  }
 }
 
 Interpreter::Interpreter(const ir::Program& program, Options options) : impl_(std::make_unique<Impl>()) {
@@ -654,12 +796,7 @@ void Interpreter::run(const double* state, int B, double* out) const {
         eval_group(g, ctx, r0, nullptr, n, dom + static_cast<std::size_t>(r0) * Ls);
       }
     }
-    const std::size_t Bs = static_cast<std::size_t>(B);
-    for (std::size_t o = 0; o < p.outputs.size(); ++o) {
-      const double* src = values + static_cast<std::size_t>(p.outputs[o]) * Ls;
-      double* dst = out + o * Bs + static_cast<std::size_t>(b0);
-      for (int l = 0; l < L; ++l) dst[l] = src[l];
-    }
+    copy_out(ctx.v, values, p.outputs.data(), static_cast<int>(p.outputs.size()), out, B, b0, L);
   }
 }
 
@@ -723,7 +860,7 @@ std::string Interpreter::describe() const {
       }
       for (std::size_t k = 0; k < g.steps.size(); ++k) {
         const StepPlan& s = g.steps[k];
-        os << (k ? "; " : "") << s.name << " -> " << (s.out ? "s" + std::to_string(k) : (g.fused ? "member" : "values"));
+        os << (k ? "; " : "") << s.name << " -> " << (s.out ? "s" + std::to_string(s.ir_last) : (g.fused ? "member" : "values"));
       }
     }
     os << '\n';

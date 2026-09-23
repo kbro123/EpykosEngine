@@ -35,7 +35,14 @@ struct Operand {
   Kind kind = Kind::Lit;
   const double* data = nullptr;        // Vec: the buffer; Lit: &value; Col: values by row
   const std::int32_t* index = nullptr; // Gat: value id by row
+  std::int32_t stride = 0;             // Lit: 0, Col: 1 — a per-row scalar is data[row · stride] (pair kernels)
 };
+
+// Operand kinds of a fused pair (below): a per-row scalar (Lit or Col through Operand::stride),
+// a gathered row, or unused (the second operand of Neg).
+enum class PK : std::uint8_t { S = 0, G = 1, None = 2 };
+
+const char* to_string(PK k) noexcept;
 
 // Lane-width variants the kernels are instantiated for. Variant 0 is the runtime-L fallback.
 inline constexpr int lane_variants[] = {0, 1, 4, 8, 16, 32, 64};
@@ -110,6 +117,10 @@ struct PreLoad {
   LoadKernel fn[2][n_lane_variants] = {};   // [row mode][lane variant]
 };
 
+// One kernel call of a group: a single IR step, or a fused pair of two consecutive IR steps
+// t = op(a, b); v = op2(t, c) (prev_right: v = op2(c, t)) — a chain whose middle value t is
+// never stored (kernels_impl.hpp: fused pairs). ir_first..ir_last are the IR steps covered;
+// `out` is the scratch of the last one, so later steps resolve it as before.
 struct StepPlan {
   Op op = Op::Const;
   Operand a, b, c, konst;
@@ -120,6 +131,9 @@ struct StepPlan {
   const SegPlan* seg = nullptr;          // Sum / Affine (per-tile fallback)
   const std::int32_t* ordinal = nullptr; // Input: input ordinal by row
   double* out = nullptr;                 // scratch for a non-final step; nullptr = the caller's destination
+  Op op2 = Op::Const;                    // fused pair: the second step's op (Const: not a pair)
+  bool prev_right = false;               // fused pair: the first step's value is op2's right operand
+  int ir_first = 0, ir_last = 0;         // IR steps this kernel covers
   std::string name;                      // for describe()
 };
 
@@ -205,6 +219,13 @@ struct KernelTable {
   static AccKernel unary_acc(Op op, Kind ka, bool affine);
   static AccKernel konst_acc(Kind kk, bool affine);
   static LoadAccKernel load_acc(Kind k, bool affine, bool ind);
+  // Fused pairs (kernels_impl.hpp): op ∈ {Add, Sub, Mul, Div} over (ka, kb) ∈ {(S,G), (G,S), (G,G)}
+  // or Neg over G; op2 ∈ {Add, Sub, Mul, Div} with kc ∈ {S, G} (prev_right only for Sub / Div)
+  // or Neg. nullptr when the shape is not one of these.
+  static OpKernel pair(Op op, PK ka, PK kb, Op op2, PK kc, bool prev_right, bool ind);
+  static AccKernel pair_acc(Op op, PK ka, PK kb, Op op2, PK kc, bool prev_right, bool affine);
+  // out[o·B + b0 + l] = values[outputs[o]·L + l] for l < L (the output copy of a lane chunk).
+  static void copy_out(const double* values, const std::int32_t* outputs, int n_out, double* out, int B, int b0, int lanes);
 };
 
 extern template struct KernelTable<0>;

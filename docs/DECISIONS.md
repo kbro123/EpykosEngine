@@ -793,3 +793,47 @@ passes 7.6), 27,459,283 raw nodes → 517,036; the IR 67 domains, 423,235 values
 passes (and raw on a 120-trade book: 2.6 M nodes, 1,377 chains); the program's run at the quotes 19 ms per lane at
 B = 1 and 17 ms per lane at B = 8 (four recalibrations per lane, chord policy), bitwise the double maths at each lane's
 solved knots, the first eight scenario lanes bitwise their single runs.
+
+## D45 — The M3 gate: the Stage A gate set, the differential ball's reference, the M4 performance baseline (2026-09-23)
+Implements `PROBLEM.md` §6 for M3/G6 (`tests/stage_a/gate_*_test.cpp`, `bench/stage_a/stage_a_bench.cpp`,
+`scripts/exec_coverage.py`, `bench/results/d448afd70180/m3.json` + `m3.md`). Five choices:
+1. **Every §6 gate is an explicit boolean with its worst number** (a `[  GATE    ]` line per gate: name, ok, worst,
+   the gate value, the sample). The G5 tests already hold round-trip identity, the sharing assertion, the O1
+   diagnostics, the O2 E0 statement and the full 2,000 × 70 ladder against forward mode; G6 adds the gates §6 names
+   that were not yet explicit: the differential ball over the quotes (E0), the adjoint of the pricing graph (O2,
+   no IFT) against finite differences and forward mode over the knots, the IFT ladder against bump-and-recalibrate
+   on sampled (trade, quote) pairs and the book, 32 sampled O4 lanes against independent single runs, optimality per
+   curve at the record point / at the run / on every sampled lane, and the recovery of the generating curves from
+   their par quotes. Sample sizes are stated in each test and seeded (Philox, seed 20260923): 64 ball draws, 24
+   trades for the O2 adjoint, 50 trades for the bump gate each paired with a quote drawn among the entries its
+   ladder row is significantly sensitive to (>= 1e-3 of the row's largest; a EUR trade against a USD quote is zero
+   on both sides and would test nothing), 32 lanes.
+2. **The differential ball's reference is the double maths at the knots a separate single-lane solve finds.** The
+   state of the ball is the 70 quotes (ρ = 0.005, the WORKLOADS §M2 radius); the compiled side is the batched
+   `ImplicitProgram` (every lane recalibrated); the reference, per draw, runs its own single-lane `ImplicitProgram`
+   and evaluates `price_stage_a_at` (O2), `CurveSet::residuals` (the residual outputs), the solved knots (O1) and the
+   solve's diagnostics on double at that solution. A pass therefore states both "the batched solve is bitwise the
+   single solve at random quotes" and "the whole-program interpreter is bitwise the templated maths at the solved
+   knots". The solves' linear algebra (Eigen) is not pinned to `-ffp-contract=off`, so the gate is stated for the
+   reference preset (CLAUDE.md Build); it holds under release too on d448afd70180 and both are reported. The
+   reference's own book on double costs more than the compiled lane, which is why the ball has 64 draws, not 256.
+3. **The M4 baseline is the `stage_a_stage_a` run.** Per D34 a baseline entry is keyed by the run name
+   `bench/run.sh` derives from the binary, so the measured file is `bench/results/<fp>/stage_a_stage_a.json` and
+   `perf_gate.py --accept` seeds `baseline.json` under that name; `m3.json` is the M3 gate summary in the `m1.json`
+   sense (gate booleans and worst numbers, the structure counts, the medians and the coverage), not a run file, and
+   `m3.md` reads it. The bench gains `BM_Calibrate/policy` (one lane's four block solves, per_iteration and chord,
+   driven through `ResidualProgram` / `BlockSolver` as `ImplicitProgram` drives them) and `BM_Evaluate/B/L` (the
+   whole-program interpreter alone at the record point, B identical lanes at lane tile L), so "one calibration" and
+   "O2 evaluation" are separate rows beside `BM_Run` (solves + run); O3 is stated per AD mode: `BM_Adjoint/B` is
+   the IFT reverse ladder (one adjoint lane per output) and `BM_ForwardLadder` the `Dual<70>` pass.
+4. **The lane tile gates row fusion.** `exec::Interpreter` applies the inliner and the exp tails only when row fusion
+   pays (`row_fusion_pays`: L = 1 or L ≥ 16); the scenario grid runs at the default lane tile 8, where neither
+   fires (no domain inlined; the interpolated zero rates materialised before the DF exp). The plan test writes the
+   L = 1 and L = 32 plans beside the grid's, and `BM_Evaluate` measures (64, 8), (64, 32) and (64, 64): a planner
+   fact M4's cost model must price (the M1 best points were L = 1 at B = 1 and L = 32 at B = 64), recorded here,
+   not changed — the grid's defaults stay what G5 measured.
+5. **The `-DEPYKOS_EXEC_PROFILE` table holds 4,096 slots** (it held 64 and the Stage A program has 67 domains); the
+   output copy is the last slot and ids beyond the table fold into the one before it. `scripts/exec_coverage.py`
+   joins a plan, the IR facts per domain (readers through gathers / segments, scan readers, output rows) and a
+   profile into the coverage table, and states for each plain-tile domain which of the two fusion rules' conditions
+   it fails.

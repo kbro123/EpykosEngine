@@ -327,7 +327,8 @@ Performance gates: per machine+toolchain fingerprint; fail on > 1.25× self-regr
 built (M2/Q5, D29, D34): `bench/run.sh` writes `bench/results/<fingerprint>/<run>.json` (refusing at a 1-minute load
 above cores/2) and `scripts/perf_gate.py` gates it against `baseline.json` of the same fingerprint — keyed by the run
 name derived from the binary, moved only by `--accept` in a perf commit — and against the absolute targets of
-`bench/targets.json`; the M1 numbers are the first baseline.
+`bench/targets.json`; the M1 numbers are the first baseline, and the Stage A tape's `stage_a_stage_a` run (record, one
+calibration, O2 evaluation, the O3 ladder in both AD modes, O4 per scenario; M3/G6, D45) is the baseline M4 is gated against.
 Reference implementations (QuantLib, hand-fused kernels) are informational tables, never the gate.
 
 ---

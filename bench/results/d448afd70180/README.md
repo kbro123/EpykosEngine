@@ -45,7 +45,7 @@ docs/WORKLOADS.md Terms: cores = logical CPUs (hardware threads): threshold 8 (p
 
 ## CI
 
-Not recorded for this round.
+GitHub Actions (ubuntu GCC 13 release + reference, macOS Apple clang release): green: all 3 jobs pass (macos-latest clang release, ubuntu-latest GCC 13 release, ubuntu-latest GCC 13 reference; 24/24 tests each) at `a8f3e6a (m1/p7-fix = integrate/m1-m5 4a4bb87 + the P7 review fixes)` (https://github.com/kbro123/EpykosEngine/actions/runs/35828819535). The first green run since P0 (2026-09-22T21:42Z): every push to integrate/m1-m5 from P2 to P6 attempt 4 (32 runs, 2026-09-22T22:13Z to 2026-09-23T05:54Z) was red because the reference TUs were pinned to -ffp-contract=off with a clang-only pragma, so under GCC 13 release exec_m1_interp_e0_test, hand_m1_hand_e0_test and exec_interp_test failed at rounding level, and tape_replay_e0_test failed under both GCC presets on argument evaluation order (D25). The numbers in this README were measured on Apple clang at c4fc0d7 and are unaffected: the fix pins on GCC what clang already had pinned and changes no arithmetic; 'exec_interp_test' in the gates evidence is now exec_interp_e0_test.
 
 ## Correctness gates (reference preset, -ffp-contract=off)
 

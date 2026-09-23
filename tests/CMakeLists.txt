@@ -6,9 +6,11 @@
 #     It links epykos, gtest_main and gmock, and may #include helper headers from tests/.
 #   * Files ending in _e0_test.cpp are E0 (bit-identity) gates: the TU is compiled with
 #     -ffp-contract=off in EVERY preset and sees EPYKOS_FP_CONTRACT_OFF=1, so the templated maths
-#     it instantiates carries no fused multiply-adds. Only the test TU gets this; code already
-#     compiled into libepykos keeps the preset's flags, so run E0 gates that also cross the
-#     library boundary under the reference preset. Label "e0": ctest -L e0.
+#     it instantiates carries no fused multiply-adds. Library sources named src/**/*_e0.cpp are
+#     pinned the same way (root CMakeLists.txt, D25); every other TU of libepykos keeps the
+#     preset's flags, so an E0 gate that crosses into such code runs under the reference preset.
+#     Label "e0": ctest -L e0.
+
 #   * ctest labels: the first subdirectory under tests/ (if any) and "e0".
 #   * Tests run with the current directory set to their binary dir, so debug dumps land in build/.
 

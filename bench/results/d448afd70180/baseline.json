@@ -10,7 +10,7 @@
   "os": "Darwin",
   "arch": "x86_64"
  },
- "updated": "2026-09-23T10:15:16+01:00",
+ "updated": "2026-09-23T10:40:47+01:00",
  "note": "accepted baseline per benchmark (medians); updated only by scripts/perf_gate.py --accept in perf commits",
  "runs": {
   "hand_m1_hand": {
@@ -458,7 +458,7 @@
    "date": "2026-09-23T08:15:34+01:00",
    "accepted": "2026-09-23T09:12:31+01:00"
   },
-  "m2": {
+  "adjoint_m1_adjoint": {
    "benchmarks": {
     "BM_AdjointEval/tile:128/lane_tile:1": {
      "median": 416.41153735599937,
@@ -515,13 +515,21 @@
      "date": "2026-09-23T10:13:28+01:00"
     }
    },
-   "source": "m2.json",
+   "source": "adjoint_m1_adjoint.json",
    "binary": "build/release/bench/adjoint_m1_adjoint_bench",
    "preset": "release",
    "commit": "8914934",
    "commit_full": "891493472f4b43fffb3ab44aa588c121d872af07",
    "date": "2026-09-23T10:13:28+01:00",
-   "accepted": "2026-09-23T10:15:16+01:00"
+   "accepted": "2026-09-23T10:40:47+01:00",
+   "args": [
+    "--benchmark_repetitions=20",
+    "--benchmark_min_time=0.2s",
+    "--benchmark_report_aggregates_only=false",
+    "--benchmark_out_format=json",
+    "--benchmark_filter=^BM_AdjointEval/|^BM_AdjointEvalBatch/tile:(128|256)/lane_tile:8$|^BM_AdjointBuild$"
+   ],
+   "note": "M2 gate: value+adjoint (out_bar = e_book) on the M1 book; B=1 at the D15 tiles, B=64 at lane tile 8 (informational, D9); compare with exec_m1_interp BM_InterpEval exp:0 for the adjoint cost ratio; written by bench/run.sh --name m2 at the M2 gate (raw output tmp/m2.gbench.json, gitignored) and re-keyed by M2/m2-fix to adjoint_m1_adjoint, the name run.sh derives from the binary, so the default invocation is gated (D34); the measurement itself is unchanged"
   }
  }
 }

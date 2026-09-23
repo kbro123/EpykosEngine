@@ -1,6 +1,6 @@
 {
  "format": "epykos-bench 1",
- "name": "m2",
+ "name": "adjoint_m1_adjoint",
  "binary": "build/release/bench/adjoint_m1_adjoint_bench",
  "args": [
   "--benchmark_repetitions=20",
@@ -483,5 +483,5 @@
    "cpu_time_median": 2740.2888888888792
   }
  },
- "note": "M2 gate: value+adjoint (out_bar = e_book) on the M1 book; B=1 at the D15 tiles, B=64 at lane tile 8 (informational, D9); compare with exec_m1_interp BM_InterpEval exp:0 for the adjoint cost ratio"
+ "note": "M2 gate: value+adjoint (out_bar = e_book) on the M1 book; B=1 at the D15 tiles, B=64 at lane tile 8 (informational, D9); compare with exec_m1_interp BM_InterpEval exp:0 for the adjoint cost ratio; written by bench/run.sh --name m2 at the M2 gate (raw output tmp/m2.gbench.json, gitignored) and re-keyed by M2/m2-fix to adjoint_m1_adjoint, the name run.sh derives from the binary, so the default invocation is gated (D34); the measurement itself is unchanged"
 }

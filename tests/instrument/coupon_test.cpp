@@ -1,10 +1,12 @@
 // M3/G2: the coupon mechanics against closed forms and hand computations (PROBLEM.md §6 O2) —
 // the telescoping identity of a plainly compounded OIS leg when projection = discount, a
 // compounded coupon with a 2-day observation shift and a 2-day lockout against the hand
-// computation of tests/conventions/rfr_test.cpp extended to a projected part, the arithmetic
-// average against an explicit average, a fixing-in-advance coupon equal to the realised fixing
-// times the accrual when the fixing date is past, accrued interest, and the futures price
-// identity. The double instantiation of the templated maths is the side under test.
+// computation of tests/conventions/rfr_test.cpp extended to a projected part, a lookback-only
+// coupon likewise (M3-fix: closes the review gap that method="lookback" was never priced), the
+// arithmetic average against an explicit average, a fixing-in-advance coupon equal to the
+// realised fixing times the accrual when the fixing date is past, accrued interest, the futures
+// price identity, and the EUR-ESTR-OIS payment-lag variant (M3-fix) against the 2-day standard.
+// The double instantiation of the templated maths is the side under test.
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -241,6 +243,126 @@ TEST(Coupon, ShiftAndLockoutFullyRealisedMatchesTheConventionsLayer) {
   avg.legs[1].observation = spec;
   const Instrument ia = c.build(avg, march_trade("USD-SOFR-AVG-SWAP"));
   EXPECT_NEAR(coupon_rate<double>(ia.legs[1], ia.legs[1].coupons[0], flat), average_rate(p, c.fixings, "USD-SOFR"), 4e-16);
+}
+
+TEST(Coupon, LookbackByHandWithAProjectedPart) {
+  // M3-fix: ObservationMethod::Lookback (a 2 business day lookback, NO observation shift) was
+  // implemented and unit-tested at the conventions layer only (tests/conventions/rfr_test.cpp
+  // LookbackWithoutShift), never wired into a blueprint or priced — closing that gap with the
+  // same accrual period as the shift/lockout test above (Mon 2026-03-02 -> Mon 2026-03-16) so the
+  // two are directly comparable: under lookback the accrual days and weights are the PLAIN ones
+  // (tests/conventions/rfr_test.cpp PlainObservationDays), but the rate applied on each accrual
+  // day is the rate published two business days earlier (ARRC "lookback without observation
+  // shift"). Valuation Thu 2026-03-05 with SOFR published through Wed 03-04: the accrual days
+  // 03-02..03-06 look back to rate dates 02-26..03-04 (all realised); 03-09..03-13 look back to
+  // rate dates 03-05..03-11 (all projected). USD-SOFR-OIS-LOOKBACK2 keeps USD-SOFR-OIS's 2
+  // business day payment delay, so the payment date and the fixed leg are identical to the
+  // shift/lockout test; only the float coupon's realised factor and projected forwards differ.
+  const Date val = date("2026-03-05");
+  epykos::test::Context c(val, march_history("2026-03-04"));
+  const Instrument in = c.build(march_trade("USD-SOFR-OIS-LOOKBACK2"));
+  ASSERT_EQ(in.legs.size(), 2u);
+  const Leg& flt = in.legs[1];
+  ASSERT_EQ(flt.coupons.size(), 1u);
+  const Coupon& cp = flt.coupons[0];
+  EXPECT_EQ(cp.kind, CouponKind::RfrCompounded);
+  EXPECT_EQ(to_iso(cp.obs_start), "2026-03-02") << "lookback does not shift the observation period";
+  EXPECT_EQ(to_iso(cp.obs_end_date), "2026-03-16");
+  EXPECT_EQ(to_iso(cp.pay), "2026-03-18");   // two business day payment delay, as USD-SOFR-OIS
+  EXPECT_EQ(cp.fixed_days, 7);
+  EXPECT_EQ(cp.obs_days, 14.0);
+  EXPECT_EQ(cp.obs_end - cp.obs_begin, 5);
+  EXPECT_TRUE(cp.current);
+  // Fixed part: rates published on 02-26, 02-27, 03-02, 03-03, 03-04 (two business days before the
+  // accrual days 03-02..03-06), weighted by the ACCRUAL day's own span (rfr_test.cpp Rfr.LookbackWithoutShift).
+  double f_real = 1.0;
+  f_real *= 1.0 + 0.0400 * 1.0 / 360.0;   // rate FOR 02-26, accrual day 03-02 (weight 1)
+  f_real *= 1.0 + 0.0401 * 1.0 / 360.0;   // rate FOR 02-27, accrual day 03-03 (weight 1)
+  f_real *= 1.0 + 0.0402 * 1.0 / 360.0;   // rate FOR 03-02, accrual day 03-04 (weight 1)
+  f_real *= 1.0 + 0.0403 * 1.0 / 360.0;   // rate FOR 03-03, accrual day 03-05 (weight 1)
+  f_real *= 1.0 + 0.0404 * 3.0 / 360.0;   // rate FOR 03-04, accrual day 03-06 (weight 3: Sat, Sun)
+  EXPECT_DOUBLE_EQ(cp.realised_factor, f_real);
+  const ObsDay* d = &flt.obs[static_cast<std::size_t>(cp.obs_begin)];
+  EXPECT_EQ(to_iso(d[0].rate_date), "2026-03-05");   // looks back from accrual day 03-09
+  EXPECT_EQ(to_iso(d[1].rate_date), "2026-03-06");   // looks back from accrual day 03-10
+  EXPECT_EQ(to_iso(d[2].rate_date), "2026-03-09");   // looks back from accrual day 03-11
+  EXPECT_EQ(to_iso(d[3].rate_date), "2026-03-10");   // looks back from accrual day 03-12
+  EXPECT_EQ(to_iso(d[4].rate_date), "2026-03-11");   // looks back from accrual day 03-13
+  EXPECT_EQ(d[0].weight_days, 1.0);   // accrual day 03-09's own span (a Monday)
+  EXPECT_EQ(d[4].weight_days, 3.0);   // accrual day 03-13's own span (a Friday: Sat, Sun)
+  EXPECT_EQ(d[0].tau_rate, 1.0 / 360.0);       // rate day 03-05's own span to 03-06
+  EXPECT_EQ(d[1].tau_rate, 3.0 / 360.0);       // rate day 03-06's own span to 03-09 (Sat, Sun)
+  const double z = 0.04;
+  auto flat = [&](int, double t) { return std::exp(-z * t); };
+  auto fwd = [&](int n) { return (std::exp(z * n / 365.0) - 1.0) * 360.0 / n; };
+  double f = f_real;
+  f *= 1.0 + fwd(1) * d[0].weight_days / 360.0;   // rate day 03-05 (own span 1), accrual weight 1
+  f *= 1.0 + fwd(3) * d[1].weight_days / 360.0;   // rate day 03-06 (own span 3), accrual weight 1
+  f *= 1.0 + fwd(1) * d[2].weight_days / 360.0;   // rate day 03-09 (own span 1), accrual weight 1
+  f *= 1.0 + fwd(1) * d[3].weight_days / 360.0;   // rate day 03-10 (own span 1), accrual weight 1
+  f *= 1.0 + fwd(1) * d[4].weight_days / 360.0;   // rate day 03-11 (own span 1), accrual weight 3
+  const double hand_rate = (f - 1.0) * 360.0 / 14.0;
+  const double t_pay = 13.0 / 365.0;   // 03-05 -> 03-18
+  const double hand_pv = 1.0e6 * (14.0 / 360.0) * hand_rate * std::exp(-z * t_pay);
+  EXPECT_NEAR(coupon_rate<double>(flt, cp, flat), hand_rate, 1e-15);
+  EXPECT_NEAR(float_coupon_pv<double>(flt, cp, flat), hand_pv, 1e-9);
+  EXPECT_NEAR(leg_pv<double>(flt, flat), hand_pv, 1e-9);
+  const double r_real = (f_real - 1.0) * 360.0 / 7.0;
+  EXPECT_NEAR(cp.accrued, 1.0e6 * r_real * 3.0 / 360.0, 1e-9);
+  const Leg& fixed = in.legs[0];
+  ASSERT_EQ(fixed.coupons.size(), 1u);
+  EXPECT_NEAR(leg_pv<double>(fixed, flat), 1.0e6 * (14.0 / 360.0) * 0.04 * std::exp(-z * t_pay), 1e-9);
+  EXPECT_NEAR(pv<double>(in, flat), leg_pv<double>(fixed, flat) - hand_pv, 1e-9);
+}
+
+TEST(Coupon, PaymentLagVariantOnlyShiftsThePaymentDate) {
+  // M3-fix: the EUR-ESTR-OIS payment-lag disagreement (2 business days, Strata / SwapEngine, vs 1
+  // business day, TP ICAP MET template / LCH 2019; docs/G4_BUNDLE.md EUR.3) had no alternate
+  // variant exposed, unlike SHIFT2 / LOCKOUT2. EUR-ESTR-OIS-LAG1 is EUR-ESTR-OIS with payment_lag
+  // 1 instead of 2 and is otherwise identical, so every coupon field but the payment date should
+  // match exactly, and the PV difference should be exactly the extra business day of discounting
+  // (the coupon rate does not depend on the payment date at all).
+  const epykos::test::Context c(valuation);
+  const epykos::test::FlatCurves flat;
+  const Calendar& target = epykos::test::registry().calendar("EUR-TARGET");
+  for (const char* tenor : {"1Y", "2Y", "5Y", "10Y"}) {
+    const Instrument in2 = c.build(swap_trade("EUR-ESTR-OIS", tenor, 0.02));
+    const Instrument in1 = c.build(swap_trade("EUR-ESTR-OIS-LAG1", tenor, 0.02));
+    ASSERT_EQ(in1.legs[1].coupons.size(), in2.legs[1].coupons.size()) << tenor;
+    for (std::size_t i = 0; i < in2.legs[1].coupons.size(); ++i) {
+      const Coupon& cp1 = in1.legs[1].coupons[i];
+      const Coupon& cp2 = in2.legs[1].coupons[i];
+      EXPECT_EQ(cp1.start, cp2.start) << tenor << " coupon " << i;
+      EXPECT_EQ(cp1.end, cp2.end) << tenor << " coupon " << i;
+      EXPECT_EQ(cp1.accrual, cp2.accrual) << tenor << " coupon " << i;
+      EXPECT_EQ(cp1.realised_factor, cp2.realised_factor) << tenor << " coupon " << i;
+      EXPECT_EQ(cp1.pay, target.add_business_days(cp1.end, 1)) << tenor << " coupon " << i;
+      EXPECT_EQ(cp2.pay, target.add_business_days(cp2.end, 2)) << tenor << " coupon " << i;
+      EXPECT_LT(cp1.pay, cp2.pay) << tenor << " coupon " << i << ": the 1-day lag pays earlier";
+    }
+    const double rate = coupon_rate<double>(in1.legs[1], in1.legs[1].coupons[0], flat);
+    EXPECT_DOUBLE_EQ(rate, coupon_rate<double>(in2.legs[1], in2.legs[1].coupons[0], flat))
+        << tenor << ": the payment lag does not enter the coupon rate";
+    // Every coupon's PV difference is N * accrual * rate * (DF(pay1) - DF(pay2)), the earlier
+    // payment discounted less; summed over the leg this must equal the leg PV difference exactly.
+    const int float_disc1 = in1.legs[1].disc_curve, float_disc2 = in2.legs[1].disc_curve;
+    const int fixed_disc1 = in1.legs[0].disc_curve, fixed_disc2 = in2.legs[0].disc_curve;
+    double float_diff = 0.0, fixed_diff = 0.0;
+    for (std::size_t i = 0; i < in1.legs[1].coupons.size(); ++i) {
+      const Coupon& f1 = in1.legs[1].coupons[i];
+      const Coupon& f2 = in2.legs[1].coupons[i];
+      const double r = coupon_rate<double>(in1.legs[1], f1, flat);
+      float_diff += f1.notional * f1.accrual * r * (flat(float_disc1, f1.t_pay) - flat(float_disc2, f2.t_pay));
+    }
+    for (std::size_t i = 0; i < in1.legs[0].coupons.size(); ++i) {
+      const Coupon& x1 = in1.legs[0].coupons[i];
+      const Coupon& x2 = in2.legs[0].coupons[i];
+      fixed_diff += x1.notional * x1.accrual * x1.rate * (flat(fixed_disc1, x1.t_pay) - flat(fixed_disc2, x2.t_pay));
+    }
+    const double pv_diff = pv<double>(in1, flat) - pv<double>(in2, flat);
+    EXPECT_NEAR(pv_diff, fixed_diff - float_diff, 1e-6 * in1.notional) << tenor;
+    EXPECT_GT(fixed_diff, 0.0) << tenor << ": paying one day earlier raises a receiver's discounted cashflow";
+  }
 }
 
 TEST(Coupon, ArithmeticAverageEqualsTheExplicitAverage) {

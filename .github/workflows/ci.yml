@@ -1,6 +1,7 @@
 # Tests only (D12): Linux GCC 13 and macOS Apple clang, release preset; the reference preset on
 # Linux as well, because E0 gates run under it. Benchmarks are built but never run in CI; perf
-# gates run only locally and are fingerprinted (D9, D13).
+# gates run only locally and are fingerprinted (D9, D13). The mutation job (Linux GCC 13) runs
+# scripts/mutation_test.sh: the mutation preset, every registered mutant against the gate tests (D29).
 name: ci
 
 on:
@@ -67,3 +68,35 @@ jobs:
 
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
+
+  mutation:
+    name: ubuntu-latest / mutation
+    runs-on: ubuntu-latest
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build gcc-13 g++-13
+
+      - name: Cache third_party downloads
+        uses: actions/cache@v5
+        with:
+          path: .cache/downloads
+          key: third-party-${{ hashFiles('scripts/bootstrap.sh') }}
+
+      - name: Bootstrap third_party
+        run: scripts/bootstrap.sh
+
+      - name: Toolchain
+        run: |
+          $CXX --version
+          cmake --version
+          ninja --version
+
+      - name: Mutation gate (build the mutation preset, every mutant against the gates)
+        run: scripts/mutation_test.sh --jobs 2

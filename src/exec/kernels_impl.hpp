@@ -1,11 +1,12 @@
-// EpykosEngine — the interpreter's kernels, templated on op, operand kinds and lane width L
-// (L = 0: runtime lane count from the context). Included by one TU per lane width
+// EpykosEngine — the interpreter's kernels, templated on op, operand kinds, row mode and lane
+// width L (L = 0: runtime lane count from the context). Included by one TU per lane width
 // (kernels_l*.cpp), which explicitly instantiates KernelTable<L>.
 //
-// Every kernel loops rows (i over the tile, r = r0 + i the domain row) and lanes (l < L) and
-// performs exactly the IEEE operation the scalar evaluator performs, in the same order; the
-// only freedom taken is which loop the compiler vectorises. Contraction is off in the including
-// TUs (see kernels_l*.cpp), so an Affine fold's product and sum round separately.
+// Every kernel loops rows (i over the tile; the domain row r is r0 + i, or idx[i] + r0 in the
+// indirect row mode, see plan.hpp) and lanes (l < L) and performs exactly the IEEE operation the
+// scalar evaluator performs, in the same order; the only freedom taken is which loop the compiler
+// vectorises. Contraction is off in the including TUs (see kernels_l*.cpp), so an Affine fold's
+// product and sum round separately.
 //
 // How the loops are written, and why. A tile's output never overlaps what the tile reads (rows
 // of a non-recurrent domain read other domains, earlier steps' scratch, columns and literals),
@@ -18,6 +19,16 @@
 // L = 1 the block of rows is the vector axis (gathers included). Sum / Affine keep several rows'
 // accumulators in locals so that several fold chains are in flight at once. The runtime-L
 // variant (L = 0, chunks of a width no specialised kernel exists for) keeps plain loops.
+//
+// Reductions over fused producers (plan.hpp: GroupPlan::fused). A block whose member positions
+// come from a fused producer evaluates that producer's group for the member rows (indirect row
+// mode, idx = the transposed member ids, one call per run of positions with the same producer):
+// the earlier steps into their scratch, the last step through a reduction epilogue that folds
+// each value into its row's accumulator with several rows in flight in locals (Sum: acc = m_0,
+// acc = acc + m_k; Affine: p = c_k·m_k, acc = acc + p — the recorded order). Members of a
+// materialised domain are folded straight from the value buffer. The per-element arithmetic
+// and the fold order are those of the materialising path, so the result is bit-identical; what
+// changes is that the producer's rows are never written to or read back from the value buffer.
 #pragma once
 
 #include <algorithm>
@@ -49,6 +60,17 @@ inline int lanes(const RunCtx& ctx) noexcept {
 }
 
 constexpr bool is_scalar_kind(Kind k) noexcept { return k == Kind::Lit || k == Kind::Col; }
+
+// The domain row of tile row i (plan.hpp: row modes).
+template <bool Ind>
+inline int row_at(int r0, const std::int32_t* idx, int i) noexcept {
+  if constexpr (Ind) {
+    return idx[i] + r0;
+  } else {
+    (void)idx;
+    return r0 + i;
+  }
+}
 
 // ---- operand access ------------------------------------------------------------------------
 
@@ -100,10 +122,13 @@ inline double lane(double s, const double* v, int l) noexcept {
   }
 }
 
-// L = 1: stage rows [r0 + i, r0 + i + nb) of an operand in dst[0..nb).
-template <Kind K>
-inline void stage_rows1(double* dst, int nb, const double* values, const Operand& o, int r0, int i) noexcept {
-  for (int j = 0; j < nb; ++j) dst[j] = elem<K>(values, o, r0 + i + j, static_cast<std::size_t>(i + j), 0, 1);
+// L = 1: stage tile rows [i, i + nb) of an operand in dst[0..nb).
+template <Kind K, bool Ind>
+inline void stage_rows1(double* dst, int nb, const double* values, const Operand& o, int r0, const std::int32_t* idx,
+                        int i) noexcept {
+  for (int j = 0; j < nb; ++j) {
+    dst[j] = elem<K>(values, o, row_at<Ind>(r0, idx, i + j), static_cast<std::size_t>(i + j), 0, 1);
+  }
 }
 
 template <Op op>
@@ -139,8 +164,8 @@ inline double apply3(double a, double b, double c) noexcept {
 
 // ---- elementwise -------------------------------------------------------------------------
 
-template <Op op, Kind KA, Kind KB, int L>
-void k_binary(const StepPlan& s, const RunCtx& ctx, int r0, int n, double* out) {
+template <Op op, Kind KA, Kind KB, int L, bool Ind>
+void k_binary(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out) {
   const double* values = ctx.values;
   const Operand& a = s.a;
   const Operand& b = s.b;
@@ -148,18 +173,19 @@ void k_binary(const StepPlan& s, const RunCtx& ctx, int r0, int n, double* out) 
     int i = 0;
     for (; i + row_block <= n; i += row_block) {
       double va[row_block], vb[row_block], o[row_block];
-      stage_rows1<KA>(va, row_block, values, a, r0, i);
-      stage_rows1<KB>(vb, row_block, values, b, r0, i);
+      stage_rows1<KA, Ind>(va, row_block, values, a, r0, idx, i);
+      stage_rows1<KB, Ind>(vb, row_block, values, b, r0, idx, i);
       for (int j = 0; j < row_block; ++j) o[j] = apply2<op>(va[j], vb[j]);
       for (int j = 0; j < row_block; ++j) out[i + j] = o[j];
     }
     for (; i < n; ++i) {
-      out[i] = apply2<op>(elem<KA>(values, a, r0 + i, static_cast<std::size_t>(i), 0, 1),
-                          elem<KB>(values, b, r0 + i, static_cast<std::size_t>(i), 0, 1));
+      const int r = row_at<Ind>(r0, idx, i);
+      out[i] = apply2<op>(elem<KA>(values, a, r, static_cast<std::size_t>(i), 0, 1),
+                          elem<KB>(values, b, r, static_cast<std::size_t>(i), 0, 1));
     }
   } else if constexpr (L > 1) {
     for (int i = 0; i < n; ++i) {
-      const int r = r0 + i;
+      const int r = row_at<Ind>(r0, idx, i);
       double va[L], vb[L], o[L];
       const double sa = stage_row<KA, L>(va, values, a, r, static_cast<std::size_t>(i));
       const double sb = stage_row<KB, L>(vb, values, b, r, static_cast<std::size_t>(i));
@@ -170,7 +196,7 @@ void k_binary(const StepPlan& s, const RunCtx& ctx, int r0, int n, double* out) 
   } else {
     const std::size_t LL = static_cast<std::size_t>(ctx.L);
     for (int i = 0; i < n; ++i) {
-      const int r = r0 + i;
+      const int r = row_at<Ind>(r0, idx, i);
       double* dst = out + static_cast<std::size_t>(i) * LL;
       for (int l = 0; l < ctx.L; ++l) {
         dst[l] = apply2<op>(elem<KA>(values, a, r, static_cast<std::size_t>(i), l, LL),
@@ -180,22 +206,30 @@ void k_binary(const StepPlan& s, const RunCtx& ctx, int r0, int n, double* out) 
   }
 }
 
-template <Op op, Kind KA, int L>
-void k_unary(const StepPlan& s, const RunCtx& ctx, int r0, int n, double* out) {
+template <Op op, Kind KA, int L, bool Ind>
+void k_unary(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out) {
   const double* values = ctx.values;
   const Operand& a = s.a;
-  if constexpr (L == 1) {
+  if constexpr (KA == Kind::Vec && (op == Op::Exp || op == Op::Log)) {
+    // A libm call per element over a contiguous tile: nothing to vectorise, no staging.
+    (void)values; (void)r0; (void)idx;
+    const double* src = a.data;
+    const std::size_t total = static_cast<std::size_t>(n) * static_cast<std::size_t>(lanes<L>(ctx));
+    for (std::size_t e = 0; e < total; ++e) out[e] = apply1<op>(src[e]);
+  } else if constexpr (L == 1) {
     int i = 0;
     for (; i + row_block <= n; i += row_block) {
       double va[row_block], o[row_block];
-      stage_rows1<KA>(va, row_block, values, a, r0, i);
+      stage_rows1<KA, Ind>(va, row_block, values, a, r0, idx, i);
       for (int j = 0; j < row_block; ++j) o[j] = apply1<op>(va[j]);
       for (int j = 0; j < row_block; ++j) out[i + j] = o[j];
     }
-    for (; i < n; ++i) out[i] = apply1<op>(elem<KA>(values, a, r0 + i, static_cast<std::size_t>(i), 0, 1));
+    for (; i < n; ++i) {
+      out[i] = apply1<op>(elem<KA>(values, a, row_at<Ind>(r0, idx, i), static_cast<std::size_t>(i), 0, 1));
+    }
   } else if constexpr (L > 1) {
     for (int i = 0; i < n; ++i) {
-      const int r = r0 + i;
+      const int r = row_at<Ind>(r0, idx, i);
       double va[L], o[L];
       const double sa = stage_row<KA, L>(va, values, a, r, static_cast<std::size_t>(i));
       for (int l = 0; l < L; ++l) o[l] = apply1<op>(lane<KA>(sa, va, l));
@@ -205,7 +239,7 @@ void k_unary(const StepPlan& s, const RunCtx& ctx, int r0, int n, double* out) {
   } else {
     const std::size_t LL = static_cast<std::size_t>(ctx.L);
     for (int i = 0; i < n; ++i) {
-      const int r = r0 + i;
+      const int r = row_at<Ind>(r0, idx, i);
       double* dst = out + static_cast<std::size_t>(i) * LL;
       for (int l = 0; l < ctx.L; ++l) dst[l] = apply1<op>(elem<KA>(values, a, r, static_cast<std::size_t>(i), l, LL));
     }
@@ -213,20 +247,20 @@ void k_unary(const StepPlan& s, const RunCtx& ctx, int r0, int n, double* out) {
 }
 
 // Materialise an operand into a tile-shaped vector.
-template <Kind K, int L>
-void load_impl(const Operand& a, const RunCtx& ctx, int r0, int n, double* out) {
+template <Kind K, int L, bool Ind>
+void load_impl(const Operand& a, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out) {
   const double* values = ctx.values;
   if constexpr (L == 1) {
     int i = 0;
     for (; i + row_block <= n; i += row_block) {
       double va[row_block];
-      stage_rows1<K>(va, row_block, values, a, r0, i);
+      stage_rows1<K, Ind>(va, row_block, values, a, r0, idx, i);
       for (int j = 0; j < row_block; ++j) out[i + j] = va[j];
     }
-    for (; i < n; ++i) out[i] = elem<K>(values, a, r0 + i, static_cast<std::size_t>(i), 0, 1);
+    for (; i < n; ++i) out[i] = elem<K>(values, a, row_at<Ind>(r0, idx, i), static_cast<std::size_t>(i), 0, 1);
   } else if constexpr (L > 1) {
     for (int i = 0; i < n; ++i) {
-      const int r = r0 + i;
+      const int r = row_at<Ind>(r0, idx, i);
       double va[L];
       const double sa = stage_row<K, L>(va, values, a, r, static_cast<std::size_t>(i));
       double* dst = out + static_cast<std::size_t>(i) * static_cast<std::size_t>(L);
@@ -235,29 +269,29 @@ void load_impl(const Operand& a, const RunCtx& ctx, int r0, int n, double* out) 
   } else {
     const std::size_t LL = static_cast<std::size_t>(ctx.L);
     for (int i = 0; i < n; ++i) {
-      const int r = r0 + i;
+      const int r = row_at<Ind>(r0, idx, i);
       double* dst = out + static_cast<std::size_t>(i) * LL;
       for (int l = 0; l < ctx.L; ++l) dst[l] = elem<K>(values, a, r, static_cast<std::size_t>(i), l, LL);
     }
   }
 }
 
-template <Kind K, int L>
-void k_load(const Operand& a, const RunCtx& ctx, int r0, int n, double* out) {
-  load_impl<K, L>(a, ctx, r0, n, out);
+template <Kind K, int L, bool Ind>
+void k_load(const Operand& a, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out) {
+  load_impl<K, L, Ind>(a, ctx, r0, idx, n, out);
 }
 
 // Exp through exp_poly: materialise the argument, then transform in place (E1).
-template <Kind KA, int L>
-void k_exp_poly(const StepPlan& s, const RunCtx& ctx, int r0, int n, double* out) {
-  load_impl<KA, L>(s.a, ctx, r0, n, out);
+template <Kind KA, int L, bool Ind>
+void k_exp_poly(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out) {
+  load_impl<KA, L, Ind>(s.a, ctx, r0, idx, n, out);
   hand::exp_poly_array(out, out, n * lanes<L>(ctx));
 }
 
 // Fma / Select over three materialised (Vec) operands: three scratch buffers, the output is a
-// fourth; staged through locals so the loop vectorises without alias checks.
+// fourth; staged through locals so the loop vectorises without alias checks. Row-mode agnostic.
 template <Op op, int L>
-void k_ternary(const StepPlan& s, const RunCtx& ctx, int, int n, double* out) {
+void k_ternary(const StepPlan& s, const RunCtx& ctx, int, const std::int32_t*, int n, double* out) {
   const double* a = s.a.data;
   const double* b = s.b.data;
   const double* c = s.c.data;
@@ -275,20 +309,20 @@ void k_ternary(const StepPlan& s, const RunCtx& ctx, int, int n, double* out) {
 }
 
 // Const: the row's constant (literal or column) broadcast over the lanes.
-template <Kind KK, int L>
-void k_konst(const StepPlan& s, const RunCtx& ctx, int r0, int n, double* out) {
-  load_impl<KK, L>(s.konst, ctx, r0, n, out);
+template <Kind KK, int L, bool Ind>
+void k_konst(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out) {
+  load_impl<KK, L, Ind>(s.konst, ctx, r0, idx, n, out);
 }
 
 // Input: values[(base + r)·L + l] = state[ordinal(r)·B + b0 + l].
-template <int L>
-void k_input(const StepPlan& s, const RunCtx& ctx, int r0, int n, double* out) {
+template <int L, bool Ind>
+void k_input(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out) {
   const int LL = lanes<L>(ctx);
   const std::size_t LLs = static_cast<std::size_t>(LL);
   const double* state = ctx.state + ctx.b0;
   const std::size_t B = static_cast<std::size_t>(ctx.B);
   for (int i = 0; i < n; ++i) {
-    const double* src = state + static_cast<std::size_t>(s.ordinal[r0 + i]) * B;
+    const double* src = state + static_cast<std::size_t>(s.ordinal[row_at<Ind>(r0, idx, i)]) * B;
     double* dst = out + static_cast<std::size_t>(i) * LLs;
     for (int l = 0; l < LL; ++l) dst[l] = src[l];
   }
@@ -373,80 +407,411 @@ inline void seg_group1(int i, int nj, int n, int len, const double* values, cons
   for (int j = 0; j < nj; ++j) dom[rows[i + j]] = acc[j];
 }
 
-// Whole-domain Sum / Affine over length buckets with transposed members (see plan.hpp).
+// A block whose members are all in the value buffer: rows in flight in local accumulators
+// (L = 0: the shared accumulator scratch, plain loops).
 template <bool Affine, int L>
-void k_seg_whole(const SegPlan& sp, const RunCtx& ctx, double* dom) {
+inline void seg_block_gathered(const SegPlan& sp, const SegBlock& blk, const RunCtx& ctx, double* dom) {
   const double* values = ctx.values;
   const double* konst = Affine ? sp.konst.data : nullptr;
   const bool konst_is_column = Affine && sp.konst.kind == Kind::Col;
-  for (const SegBlock& blk : sp.blocks) {
-    const int n = blk.n;
-    const int len = blk.len;
-    const std::int32_t* rows = sp.rows.data() + blk.row0;
-    const std::int32_t* memT = sp.memT.data() + blk.memT;
-    const double* coefT = Affine ? sp.coefT.data() + blk.memT : nullptr;
-    if constexpr (L == 1) {
-      constexpr int RJ = seg_rows_in_flight<1>;
-      int i = 0;
-      for (; i + RJ <= n; i += RJ) seg_group1<Affine, RJ>(i, RJ, n, len, values, rows, memT, coefT, konst, konst_is_column, dom);
-      if (i < n) seg_group1<Affine, RJ>(i, n - i, n, len, values, rows, memT, coefT, konst, konst_is_column, dom);
-    } else if constexpr (L > 1) {
-      constexpr int RJ = seg_rows_in_flight<L>;
-      int i = 0;
-      for (; i + RJ <= n; i += RJ) seg_group<Affine, L, RJ>(i, RJ, n, len, values, rows, memT, coefT, konst, konst_is_column, dom);
-      if (i < n) seg_group<Affine, L, RJ>(i, n - i, n, len, values, rows, memT, coefT, konst, konst_is_column, dom);
-    } else {
-      // Runtime lane count: the shared accumulator scratch, plain loops.
-      const std::size_t LL = static_cast<std::size_t>(ctx.L);
-      double* acc = ctx.acc;
-      int k0;
-      if constexpr (Affine) {
-        for (int i = 0; i < n; ++i) {
-          const double v = konst_is_column ? konst[rows[i]] : konst[0];
-          for (std::size_t l = 0; l < LL; ++l) acc[static_cast<std::size_t>(i) * LL + l] = v;
-        }
-        k0 = 0;
-      } else {
-        for (int i = 0; i < n; ++i) {
-          const double* src = values + static_cast<std::size_t>(memT[i]) * LL;
-          for (std::size_t l = 0; l < LL; ++l) acc[static_cast<std::size_t>(i) * LL + l] = src[l];
-        }
-        k0 = 1;
-      }
-      for (int k = k0; k < len; ++k) {
-        const std::size_t kk = static_cast<std::size_t>(k) * static_cast<std::size_t>(n);
-        for (int i = 0; i < n; ++i) {
-          const double* src = values + static_cast<std::size_t>(memT[kk + static_cast<std::size_t>(i)]) * LL;
-          double* d = acc + static_cast<std::size_t>(i) * LL;
-          if constexpr (Affine) {
-            const double c = coefT[kk + static_cast<std::size_t>(i)];
-            for (std::size_t l = 0; l < LL; ++l) {
-              const double p = c * src[l];
-              d[l] = d[l] + p;
-            }
-          } else {
-            for (std::size_t l = 0; l < LL; ++l) d[l] = d[l] + src[l];
-          }
-        }
-      }
+  const int n = blk.n;
+  const int len = blk.len;
+  const std::int32_t* rows = sp.rows.data() + blk.row0;
+  const std::int32_t* memT = sp.memT.data() + blk.memT;
+  const double* coefT = Affine ? sp.coefT.data() + blk.memT : nullptr;
+  if constexpr (L == 1) {
+    constexpr int RJ = seg_rows_in_flight<1>;
+    int i = 0;
+    for (; i + RJ <= n; i += RJ) seg_group1<Affine, RJ>(i, RJ, n, len, values, rows, memT, coefT, konst, konst_is_column, dom);
+    if (i < n) seg_group1<Affine, RJ>(i, n - i, n, len, values, rows, memT, coefT, konst, konst_is_column, dom);
+  } else if constexpr (L > 1) {
+    constexpr int RJ = seg_rows_in_flight<L>;
+    int i = 0;
+    for (; i + RJ <= n; i += RJ) seg_group<Affine, L, RJ>(i, RJ, n, len, values, rows, memT, coefT, konst, konst_is_column, dom);
+    if (i < n) seg_group<Affine, L, RJ>(i, n - i, n, len, values, rows, memT, coefT, konst, konst_is_column, dom);
+  } else {
+    const std::size_t LL = static_cast<std::size_t>(ctx.L);
+    double* acc = ctx.acc;
+    int k0;
+    if constexpr (Affine) {
       for (int i = 0; i < n; ++i) {
-        double* d = dom + static_cast<std::size_t>(rows[i]) * LL;
-        const double* src = acc + static_cast<std::size_t>(i) * LL;
-        for (std::size_t l = 0; l < LL; ++l) d[l] = src[l];
+        const double v = konst_is_column ? konst[rows[i]] : konst[0];
+        for (std::size_t l = 0; l < LL; ++l) acc[static_cast<std::size_t>(i) * LL + l] = v;
+      }
+      k0 = 0;
+    } else {
+      for (int i = 0; i < n; ++i) {
+        const double* src = values + static_cast<std::size_t>(memT[i]) * LL;
+        for (std::size_t l = 0; l < LL; ++l) acc[static_cast<std::size_t>(i) * LL + l] = src[l];
+      }
+      k0 = 1;
+    }
+    for (int k = k0; k < len; ++k) {
+      const std::size_t kk = static_cast<std::size_t>(k) * static_cast<std::size_t>(n);
+      for (int i = 0; i < n; ++i) {
+        const double* src = values + static_cast<std::size_t>(memT[kk + static_cast<std::size_t>(i)]) * LL;
+        double* d = acc + static_cast<std::size_t>(i) * LL;
+        if constexpr (Affine) {
+          const double c = coefT[kk + static_cast<std::size_t>(i)];
+          for (std::size_t l = 0; l < LL; ++l) {
+            const double p = c * src[l];
+            d[l] = d[l] + p;
+          }
+        } else {
+          for (std::size_t l = 0; l < LL; ++l) d[l] = d[l] + src[l];
+        }
+      }
+    }
+    for (int i = 0; i < n; ++i) {
+      double* d = dom + static_cast<std::size_t>(rows[i]) * LL;
+      const double* src = acc + static_cast<std::size_t>(i) * LL;
+      for (std::size_t l = 0; l < LL; ++l) d[l] = src[l];
+    }
+  }
+}
+
+// ---- reduction epilogues ------------------------------------------------------------------
+//
+// A fused block's members are never stored: the producer's last step is evaluated with an
+// epilogue that folds each value into its row's accumulator, with several rows in flight in
+// local accumulators (32 lanes: eight 4-wide accumulators at every L; one row at L >= 32) and
+// the member positions of a producer run as the inner loop. The value v of a member is computed
+// exactly as the plain kernel computes it (same operation, same operands), then folded: Sum
+// acc = acc + v (acc = v at the block's first position); Affine p = c·v, acc = acc + p — the
+// recorded fold order, one IEEE rounding per operation, contraction off in the including TU.
+
+template <int L>
+inline constexpr int acc_rows_in_flight = acc_rows_in_flight_for(L == 0 ? 1 : L);
+
+// L = 1: RJ rows from i0 of a run of kr positions; f(r, t) is the member's value for domain
+// row r at tile row t.
+template <bool Affine, bool Ind, int RJ, class F>
+inline void acc_rows1(F&& f, int r0, const std::int32_t* idx, int n, int i0, int kr, bool first, const double* coef,
+                      double* accbuf) {
+  double acc[RJ];
+  if (Affine || !first) {
+    for (int j = 0; j < RJ; ++j) acc[j] = accbuf[i0 + j];
+  } else {
+    for (int j = 0; j < RJ; ++j) acc[j] = 0.0;  // overwritten at position 0
+  }
+  for (int k = 0; k < kr; ++k) {
+    const int t0 = k * n + i0;
+    double v[RJ];
+    for (int j = 0; j < RJ; ++j) v[j] = f(row_at<Ind>(r0, idx, t0 + j), t0 + j);
+    if constexpr (Affine) {
+      const double* ck = coef + t0;
+      for (int j = 0; j < RJ; ++j) {
+        const double p = ck[j] * v[j];
+        acc[j] = acc[j] + p;
+      }
+    } else if (first && k == 0) {
+      for (int j = 0; j < RJ; ++j) acc[j] = v[j];
+    } else {
+      for (int j = 0; j < RJ; ++j) acc[j] = acc[j] + v[j];
+    }
+  }
+  for (int j = 0; j < RJ; ++j) accbuf[i0 + j] = acc[j];
+}
+
+// L > 1: f(r, t, v) fills the member's L lanes.
+template <bool Affine, bool Ind, int L, int RJ, class F>
+inline void acc_rowsL(F&& f, int r0, const std::int32_t* idx, int n, int i0, int kr, bool first, const double* coef,
+                      double* accbuf) {
+  double acc[RJ][L];
+  if (Affine || !first) {
+    for (int j = 0; j < RJ; ++j) {
+      const double* src = accbuf + static_cast<std::size_t>(i0 + j) * static_cast<std::size_t>(L);
+      for (int l = 0; l < L; ++l) acc[j][l] = src[l];
+    }
+  } else {
+    for (int j = 0; j < RJ; ++j) {
+      for (int l = 0; l < L; ++l) acc[j][l] = 0.0;  // overwritten at position 0
+    }
+  }
+  for (int k = 0; k < kr; ++k) {
+    const int t0 = k * n + i0;
+    for (int j = 0; j < RJ; ++j) {
+      double v[L];
+      f(row_at<Ind>(r0, idx, t0 + j), t0 + j, v);
+      if constexpr (Affine) {
+        const double c = coef[t0 + j];
+        for (int l = 0; l < L; ++l) {
+          const double p = c * v[l];
+          acc[j][l] = acc[j][l] + p;
+        }
+      } else if (first && k == 0) {
+        for (int l = 0; l < L; ++l) acc[j][l] = v[l];
+      } else {
+        for (int l = 0; l < L; ++l) acc[j][l] = acc[j][l] + v[l];
+      }
+    }
+  }
+  for (int j = 0; j < RJ; ++j) {
+    double* dst = accbuf + static_cast<std::size_t>(i0 + j) * static_cast<std::size_t>(L);
+    for (int l = 0; l < L; ++l) dst[l] = acc[j][l];
+  }
+}
+
+// The rows left after the full groups (nj < RJ), in halving groups: every group has a
+// compile-time row count, so the tail vectorises like the full groups.
+template <bool Affine, bool Ind, int RJ, class F>
+inline void acc_tail1(F&& f, int r0, const std::int32_t* idx, int n, int i0, int nj, int kr, bool first,
+                      const double* coef, double* accbuf) {
+  if constexpr (RJ > 1) {
+    constexpr int H = RJ / 2;
+    if (nj >= H) {
+      acc_rows1<Affine, Ind, H>(f, r0, idx, n, i0, kr, first, coef, accbuf);
+      i0 += H;
+      nj -= H;
+    }
+    acc_tail1<Affine, Ind, H>(f, r0, idx, n, i0, nj, kr, first, coef, accbuf);
+  } else {
+    (void)f; (void)r0; (void)idx; (void)n; (void)i0; (void)nj; (void)kr; (void)first; (void)coef; (void)accbuf;
+  }
+}
+
+template <bool Affine, bool Ind, int L, int RJ, class F>
+inline void acc_tailL(F&& f, int r0, const std::int32_t* idx, int n, int i0, int nj, int kr, bool first,
+                      const double* coef, double* accbuf) {
+  if constexpr (RJ > 1) {
+    constexpr int H = RJ / 2;
+    if (nj >= H) {
+      acc_rowsL<Affine, Ind, L, H>(f, r0, idx, n, i0, kr, first, coef, accbuf);
+      i0 += H;
+      nj -= H;
+    }
+    acc_tailL<Affine, Ind, L, H>(f, r0, idx, n, i0, nj, kr, first, coef, accbuf);
+  } else {
+    (void)f; (void)r0; (void)idx; (void)n; (void)i0; (void)nj; (void)kr; (void)first; (void)coef; (void)accbuf;
+  }
+}
+
+// Runtime lane count: in place on the accumulator, plain loops; f(r, t, l) is one lane.
+template <bool Affine, bool Ind, class F>
+inline void acc_rows0(F&& f, int r0, const std::int32_t* idx, int n, int LL, int kr, bool first, const double* coef,
+                      double* accbuf) {
+  const std::size_t LLs = static_cast<std::size_t>(LL);
+  for (int k = 0; k < kr; ++k) {
+    for (int i = 0; i < n; ++i) {
+      const int t = k * n + i;
+      const int r = row_at<Ind>(r0, idx, t);
+      double* a = accbuf + static_cast<std::size_t>(i) * LLs;
+      for (int l = 0; l < LL; ++l) {
+        const double v = f(r, t, l);
+        if constexpr (Affine) {
+          const double p = coef[t] * v;
+          a[l] = a[l] + p;
+        } else if (first && k == 0) {
+          a[l] = v;
+        } else {
+          a[l] = a[l] + v;
+        }
       }
     }
   }
 }
 
-// Per-tile Sum / Affine, row by row (a Sum / Affine step that shares its group with other steps).
+template <bool Affine, bool Ind, int L, class F1, class FL, class F0>
+inline void acc_run(F1&& f1, FL&& fL, F0&& f0, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, int kr,
+                    bool first, const double* coef, double* acc) {
+  (void)f1; (void)fL; (void)f0; (void)ctx;
+  if constexpr (L == 1) {
+    constexpr int RJ = acc_rows_in_flight<1>;
+    int i = 0;
+    for (; i + RJ <= n; i += RJ) acc_rows1<Affine, Ind, RJ>(f1, r0, idx, n, i, kr, first, coef, acc);
+    if (i < n) acc_tail1<Affine, Ind, RJ>(f1, r0, idx, n, i, n - i, kr, first, coef, acc);
+  } else if constexpr (L > 1) {
+    constexpr int RJ = acc_rows_in_flight<L>;
+    int i = 0;
+    for (; i + RJ <= n; i += RJ) acc_rowsL<Affine, Ind, L, RJ>(fL, r0, idx, n, i, kr, first, coef, acc);
+    if (i < n) acc_tailL<Affine, Ind, L, RJ>(fL, r0, idx, n, i, n - i, kr, first, coef, acc);
+  } else {
+    acc_rows0<Affine, Ind>(f0, r0, idx, n, ctx.L, kr, first, coef, acc);
+  }
+}
+
+template <Op op, Kind KA, Kind KB, int L, bool Affine>
+void k_binary_acc(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, int kr, bool first,
+                  const double* coef, double* acc) {
+  const double* values = ctx.values;
+  const Operand& a = s.a;
+  const Operand& b = s.b;
+  const std::size_t LL = static_cast<std::size_t>(lanes<L>(ctx));
+  auto f1 = [&](int r, int t) {
+    return apply2<op>(elem<KA>(values, a, r, static_cast<std::size_t>(t), 0, 1),
+                      elem<KB>(values, b, r, static_cast<std::size_t>(t), 0, 1));
+  };
+  auto fL = [&](int r, int t, double* v) {
+    if constexpr (L > 1) {
+      double va[L], vb[L];
+      const double sa = stage_row<KA, L>(va, values, a, r, static_cast<std::size_t>(t));
+      const double sb = stage_row<KB, L>(vb, values, b, r, static_cast<std::size_t>(t));
+      for (int l = 0; l < L; ++l) v[l] = apply2<op>(lane<KA>(sa, va, l), lane<KB>(sb, vb, l));
+    } else {
+      (void)r; (void)t; (void)v;
+    }
+  };
+  auto f0 = [&](int r, int t, int l) {
+    return apply2<op>(elem<KA>(values, a, r, static_cast<std::size_t>(t), l, LL),
+                      elem<KB>(values, b, r, static_cast<std::size_t>(t), l, LL));
+  };
+  acc_run<Affine, false, L>(f1, fL, f0, ctx, r0, idx, n, kr, first, coef, acc);
+}
+
+template <Op op, Kind KA, int L, bool Affine>
+void k_unary_acc(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, int kr, bool first,
+                 const double* coef, double* acc) {
+  const double* values = ctx.values;
+  const Operand& a = s.a;
+  const std::size_t LL = static_cast<std::size_t>(lanes<L>(ctx));
+  auto f1 = [&](int r, int t) { return apply1<op>(elem<KA>(values, a, r, static_cast<std::size_t>(t), 0, 1)); };
+  auto fL = [&](int r, int t, double* v) {
+    if constexpr (L > 1) {
+      double va[L];
+      const double sa = stage_row<KA, L>(va, values, a, r, static_cast<std::size_t>(t));
+      for (int l = 0; l < L; ++l) v[l] = apply1<op>(lane<KA>(sa, va, l));
+    } else {
+      (void)r; (void)t; (void)v;
+    }
+  };
+  auto f0 = [&](int r, int t, int l) { return apply1<op>(elem<KA>(values, a, r, static_cast<std::size_t>(t), l, LL)); };
+  acc_run<Affine, false, L>(f1, fL, f0, ctx, r0, idx, n, kr, first, coef, acc);
+}
+
+// The member is an operand as it stands: a Const step's literal / column (indirect rows), the
+// members of a materialised domain (Gat over the block's member ids, contiguous rows) or the
+// member buffer (Vec) holding a last step that has no epilogue of its own.
+template <Kind K, int L, bool Affine, bool Ind>
+void k_load_acc(const Operand& o, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, int kr, bool first,
+                const double* coef, double* acc) {
+  const double* values = ctx.values;
+  const std::size_t LL = static_cast<std::size_t>(lanes<L>(ctx));
+  auto f1 = [&](int r, int t) { return elem<K>(values, o, r, static_cast<std::size_t>(t), 0, 1); };
+  auto fL = [&](int r, int t, double* v) {
+    if constexpr (L > 1) {
+      double va[L];
+      const double sa = stage_row<K, L>(va, values, o, r, static_cast<std::size_t>(t));
+      for (int l = 0; l < L; ++l) v[l] = lane<K>(sa, va, l);
+    } else {
+      (void)r; (void)t; (void)v;
+    }
+  };
+  auto f0 = [&](int r, int t, int l) { return elem<K>(values, o, r, static_cast<std::size_t>(t), l, LL); };
+  acc_run<Affine, Ind, L>(f1, fL, f0, ctx, r0, idx, n, kr, first, coef, acc);
+}
+
+template <Kind KK, int L, bool Affine>
+void k_konst_acc(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, int kr, bool first,
+                 const double* coef, double* acc) {
+  k_load_acc<KK, L, Affine, false>(s.konst, ctx, r0, idx, n, kr, first, coef, acc);
+}
+
+// A block with fused producers: for each chunk of kc member positions and each run of positions
+// with the same producer, the producer's earlier steps are evaluated over the run's member rows
+// (indirect row mode, tile row kk·n + i) into their scratch and its last step through its
+// epilogue into the accumulator; a last step without an epilogue goes through the member buffer;
+// members of a materialised domain are folded straight from the value buffer.
 template <bool Affine, int L>
-void k_seg_rows(const StepPlan& s, const RunCtx& ctx, int r0, int n, double* out) {
+inline void seg_block_fused(const SegPlan& sp, const SegBlock& blk, const RunCtx& ctx, double* dom) {
+  const int LL = lanes<L>(ctx);
+  const std::size_t LLs = static_cast<std::size_t>(LL);
+  const int v = ctx.v;
+  const int n = blk.n;
+  const int len = blk.len;
+  const int kc = blk.kc;
+  const std::int32_t* rows = sp.rows.data() + blk.row0;
+  const std::int32_t* memT = sp.memT.data() + blk.memT;
+  const double* coefT = Affine ? sp.coefT.data() + blk.memT : nullptr;
+  const std::int32_t* prod = sp.prod.data() + blk.prod;
+  double* acc = ctx.acc;
+  if constexpr (Affine) {
+    if (sp.konst.kind == Kind::Col) {
+      load_impl<Kind::Col, L, true>(sp.konst, ctx, 0, rows, n, acc);
+    } else {
+      load_impl<Kind::Lit, L, false>(sp.konst, ctx, 0, nullptr, n, acc);
+    }
+  }
+  for (int k0 = 0; k0 < len; k0 += kc) {
+    const int k1 = std::min(len, k0 + kc);
+    for (int k = k0; k < k1;) {
+      int ke = k + 1;
+      while (ke < k1 && prod[ke] == prod[k]) ++ke;
+      const int kr = ke - k;
+      const std::int32_t* mem = memT + static_cast<std::size_t>(k) * static_cast<std::size_t>(n);
+      const double* coef = Affine ? coefT + static_cast<std::size_t>(k) * static_cast<std::size_t>(n) : nullptr;
+      const bool first = !Affine && k == 0;
+      if (prod[k] >= 0) {
+        const FusedProducer& fp = sp.producers[static_cast<std::size_t>(prod[k])];
+        const int n_rows = kr * n;
+        if (fp.block_mode) {
+          // The producer's operands are laid out in this reduction's member order: contiguous
+          // rows from the run's offset.
+          const int r0 = sp.prod_off[blk.prod + static_cast<std::size_t>(k)];
+          const std::size_t n_steps = fp.steps.size();
+          for (std::size_t j = 0; j < n_steps; ++j) {
+            const StepPlan& s = fp.steps[j];
+            for (int q = 0; q < s.n_pre; ++q) {
+              s.pre[q].fn[row_contiguous][v](s.pre[q].src, ctx, r0, nullptr, n_rows, s.pre[q].dst);
+            }
+            if (j + 1 < n_steps) {
+              s.fn[row_contiguous][v](s, ctx, r0, nullptr, n_rows, s.out);
+            } else if (s.acc_fn[Affine ? 1 : 0][v] != nullptr) {
+              s.acc_fn[Affine ? 1 : 0][v](s, ctx, r0, nullptr, n, kr, first, coef, acc);
+            } else {
+              s.fn[row_contiguous][v](s, ctx, r0, nullptr, n_rows, ctx.member);
+              Operand o;
+              o.kind = Kind::Vec;
+              o.data = ctx.member;
+              sp.load_acc_vec[v](o, ctx, 0, nullptr, n, kr, first, coef, acc);
+            }
+          }
+        } else {
+          // Not re-laid out: the producer's own steps over the member ids (indirect rows) into
+          // the member buffer.
+          const GroupPlan& g = ctx.groups[fp.domain];
+          eval_group(g, ctx, -g.value_base, mem, n_rows, ctx.member);
+          Operand o;
+          o.kind = Kind::Vec;
+          o.data = ctx.member;
+          sp.load_acc_vec[v](o, ctx, 0, nullptr, n, kr, first, coef, acc);
+        }
+      } else {
+        Operand o;
+        o.kind = Kind::Gat;
+        o.index = mem;
+        sp.load_acc_gat[v](o, ctx, 0, nullptr, n, kr, first, coef, acc);
+      }
+      k = ke;
+    }
+  }
+  for (int i = 0; i < n; ++i) {
+    double* d = dom + static_cast<std::size_t>(rows[i]) * LLs;
+    const double* src = acc + static_cast<std::size_t>(i) * LLs;
+    for (std::size_t l = 0; l < LLs; ++l) d[l] = src[l];
+  }
+}
+
+// Whole-domain Sum / Affine over length buckets with transposed members (see plan.hpp).
+template <bool Affine, int L>
+void k_seg_whole(const SegPlan& sp, const RunCtx& ctx, double* dom) {
+  for (const SegBlock& blk : sp.blocks) {
+    if (blk.fused) {
+      seg_block_fused<Affine, L>(sp, blk, ctx, dom);
+    } else {
+      seg_block_gathered<Affine, L>(sp, blk, ctx, dom);
+    }
+  }
+}
+
+// Per-tile Sum / Affine, row by row (a Sum / Affine step that shares its group with other steps).
+template <bool Affine, int L, bool Ind>
+void k_seg_rows(const StepPlan& s, const RunCtx& ctx, int r0, const std::int32_t* idx, int n, double* out) {
   const int LL = lanes<L>(ctx);
   const std::size_t LLs = static_cast<std::size_t>(LL);
   const SegPlan& sp = *s.seg;
   const double* values = ctx.values;
   for (int i = 0; i < n; ++i) {
-    const int r = r0 + i;
+    const int r = row_at<Ind>(r0, idx, i);
     const std::int32_t lo = sp.offsets[r];
     const std::int32_t hi = sp.offsets[r + 1];
     double* o = out + static_cast<std::size_t>(i) * LLs;
@@ -475,76 +840,91 @@ void k_seg_rows(const StepPlan& s, const RunCtx& ctx, int r0, int n, double* out
 
 // ---- tables ----------------------------------------------------------------------------------
 
-template <int L, Op op, Kind KA>
+template <int L, bool Ind, Op op, Kind KA>
 OpKernel pick_binary_b(Kind kb) {
   switch (kb) {
-    case Kind::Vec: return &k_binary<op, KA, Kind::Vec, L>;
-    case Kind::Lit: return &k_binary<op, KA, Kind::Lit, L>;
-    case Kind::Col: return &k_binary<op, KA, Kind::Col, L>;
-    case Kind::Gat: return &k_binary<op, KA, Kind::Gat, L>;
+    case Kind::Vec: return &k_binary<op, KA, Kind::Vec, L, Ind>;
+    case Kind::Lit: return &k_binary<op, KA, Kind::Lit, L, Ind>;
+    case Kind::Col: return &k_binary<op, KA, Kind::Col, L, Ind>;
+    case Kind::Gat: return &k_binary<op, KA, Kind::Gat, L, Ind>;
   }
   return nullptr;
 }
 
-template <int L, Op op>
+template <int L, bool Ind, Op op>
 OpKernel pick_binary_a(Kind ka, Kind kb) {
   switch (ka) {
-    case Kind::Vec: return pick_binary_b<L, op, Kind::Vec>(kb);
-    case Kind::Lit: return pick_binary_b<L, op, Kind::Lit>(kb);
-    case Kind::Col: return pick_binary_b<L, op, Kind::Col>(kb);
-    case Kind::Gat: return pick_binary_b<L, op, Kind::Gat>(kb);
+    case Kind::Vec: return pick_binary_b<L, Ind, op, Kind::Vec>(kb);
+    case Kind::Lit: return pick_binary_b<L, Ind, op, Kind::Lit>(kb);
+    case Kind::Col: return pick_binary_b<L, Ind, op, Kind::Col>(kb);
+    case Kind::Gat: return pick_binary_b<L, Ind, op, Kind::Gat>(kb);
   }
   return nullptr;
 }
 
-template <int L>
-OpKernel KernelTable<L>::binary(Op op, Kind ka, Kind kb) {
+template <int L, bool Ind>
+OpKernel pick_binary(Op op, Kind ka, Kind kb) {
   switch (op) {
-    case Op::Add: return pick_binary_a<L, Op::Add>(ka, kb);
-    case Op::Sub: return pick_binary_a<L, Op::Sub>(ka, kb);
-    case Op::Mul: return pick_binary_a<L, Op::Mul>(ka, kb);
-    case Op::Div: return pick_binary_a<L, Op::Div>(ka, kb);
-    case Op::CmpLt: return pick_binary_a<L, Op::CmpLt>(ka, kb);
-    case Op::CmpLe: return pick_binary_a<L, Op::CmpLe>(ka, kb);
-    case Op::CmpGt: return pick_binary_a<L, Op::CmpGt>(ka, kb);
-    case Op::CmpGe: return pick_binary_a<L, Op::CmpGe>(ka, kb);
-    case Op::CmpEq: return pick_binary_a<L, Op::CmpEq>(ka, kb);
+    case Op::Add: return pick_binary_a<L, Ind, Op::Add>(ka, kb);
+    case Op::Sub: return pick_binary_a<L, Ind, Op::Sub>(ka, kb);
+    case Op::Mul: return pick_binary_a<L, Ind, Op::Mul>(ka, kb);
+    case Op::Div: return pick_binary_a<L, Ind, Op::Div>(ka, kb);
+    case Op::CmpLt: return pick_binary_a<L, Ind, Op::CmpLt>(ka, kb);
+    case Op::CmpLe: return pick_binary_a<L, Ind, Op::CmpLe>(ka, kb);
+    case Op::CmpGt: return pick_binary_a<L, Ind, Op::CmpGt>(ka, kb);
+    case Op::CmpGe: return pick_binary_a<L, Ind, Op::CmpGe>(ka, kb);
+    case Op::CmpEq: return pick_binary_a<L, Ind, Op::CmpEq>(ka, kb);
     default: throw std::invalid_argument("exec: not a binary op");
   }
 }
 
-template <int L, Op op>
+template <int L>
+OpKernel KernelTable<L>::binary(Op op, Kind ka, Kind kb, bool ind) {
+  return ind ? pick_binary<L, true>(op, ka, kb) : pick_binary<L, false>(op, ka, kb);
+}
+
+template <int L, bool Ind, Op op>
 OpKernel pick_unary_a(Kind ka) {
   switch (ka) {
-    case Kind::Vec: return &k_unary<op, Kind::Vec, L>;
-    case Kind::Lit: return &k_unary<op, Kind::Lit, L>;
-    case Kind::Col: return &k_unary<op, Kind::Col, L>;
-    case Kind::Gat: return &k_unary<op, Kind::Gat, L>;
+    case Kind::Vec: return &k_unary<op, Kind::Vec, L, Ind>;
+    case Kind::Lit: return &k_unary<op, Kind::Lit, L, Ind>;
+    case Kind::Col: return &k_unary<op, Kind::Col, L, Ind>;
+    case Kind::Gat: return &k_unary<op, Kind::Gat, L, Ind>;
   }
   return nullptr;
 }
 
-template <int L>
-OpKernel KernelTable<L>::unary(Op op, Kind ka) {
+template <int L, bool Ind>
+OpKernel pick_unary(Op op, Kind ka) {
   switch (op) {
-    case Op::Neg: return pick_unary_a<L, Op::Neg>(ka);
-    case Op::Exp: return pick_unary_a<L, Op::Exp>(ka);
-    case Op::Log: return pick_unary_a<L, Op::Log>(ka);
-    case Op::Sqrt: return pick_unary_a<L, Op::Sqrt>(ka);
-    case Op::Recip: return pick_unary_a<L, Op::Recip>(ka);
+    case Op::Neg: return pick_unary_a<L, Ind, Op::Neg>(ka);
+    case Op::Exp: return pick_unary_a<L, Ind, Op::Exp>(ka);
+    case Op::Log: return pick_unary_a<L, Ind, Op::Log>(ka);
+    case Op::Sqrt: return pick_unary_a<L, Ind, Op::Sqrt>(ka);
+    case Op::Recip: return pick_unary_a<L, Ind, Op::Recip>(ka);
     default: throw std::invalid_argument("exec: not a unary op");
   }
 }
 
 template <int L>
-OpKernel KernelTable<L>::exp_poly(Kind ka) {
+OpKernel KernelTable<L>::unary(Op op, Kind ka, bool ind) {
+  return ind ? pick_unary<L, true>(op, ka) : pick_unary<L, false>(op, ka);
+}
+
+template <int L, bool Ind>
+OpKernel pick_exp_poly(Kind ka) {
   switch (ka) {
-    case Kind::Vec: return &k_exp_poly<Kind::Vec, L>;
-    case Kind::Lit: return &k_exp_poly<Kind::Lit, L>;
-    case Kind::Col: return &k_exp_poly<Kind::Col, L>;
-    case Kind::Gat: return &k_exp_poly<Kind::Gat, L>;
+    case Kind::Vec: return &k_exp_poly<Kind::Vec, L, Ind>;
+    case Kind::Lit: return &k_exp_poly<Kind::Lit, L, Ind>;
+    case Kind::Col: return &k_exp_poly<Kind::Col, L, Ind>;
+    case Kind::Gat: return &k_exp_poly<Kind::Gat, L, Ind>;
   }
   return nullptr;
+}
+
+template <int L>
+OpKernel KernelTable<L>::exp_poly(Kind ka, bool ind) {
+  return ind ? pick_exp_poly<L, true>(ka) : pick_exp_poly<L, false>(ka);
 }
 
 template <int L>
@@ -556,39 +936,154 @@ OpKernel KernelTable<L>::ternary(Op op) {
   }
 }
 
-template <int L>
-OpKernel KernelTable<L>::konst(Kind kk) {
+template <int L, bool Ind>
+OpKernel pick_konst(Kind kk) {
   switch (kk) {
-    case Kind::Lit: return &k_konst<Kind::Lit, L>;
-    case Kind::Col: return &k_konst<Kind::Col, L>;
+    case Kind::Lit: return &k_konst<Kind::Lit, L, Ind>;
+    case Kind::Col: return &k_konst<Kind::Col, L, Ind>;
     default: throw std::invalid_argument("exec: a Const step needs a literal or a column");
   }
 }
 
 template <int L>
-OpKernel KernelTable<L>::input() {
-  return &k_input<L>;
+OpKernel KernelTable<L>::konst(Kind kk, bool ind) {
+  return ind ? pick_konst<L, true>(kk) : pick_konst<L, false>(kk);
 }
 
 template <int L>
-OpKernel KernelTable<L>::seg_rows(bool affine) {
-  return affine ? &k_seg_rows<true, L> : &k_seg_rows<false, L>;
+OpKernel KernelTable<L>::input(bool ind) {
+  return ind ? &k_input<L, true> : &k_input<L, false>;
 }
 
 template <int L>
-LoadKernel KernelTable<L>::load(Kind k) {
+OpKernel KernelTable<L>::seg_rows(bool affine, bool ind) {
+  if (ind) return affine ? &k_seg_rows<true, L, true> : &k_seg_rows<false, L, true>;
+  return affine ? &k_seg_rows<true, L, false> : &k_seg_rows<false, L, false>;
+}
+
+template <int L, bool Ind>
+LoadKernel pick_load(Kind k) {
   switch (k) {
-    case Kind::Vec: return &k_load<Kind::Vec, L>;
-    case Kind::Lit: return &k_load<Kind::Lit, L>;
-    case Kind::Col: return &k_load<Kind::Col, L>;
-    case Kind::Gat: return &k_load<Kind::Gat, L>;
+    case Kind::Vec: return &k_load<Kind::Vec, L, Ind>;
+    case Kind::Lit: return &k_load<Kind::Lit, L, Ind>;
+    case Kind::Col: return &k_load<Kind::Col, L, Ind>;
+    case Kind::Gat: return &k_load<Kind::Gat, L, Ind>;
   }
   return nullptr;
 }
 
 template <int L>
+LoadKernel KernelTable<L>::load(Kind k, bool ind) {
+  return ind ? pick_load<L, true>(k) : pick_load<L, false>(k);
+}
+
+template <int L>
 SegKernel KernelTable<L>::seg_whole(bool affine) {
   return affine ? &k_seg_whole<true, L> : &k_seg_whole<false, L>;
+}
+
+// ---- reduction epilogue tables -------------------------------------------------------------
+
+template <int L, bool Affine, Op op, Kind KA>
+AccKernel pick_binary_acc_b(Kind kb) {
+  switch (kb) {
+    case Kind::Vec: return &k_binary_acc<op, KA, Kind::Vec, L, Affine>;
+    case Kind::Lit: return &k_binary_acc<op, KA, Kind::Lit, L, Affine>;
+    case Kind::Col: return &k_binary_acc<op, KA, Kind::Col, L, Affine>;
+    case Kind::Gat: return &k_binary_acc<op, KA, Kind::Gat, L, Affine>;
+  }
+  return nullptr;
+}
+
+template <int L, bool Affine, Op op>
+AccKernel pick_binary_acc_a(Kind ka, Kind kb) {
+  switch (ka) {
+    case Kind::Vec: return pick_binary_acc_b<L, Affine, op, Kind::Vec>(kb);
+    case Kind::Lit: return pick_binary_acc_b<L, Affine, op, Kind::Lit>(kb);
+    case Kind::Col: return pick_binary_acc_b<L, Affine, op, Kind::Col>(kb);
+    case Kind::Gat: return pick_binary_acc_b<L, Affine, op, Kind::Gat>(kb);
+  }
+  return nullptr;
+}
+
+template <int L, bool Affine>
+AccKernel pick_binary_acc(Op op, Kind ka, Kind kb) {
+  switch (op) {
+    case Op::Add: return pick_binary_acc_a<L, Affine, Op::Add>(ka, kb);
+    case Op::Sub: return pick_binary_acc_a<L, Affine, Op::Sub>(ka, kb);
+    case Op::Mul: return pick_binary_acc_a<L, Affine, Op::Mul>(ka, kb);
+    case Op::Div: return pick_binary_acc_a<L, Affine, Op::Div>(ka, kb);
+    case Op::CmpLt: return pick_binary_acc_a<L, Affine, Op::CmpLt>(ka, kb);
+    case Op::CmpLe: return pick_binary_acc_a<L, Affine, Op::CmpLe>(ka, kb);
+    case Op::CmpGt: return pick_binary_acc_a<L, Affine, Op::CmpGt>(ka, kb);
+    case Op::CmpGe: return pick_binary_acc_a<L, Affine, Op::CmpGe>(ka, kb);
+    case Op::CmpEq: return pick_binary_acc_a<L, Affine, Op::CmpEq>(ka, kb);
+    default: throw std::invalid_argument("exec: not a binary op");
+  }
+}
+
+template <int L>
+AccKernel KernelTable<L>::binary_acc(Op op, Kind ka, Kind kb, bool affine) {
+  return affine ? pick_binary_acc<L, true>(op, ka, kb) : pick_binary_acc<L, false>(op, ka, kb);
+}
+
+template <int L, bool Affine, Op op>
+AccKernel pick_unary_acc_a(Kind ka) {
+  switch (ka) {
+    case Kind::Vec: return &k_unary_acc<op, Kind::Vec, L, Affine>;
+    case Kind::Lit: return &k_unary_acc<op, Kind::Lit, L, Affine>;
+    case Kind::Col: return &k_unary_acc<op, Kind::Col, L, Affine>;
+    case Kind::Gat: return &k_unary_acc<op, Kind::Gat, L, Affine>;
+  }
+  return nullptr;
+}
+
+template <int L, bool Affine>
+AccKernel pick_unary_acc(Op op, Kind ka) {
+  switch (op) {
+    case Op::Neg: return pick_unary_acc_a<L, Affine, Op::Neg>(ka);
+    case Op::Exp: return pick_unary_acc_a<L, Affine, Op::Exp>(ka);
+    case Op::Log: return pick_unary_acc_a<L, Affine, Op::Log>(ka);
+    case Op::Sqrt: return pick_unary_acc_a<L, Affine, Op::Sqrt>(ka);
+    case Op::Recip: return pick_unary_acc_a<L, Affine, Op::Recip>(ka);
+    default: throw std::invalid_argument("exec: not a unary op");
+  }
+}
+
+template <int L>
+AccKernel KernelTable<L>::unary_acc(Op op, Kind ka, bool affine) {
+  return affine ? pick_unary_acc<L, true>(op, ka) : pick_unary_acc<L, false>(op, ka);
+}
+
+template <int L, bool Affine>
+AccKernel pick_konst_acc(Kind kk) {
+  switch (kk) {
+    case Kind::Lit: return &k_konst_acc<Kind::Lit, L, Affine>;
+    case Kind::Col: return &k_konst_acc<Kind::Col, L, Affine>;
+    default: throw std::invalid_argument("exec: a Const step needs a literal or a column");
+  }
+}
+
+template <int L>
+AccKernel KernelTable<L>::konst_acc(Kind kk, bool affine) {
+  return affine ? pick_konst_acc<L, true>(kk) : pick_konst_acc<L, false>(kk);
+}
+
+template <int L, bool Affine, bool Ind>
+LoadAccKernel pick_load_acc(Kind k) {
+  switch (k) {
+    case Kind::Vec: return &k_load_acc<Kind::Vec, L, Affine, Ind>;
+    case Kind::Lit: return &k_load_acc<Kind::Lit, L, Affine, Ind>;
+    case Kind::Col: return &k_load_acc<Kind::Col, L, Affine, Ind>;
+    case Kind::Gat: return &k_load_acc<Kind::Gat, L, Affine, Ind>;
+  }
+  return nullptr;
+}
+
+template <int L>
+LoadAccKernel KernelTable<L>::load_acc(Kind k, bool affine, bool ind) {
+  if (ind) return affine ? pick_load_acc<L, true, true>(k) : pick_load_acc<L, false, true>(k);
+  return affine ? pick_load_acc<L, true, false>(k) : pick_load_acc<L, false, false>(k);
 }
 
 }  // namespace epykos::exec::detail

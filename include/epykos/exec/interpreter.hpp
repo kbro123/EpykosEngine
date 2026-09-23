@@ -21,6 +21,14 @@
 //     transposed, so fold step k is one vector op across the bucket's rows — each row's fold
 //     stays the recorded left-to-right order (bit-identical), with no per-row dependency chain
 //     stalling the pipeline and no variable trip count to mispredict;
+//   * an elementwise domain whose rows are read only as members of such whole-domain Sum /
+//     Affine groups (no gather, no output, no per-row Sum reads it) is never materialised:
+//     each reduction block evaluates the producer's steps for the member rows it needs (the
+//     same kernels, rows addressed through the block's member ids) and folds the result in
+//     place — the per-element arithmetic and the fold order are unchanged (E0), the producer's
+//     rows are never written to or read back from the value buffer. On the M1 book this is the
+//     two coupon domains (31,806 rows) folded into the leg sums. Options::fuse_reductions
+//     switches it off (every domain materialised);
 //   * gathers and segment members read the value buffer of the current chunk.
 //
 // Runtime B and tile; kernels are instantiated for lane widths 1, 4, 8, 16, 32, 64 (a chunk of
@@ -55,6 +63,7 @@ struct Options {
   int max_batch = 64;                // lanes the buffers are sized for; run(B > max_batch) throws
   int lane_tile = 8;                 // lanes per chunk (B is split into chunks of at most this many)
   ExpMode exp = ExpMode::std_exp;    // std_exp: E0; poly: E1 (exp_poly), timing only
+  bool fuse_reductions = true;       // evaluate reduction-only elementwise domains inside the reductions (E0); false: materialise every domain
 };
 
 class Interpreter {
@@ -74,7 +83,7 @@ class Interpreter {
   void run(const double* state, int B, double* out) const;
 
   // The plan: options, domain order with rows / steps / kernel per step / tiles, segment
-  // buckets, and buffer sizes. For the benchmark report.
+  // buckets, fused producers, and buffer sizes. For the benchmark report.
   std::string describe() const;
 
   const Options& options() const noexcept;
@@ -83,8 +92,9 @@ class Interpreter {
   int n_outputs() const noexcept;
   int max_batch() const noexcept;
   std::size_t num_values() const noexcept;   // rows over all domains (one value per row per lane)
+  std::size_t num_fused_values() const noexcept;  // of which rows of fused domains (never materialised)
   std::size_t value_bytes() const noexcept;  // the value buffer, as allocated
-  std::size_t scratch_bytes() const noexcept;  // step scratch + operand temporaries + segment accumulator
+  std::size_t scratch_bytes() const noexcept;  // step scratch + operand temporaries + reduction accumulator and member buffers
   std::size_t table_bytes() const noexcept;    // the plan's own index / coefficient tables
 
  private:

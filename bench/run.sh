@@ -159,5 +159,6 @@ EXTRA=()
 python3 "$ROOT/scripts/bench_results.py" summarise \
   --raw "$RAW" --name "$NAME" --binary "$BIN_REL" --preset "$PRESET" \
   --fingerprint-before "$FP_BEFORE_FILE" --fingerprint-after "$FP_AFTER_FILE" \
-  --raw-output "tmp/$NAME.gbench.json" "${ARG_FLAGS[@]}" "${EXTRA[@]}" \
+  --raw-output "tmp/$NAME.gbench.json" ${ARG_FLAGS[@]+"${ARG_FLAGS[@]}"} ${EXTRA[@]+"${EXTRA[@]}"} \
   --out "$OUT_DIR/$NAME.json"
+# (the ${a[@]+"${a[@]}"} form: an empty array is an unbound variable under set -u in bash 3.2, macOS /bin/bash)

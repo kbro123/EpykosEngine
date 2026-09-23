@@ -174,6 +174,13 @@ constexpr double inline_max_refs_per_row = 1.25;
 // 7.7 KB, emitting cost 0.9 us more).
 constexpr std::size_t emit_min_bytes = std::size_t{64} << 10;
 
+// Chain tails and inlined producers do per-row work (a tail's dispatch and libm loop, a
+// producer's per-row fold and copy) that amortises over the row's lanes at 16 lanes and more,
+// and over the 16-row block at 1 lane; at 4 and 8 lanes the separate vectorised passes are
+// cheaper (measured on the M1 book: B = 64 at 4 lanes 2024 -> 2259 us and at 8 lanes
+// 1726 -> 1796 us with them, 16 lanes 1656 -> 1594 and 32 lanes 1640 -> 1571 us).
+constexpr bool row_fusion_pays(int lanes) noexcept { return lanes == 1 || lanes >= 16; }
+
 }  // namespace
 
 struct Interpreter::Impl {
@@ -333,7 +340,7 @@ void Interpreter::Impl::decide_inline() {
   inlined_into.assign(nd, -1);
   inline_refs.assign(nd, {});
   n_inline_temps = 0;
-  if (!opt.inline_producers) return;
+  if (!opt.inline_producers || !row_fusion_pays(Lt)) return;
   auto dom_of = [&](ir::value_id v) { return static_cast<std::int32_t>(prog.domain_of(v)); };
   std::vector<char> blocked(nd, 0);   // read other than through a gather
   for (ir::value_id v : prog.outputs) blocked[static_cast<std::size_t>(dom_of(v))] = 1;
@@ -996,7 +1003,7 @@ void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
       // The chain continues while the last covered step is read only by the next one and that
       // step is a tail shape (a unary, or a binary with a literal / column).
       std::size_t last = k + 1;
-      while (last + 1 < grp.steps.size() && uses[last] == 1 && add_tail_step(grp.steps[last + 1], last, sp)) ++last;
+      while (row_fusion_pays(Lt) && last + 1 < grp.steps.size() && uses[last] == 1 && add_tail_step(grp.steps[last + 1], last, sp)) ++last;
       if (sp.n_tail > 0) {
         for (int v = 0; v < n_lane_variants; ++v) sp.acc_fn[0][v] = sp.acc_fn[1][v] = nullptr;  // epilogues apply no tails
       }

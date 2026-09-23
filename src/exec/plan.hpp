@@ -235,7 +235,7 @@ struct GroupPlan {
   std::vector<std::int32_t> consumers;   // the reduction domains that evaluate it (describe)
   // Output rows of a fused group that are not kept are written to `out` by the reduction blocks
   // that compute them, from the member buffer (emit_ordinal: the row's output ordinal, or -1);
-  // every other output is copied from the value buffer after the chunk (Impl::late_outputs).
+  // every other output is copied from the value buffer after the chunk (Impl::late_ids / late_ords).
   std::vector<std::int32_t> emit_ordinal;
   std::size_t emitted = 0;               // rows emitted this way (describe)
   // Producers evaluated per tile of this group (InlinedProducer), and the tile row of each of

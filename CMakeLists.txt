@@ -40,7 +40,7 @@ option(EPYKOS_REFERENCE   "Reference build: every TU gets -ffp-contract=off (E0 
 option(EPYKOS_BUILD_TESTS "Build the gtest executables under tests/"                          ON)
 option(EPYKOS_BUILD_BENCH "Build the Google Benchmark executables under bench/"               ON)
 option(EPYKOS_WERROR      "Treat warnings as errors in epykos targets (not third_party)"       OFF)
-option(EPYKOS_MUTATIONS   "Compile the registered mutants (include/epykos/mutation) into libepykos; EPYKOS_MUTANT=<name> selects one at run time. The mutation preset only, never a gated build (D29)" OFF)
+option(EPYKOS_MUTATIONS   "Compile the registered mutants (include/epykos/mutation) into libepykos; EPYKOS_MUTANT=<name> selects one at run time. The mutation preset only, never a gated build (D31)" OFF)
 
 # ---------------------------------------------------------------------------------------------
 # Flags (D13).  Gated build: -O3 -march=x86-64-v3 -fno-math-errno, never -ffast-math.
@@ -157,7 +157,7 @@ target_compile_features(epykos PUBLIC cxx_std_20)
 target_link_libraries(epykos
   PUBLIC  Threads::Threads
   PRIVATE epykos_warnings)
-# Mutation testing (D29): with EPYKOS_MUTATIONS=ON the deliberate defects guarded by
+# Mutation testing (D31): with EPYKOS_MUTATIONS=ON the deliberate defects guarded by
 # epykos::mutant("<pass>.<defect>") are compiled in and EPYKOS_MUTANT selects one per process;
 # scripts/mutation_test.sh asserts that the gate tests catch every one. PUBLIC so that every TU
 # of the build (tests included) sees the same selector. OFF: epykos::mutant() is constexpr false.

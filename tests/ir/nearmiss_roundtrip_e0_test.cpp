@@ -6,7 +6,7 @@
 //
 // The M1 book's classes are far apart, so a signature pass that merged near-miss shapes, or a
 // tape pass that mishandled a leading constant, would pass every M1 gate; this gate closes that
-// gap (found by the mutation harness, D29). Round-trip identity on the raw recording and after
+// gap (found by the mutation harness, D31). Round-trip identity on the raw recording and after
 // the passes; the expanded tape, the IR evaluator and the tape after every pass replay bitwise
 // the double instantiation of the same shapes at the record point and a 64-draw state ball.
 //

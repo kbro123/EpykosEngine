@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/mutation_test.sh — the mutation gate (DESIGN.md §11, D29): every registered mutant must
+# scripts/mutation_test.sh — the mutation gate (DESIGN.md §11, D31): every registered mutant must
 # fail at least one GATE test.
 #
 # What it does

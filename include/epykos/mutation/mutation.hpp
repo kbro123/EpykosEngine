@@ -1,4 +1,4 @@
-// EpykosEngine — the mutation-testing selector (DESIGN.md §11 "mutation testing", D29; M2/Q4).
+// EpykosEngine — the mutation-testing selector (DESIGN.md §11 "mutation testing", D31; M2/Q4).
 //
 // A mutant is a deliberate one-line defect inside a real pass, guarded by
 // `epykos::mutant("<pass>.<defect>")` and listed in `mutation::registry` below. Mutants exist only in

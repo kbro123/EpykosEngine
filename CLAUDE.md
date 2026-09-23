@@ -38,7 +38,7 @@ ctest --preset release
 cmake --preset reference        # -ffp-contract=off build for E0 gates (then build/ctest --preset reference)
 cmake --preset debug            # -O0 -g
 scripts/mutation_test.sh        # mutation gate: builds the `mutation` preset (reference + EPYKOS_MUTATIONS=ON) and
-                                # runs the gate tests once per registered mutant; every mutant must be caught (D29)
+                                # runs the gate tests once per registered mutant; every mutant must be caught (D31)
 ```
 Presets build into `build/<preset>/`. Flags per D13; the `-march=x86-64-v3` flag is dropped on non-x86-64 hosts (the
 arm64 CI runner) and `build/<preset>/epykos_flags.txt` / `epykos::build_flags()` state the flags actually used.

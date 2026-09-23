@@ -1,7 +1,7 @@
 # Tests only (D12): Linux GCC 13 and macOS Apple clang, release preset; the reference preset on
 # Linux as well, because E0 gates run under it. Benchmarks are built but never run in CI; perf
 # gates run only locally and are fingerprinted (D9, D13). The mutation job (Linux GCC 13) runs
-# scripts/mutation_test.sh: the mutation preset, every registered mutant against the gate tests (D29).
+# scripts/mutation_test.sh: the mutation preset, every registered mutant against the gate tests (D31).
 name: ci
 
 on:

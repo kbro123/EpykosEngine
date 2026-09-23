@@ -12,6 +12,10 @@ hand-fused kernel single-state and 1.079× batched (fingerprint d448afd70180, li
 §5 "M1 result"); **M2 (verification harness and adjoints) passed** 2026-09-23 — the mechanical adjoint within 2.9e-9 of central
 finite differences (gate 1e-6) and within 2.1e-13 of forward mode (gate 1e-12) on the same book, 13/13 mutants caught, the
 differential tester bitwise against the templated `double` maths, perf-gate tooling with the M1 numbers as the baseline
-(`docs/RESUME.md` §5 "M2 result"); M3 onward in progress on `integrate/m1-m5`, re-planned around the desk problem of
-[`docs/PROBLEM.md`](docs/PROBLEM.md). See [`docs/DESIGN.md`](docs/DESIGN.md), [`docs/ROADMAP.md`](docs/ROADMAP.md),
+(`docs/RESUME.md` §5 "M2 result"); **M3 (groundwork and the Stage A tape) passed** 2026-09-23 — the desk problem of
+[`docs/PROBLEM.md`](docs/PROBLEM.md) §4 Stage A recorded as one tape (2,000 trades, 70 quotes across 4 curves, 1,000
+scenario lanes; 517,036 nodes, 67 IR domains, 5 scan domains) with every `PROBLEM.md` §6 gate passing on fingerprint
+d448afd70180 (adjoint vs FD 9.65e-10, vs forward mode 2.79e-15, IFT risk vs bump-and-recalibrate 5.09e-8, optimality
+1.235e-13, 20/20 mutants caught; `docs/RESUME.md` §5 "M3 result"); M4 onward in progress on `integrate/m1-m5`. See
+[`docs/DESIGN.md`](docs/DESIGN.md), [`docs/ROADMAP.md`](docs/ROADMAP.md),
 [`docs/DECISIONS.md`](docs/DECISIONS.md), [`docs/WORKLOADS.md`](docs/WORKLOADS.md) and [`docs/PRIOR_ART.md`](docs/PRIOR_ART.md).

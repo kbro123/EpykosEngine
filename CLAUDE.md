@@ -14,8 +14,13 @@ kernel single-state and 1.079× batched on fingerprint d448afd70180, libm `std::
 finite differences within 2.9e-9 relative (gate 1e-6) and with forward mode (`Dual`) within 2.1e-13 (gate 1e-12) on the
 M1 book, all 13 registered mutants are caught by the gates, the differential tester is bitwise against the templated
 `double` maths at 256 ball states, and the perf gate holds the M1 numbers as the d448afd70180 baseline (D29–D34;
-`docs/RESUME.md` §5 "M2 result"). M3 onward in progress on branch `integrate/m1-m5`, re-planned around the desk problem
-of `docs/PROBLEM.md` (see `docs/RESUME.md` §3). Nothing merges to `main` without the owner.
+`docs/RESUME.md` §5 "M2 result"). **M3 (groundwork and the Stage A tape) passed 2026-09-23**: the desk problem of
+`docs/PROBLEM.md` §4 Stage A recorded as one tape (2,000 trades, 70 quotes, 4 curves, 1,000 scenario lanes; 517,036
+nodes, 67 IR domains, 5 scan domains) with every `PROBLEM.md` §6 gate ok on fingerprint d448afd70180 — adjoint vs FD
+9.65e-10, vs Dual 2.79e-15, IFT vs bump-and-recalibrate 5.09e-8, optimality 1.235e-13, 0/262,112 O4 mismatches on the
+sampled lanes and 0 lanes not converged on the full 1,000-lane grid, 20/20 mutants caught, timings recorded as the M4
+baseline (D35, D44, D45; `docs/RESUME.md` §5 "M3 result"). M4 onward in progress on branch `integrate/m1-m5`. Nothing
+merges to `main` without the owner.
 
 ## Rules
 - **Decisions are in `docs/DECISIONS.md`.** Changing one means appending a new entry that supersedes it, in the same

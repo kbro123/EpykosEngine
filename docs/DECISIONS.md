@@ -583,6 +583,6 @@ Implements DESIGN.md §3.2 `implicit(F)` and D7 for M3/G4 (`include/epykos/solve
    default: fewer flops per Jacobian, and it exposes the chained IFT the xccy curves of Stage B need.
 7. **Mutants** (D32, D33): `implicit.ift_not_transposed`, `implicit.ift_drop_fp`, `implicit.stale_jacobian` in
    `src/solver/residual.cpp`, each caught by all three IFT gates `solver_m1_implicit_adjoint_test`,
-   `solver_curve_set_adjoint_test` and `solver_m1_implicit_vs_dual_test` (16/16 registered mutants caught against
-   25 gates, `scripts/mutation_test.sh`); the forward-mode gate at 1e-12 is the one that sees a stale Jacobian
+   `solver_curve_set_adjoint_test` and `solver_m1_implicit_vs_dual_test` (17/17 registered mutants caught against
+   29 gates on the tree rebased onto G1, `scripts/mutation_test.sh`); the forward-mode gate at 1e-12 is the one that sees a stale Jacobian
    whatever the start point.

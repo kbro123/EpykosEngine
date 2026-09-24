@@ -49,7 +49,7 @@ cmake --preset reference        # -ffp-contract=off build for E0 gates (then bui
 cmake --preset debug            # -O0 -g
 scripts/mutation_test.sh        # mutation gate: builds the `mutation` preset (reference + EPYKOS_MUTATIONS=ON) and
                                 # runs the gate tests once per registered mutant; every mutant must be caught (D32)
-cmake --preset profile           # release + EPYKOS_EXEC_PROFILE=ON (D47): tools/costmodel/'s calibration only,
+cmake --preset profile           # release + EPYKOS_EXEC_PROFILE=ON (D48): tools/costmodel/'s calibration only,
                                 # never a gated or perf-gated build (adds instrumentation to every Interpreter::run())
 ```
 Presets build into `build/<preset>/`. Flags per D13; the `-march=x86-64-v3` flag is dropped on non-x86-64 hosts (the

@@ -26,7 +26,7 @@ This is the launch brief for the M1–M5 run and the handoff for the morning. Ag
 
 ## 2. Repository layout (fixed by M1/P0; consolidated by M2/Q0, D28)
 ```
-CMakeLists.txt  CMakePresets.json        presets: release (D13 flags), reference (+ -ffp-contract=off), debug, mutation (reference + EPYKOS_MUTATIONS=ON, D32)
+CMakeLists.txt  CMakePresets.json        presets: release (D13 flags), reference (+ -ffp-contract=off), debug, mutation (reference + EPYKOS_MUTATIONS=ON, D32), profile (release + EPYKOS_EXEC_PROFILE=ON, D48: tools/costmodel/'s calibration)
 scripts/bootstrap.sh                     fetch pinned third_party with checksums
 scripts/fingerprint.sh                   CPU brand, cores, compiler, flags → id; prints 1-min load
 scripts/perf_gate.py, bench_results.py   perf gate (D29, D34): baseline per fingerprint keyed by the run name run.sh derives from the binary, 1.25× self-regression, bench/targets.json
@@ -55,12 +55,14 @@ include/epykos/                          public headers, namespace epykos, macro
               tail groupings, emitted outputs, per-Jacobian-block AD mode), excluded from Program's identity and
               never serialised
   solver/     M3/G4 (D40): implicit (the implicit node as a block of solved inputs / residual outputs + the record-time solve), residual (the sliced residual sub-program with its interpreter and adjoint; factorised Jacobians; the per-lane Gauss–Newton / LM solve), implicit_program (forward per lane + the IFT adjoint over the one tape), curve_set (named curves, instruments as Scalar residuals, dependency discovery, sequential / joint blocks), tangent (the forward-mode rule on Dual); ir/sharing.hpp (the cross-stage sharing gate); tape/slice.hpp (backward slice of a tape)
+  optimise/   M4/CM (D48): cost.hpp — Treatment / Plan (an IR-structural annotation independent of exec::Interpreter, infer_plan reproducing its documented fusion rules), CostCoefficients / CostModel (per-fingerprint bench/results/<fp>/cost_model.json, falls back to defaults() with a warning), estimate_domain / estimate_program (per-domain ns, folding fused / inlined domains into their consumer), estimate_jacobian_ns (AD mode by forward / reverse / closed-form-affine passes)
   mutation/   the mutant selector and registry: epykos::mutant("<pass>.<defect>"), compiled in by the mutation preset only (D32)
 src/                                     non-template implementation; src/fixtures/ = the seeded book generator (E0 TU, test-only)
 src/catalogue/generated/                 committed generated kernels (M3)
 tests/                                   gtest: unit, roundtrip, differential, adjoint, mutation; tests/hand/ links epykos_hand
 bench/                                   Google Benchmark; results in bench/results/<fingerprint>/; bench/hand/ = the hand-fused reference kernel (D9), static library epykos_hand, not engine API
 tools/catalogue/                         M3 generator
+tools/costmodel/                         M4/CM (D48): collect_main.cpp (one (case, B, tile, lane_tile) interpreter run under the `profile` preset, EPYKOS_EXEC_PROFILE=ON, per-domain us to stderr), fit_main.cpp (relative-error least squares, Eigen; writes cost_model.json + cost_model_validation.md), calibrate.py (the grid, Python per D29)
 blueprints/conventions/*.json            definitions as data (D36): calendars.json, currencies.json (+ day-count names, cb schedules), indices.json, instruments.json; located at build time (EPYKOS_BLUEPRINTS_DIR) or by $EPYKOS_BLUEPRINTS; docs/G4_BUNDLE.md holds the citations
 blueprints/instruments/*.json, curves/*.json  instrument blueprints (a convention + the coupon kind per leg + trade defaults) and curve definitions (scheme, variable, regions, knots, the calibration instrument set with quote keys), M3/G2, D43
 blueprints/problems/*.json                 problem definitions (D36, D44): stage_a.json = the curves and their variants, the generating levels, the trade mix, tenor / notional / seasoning / netting distributions and the scenario families of the Stage A desk problem; every number of the fixture is generated from the seed by fixtures/stage_a
@@ -413,3 +415,31 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   warnings on a from-scratch configure + build of both presets. Not done in R0 (by design, `RESUME.md` §3 M4
   table): the cost model (M4/CM), R1-R7's real bodies (R-a/R-b/R-c), the e-graph (M4/EG) and the catalogue (M4/C1).
   No SwapEngine file opened.  (branch `m4/r0-rules`)
+
+2026-09-24  M4/CM cost model  D48; `include/epykos/optimise/cost.hpp`, `src/optimise/cost.cpp`, `tools/costmodel/`,
+  `tests/optimise/cost_test.cpp`. A static per-domain cost estimate over an `ir::Program` (rows x lanes x per-op
+  cost; tile-aware L1/L2/L3/DRAM byte traffic; gather, dispatch and reduction-epilogue costs; a Jacobian block's
+  cost by AD mode) over CM's own `Treatment` / `Plan` annotation, independent of `exec::Interpreter` (M4/R0 and CM
+  ran in parallel; EG will need to cost candidate programs that never become a real `Interpreter`), reproducing
+  the planner's documented fusion / inlining rules as IR-structure predicates (`infer_plan`). Calibrated on this
+  machine (`d448afd70180`) from the M1 book and the Stage A tape under the new `profile` preset
+  (`EPYKOS_EXEC_PROFILE=ON`), 15 (case, B, tile, lane_tile) points, 492 measured (case, config, domain) rows,
+  fitted by relative-error least squares (Eigen, ridge-regularised toward `CostCoefficients::defaults()`) —
+  plain least squares on absolute nanoseconds was tried first and put the M1 book's dominant domains three orders
+  of magnitude high, dominated entirely by Stage A's much larger absolute values; row-weighting by 1/measured_ns
+  fixed that. **Gate not met, reported honestly**: mean absolute relative error over every measured domain
+  **84.4%** (target < 25%); restricted to domains at least 1% of their own config's time, **69.3%**
+  (`bench/results/d448afd70180/cost_model_validation.md`). Found and fixed during calibration: a whole-domain
+  Sum/Affine producer with a uniform row count per row (an interpolation) can still be inlined into its one
+  consumer — `infer_plan`'s first cut excluded every reduction-shaped domain from folding, which overpriced the
+  Stage A tape's interpolated-DF domain (16,917 rows) by three orders of magnitude before the fix (D48.2); a
+  regression test (`Cost.UniformAffineProducerCanBeInlined`) is a hand-built synthetic `ir::Program`, not the
+  Stage A tape, and runs in under a millisecond. Not done: separating the two workloads' dispatch / byte
+  coefficients (sharing only the per-op rates) or excluding sub-microsecond domains from the fit target itself,
+  either of which D48 names as the likely next lever, given widening the calibration grid from 11 to 15 points
+  did not move the mean outside noise. `ctest --preset release` / `--preset reference` and
+  `scripts/mutation_test.sh` unaffected (no engine or maths code touched; `optimise::` ships unit tests, not a
+  differential or mutation test — it is estimation tooling, not a rewrite, so CLAUDE.md's E0/E1 exactness classes
+  do not apply to it). Landed in parallel with, and not yet reconciled against, R0's `ir::PlanAnnotations` /
+  `rewrite::planner::default_plan` above (D48.6): a follow-up should read an attached plan when one exists rather
+  than have `infer_plan` keep reproducing the fusion / inlining rules from IR structure alone.

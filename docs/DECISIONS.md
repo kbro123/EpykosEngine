@@ -973,3 +973,84 @@ this package registers no new mutant of its own (its rules are verified by `rewr
 M1 book and by the existing M1/M3 gates re-running bit-identically; a mutant of the planner rules is left to
 whichever M4 package next changes their behaviour on purpose, since a mutant of an identity refactor has nothing
 to catch it that the M1 gates do not already catch by construction). No SwapEngine file opened.
+
+## D48 — The cost model: an annotation independent of the interpreter, per-tile cache tiering, fitted by relative-error least squares (2026-09-24)
+Implements `PROBLEM.md` §7 for M4/CM (`include/epykos/optimise/cost.hpp`, `src/optimise/cost.cpp`, `tools/costmodel/`,
+`tests/optimise/cost_test.cpp`). Five choices:
+1. **The annotated Program is CM's own type, not `exec::Interpreter`'s internal plan.** M4/R0 (turning the
+   interpreter's hard-coded fusion decisions into a Rule framework) and CM run in parallel (`RESUME.md` §3:
+   "Order: {R0, CM} -> ..."), so CM cannot depend on R0's deliverable, and EG's later equality-saturation search
+   will need to cost *candidate* programs that never become a real `Interpreter` at all. `optimise::Treatment`
+   (Materialized / FusedIntoReduction / Inlined) and `optimise::Plan` are therefore a small IR-structural
+   annotation CM defines and fills itself (`infer_plan`), reproducing `exec/interpreter.cpp`'s documented rules
+   (`row_fusion_pays`, `inline_max_refs_per_row`) as pure predicates over `ir::Program` (HARD RULE 9: keyed on
+   structure, no magic numbers for one fixture). `optimise::analyze` generalises the per-domain reader/output-row
+   facts `tests/stage_a/gate_lanes_test.cpp` computed ad hoc (for `scripts/exec_coverage.py`) into engine code, so
+   the cost model and that test's own coverage report can share one source of them.
+2. **A whole-domain Sum/Affine producer can still be inlined.** `infer_plan`'s first cut disqualified any domain
+   whose own group is a reduction shape from ever being folded into a consumer, on the assumption that "reduction"
+   and "elementwise producer" were mutually exclusive categories. Calibration caught this immediately: the Stage A
+   tape's interpolated-DF domain (16,917 rows, `affine(#0;%0)`, gathered 1:1 by exactly one consumer) measured
+   0.2 us and was priced at 761 us — three orders of magnitude high, because it was never a *materialised* domain
+   at all in the real interpreter. `exec/interpreter.cpp`'s `decide_inline` allows a whole-segment producer to
+   inline when every row has the same member count (an interpolation vectorises like the bucketed pass either
+   way); `infer_plan` now checks that (`has_uniform_row_length`) instead of excluding every reduction-shaped
+   domain, with a regression test built by hand (`Cost.UniformAffineProducerCanBeInlined`, not the Stage A tape:
+   sub-second, no fixture dependency).
+3. **The cache tier is decided by one tile's worth, not by a domain's whole footprint.** DESIGN.md §4's own
+   description of the tiled interpreter's scratch ("a contiguous vector of tile·L doubles ... L1-sized at the
+   default tile for small L") makes tile rows x lane width the right working-set size for the L1/L2/L3/DRAM
+   classification, not a domain's total rows x lanes: a domain can be five orders of magnitude larger than L1 and
+   still stream through it a tile at a time. `byte_cost`'s two arguments (bytes moved, for the quantity; tier
+   bytes, for the rate) keep this distinction explicit.
+4. **Fitting is relative-error least squares, ridge-regularised toward `CostCoefficients::defaults()`.** The
+   package's own gate is a MEAN RELATIVE error, and the two calibration workloads' measured domain times span five
+   decades (tens of ns to milliseconds): plain least squares on absolute nanoseconds is dominated entirely by
+   Stage A's largest domains and reproduces M1-book-sized ones only by accident — an early fit this way put a
+   16-domain M1 program's dominant `Mul` domains three orders of magnitude high for exactly this reason. Every row
+   is divided by its own measured time before the solve (`minimise sum((pred-measured)/measured)^2`, i.e. every
+   row's target becomes 1), and every column is scaled to [-1, 1] before a small L2 penalty pulls the solution
+   toward the documented defaults rather than toward zero — still one ordinary least squares call
+   (`Eigen::MatrixXd::bdcSvd().solve()`) on an augmented system, D12's Eigen dependency, nothing new. Feature
+   extraction never re-derives `cost.cpp`'s formula: `tools/costmodel/fit_main.cpp` calls
+   `optimise::estimate_program` once per unknown coefficient with a one-hot coefficient vector and reads the
+   result off as that coefficient's linear contribution to every domain (the model is exactly linear in every
+   coefficient, so this is exact, not an approximation), which makes a fit-vs-engine drift structurally
+   impossible.
+5. **The M1 book and the Stage A tape are calibrated together, on a grid covering a tile sweep AND a batch/lane
+   sweep for BOTH workloads** (`tools/costmodel/calibrate.py`'s `GRID`; 15 (case, B, tile, lane_tile) points, 492
+   measured (case, config, domain) rows, 41 of 187 coefficients with data support — the rest stay at
+   `CostCoefficients::defaults()`). Measured on this machine (`d448afd70180`; `bench/results/d448afd70180/
+   cost_model.json`, `cost_model_validation.md`): **mean absolute relative error over every measured domain
+   84.4%** (target < 25%, PROBLEM.md §7's own gate — NOT MET); restricted to domains that are at least 1% of their
+   own config's measured time — the ones an extraction decision actually turns on — **69.3%** (also not met).
+   Reported honestly as short of the target (CLAUDE.md: "report honestly ... never softened"), not silently
+   narrowed to a friendlier subset — both numbers, the per-case breakdowns and the worst domain are in the
+   committed report. Named causes, in the report and in `cost.hpp`'s own header comment: libm `std::exp` vs
+   `exp_poly` share one `Exp` coefficient; cache effects across domains live *at once*, not per domain; fused
+   pairs and chain tails are priced as two ops and two dispatches, so a rewrite that changes step fusion is
+   over-costed, never under; a fused-into-reduction domain's `kept_rows` and an inlined domain's exact re-fetch
+   count are approximated from IR structure, not a live plan; and a domain measuring a few tens of nanoseconds is
+   measuring `ProfileScope`'s own two `std::chrono::steady_clock::now()` calls (`src/exec/interpreter.cpp`) as
+   much as its own work — no coefficient can fit away instrumentation noise, and Stage A alone has hundreds of
+   domains under half a microsecond. Widening the grid from 11 to 15 points (adding a Stage A tile sweep and a
+   B=8 point for both workloads) moved the mean from 84.4%/69.3% to a statistically indistinguishable place
+   (78.2%/65.8% on the narrower 11-point grid was the best seen across a lambda sweep on that grid; more points
+   did not resolve it), which is itself evidence the shortfall is instrumentation noise and cross-workload
+   coefficient sharing, not an under-sized calibration grid alone. Left for a follow-up: fit the two workloads'
+   dispatch/byte coefficients separately (share only the per-op rates, which is where the actual arithmetic is
+   workload-independent), and/or drop sub-microsecond domains from the fit target entirely rather than only from
+   a secondary reported metric.
+6. **Landed in parallel with D47's `ir::PlanAnnotations`, not yet reconciled with it.** M4/R0 (this same integration)
+   extracted the interpreter's actual fusion / inlining decision (`rewrite::planner::default_plan`) as data
+   attached to the Program itself; CM's `optimise::Plan` / `infer_plan` was written and calibrated against without
+   it, per this package's own brief (point 1 above: R0 and CM run in parallel, `RESUME.md` §3, neither depends on
+   the other's deliverable, so CM could not have depended on a type that did not exist yet when CM branched).
+   `rewrite::planner::default_plan` is now the AUTHORITATIVE decision (it IS the interpreter's logic, not a
+   reproduction of it), so a follow-up should retire `infer_plan`'s own approximation of the fusion / inlining
+   rules in favour of reading `ir::PlanAnnotations` when one is attached to the Program being costed, keeping
+   `infer_plan`'s structural inference only as EG's fallback for a candidate program that has no attached plan yet
+   (an unmaterialised e-class member, DESIGN.md's own case for why CM defined its own annotation type at all,
+   point 1 above). This would likely narrow some of D48 point 5's shortfall: `infer_plan`'s approximation of
+   `decide_inline` (found and fixed once already, point 2 above) is one plausible source of it, on top of the
+   named instrumentation-noise and coefficient-sharing causes measurement can already see directly.

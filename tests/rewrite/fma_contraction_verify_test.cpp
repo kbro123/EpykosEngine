@@ -12,6 +12,8 @@
 // something else in the SAME group, a shape neither fixture happens to record.
 #include <gtest/gtest.h>
 
+#include <cmath>
+
 #include "epykos/fixtures/m1_book.hpp"
 #include "epykos/fixtures/record_m1.hpp"
 #include "epykos/ir/evaluate.hpp"
@@ -21,6 +23,7 @@
 #include "epykos/rewrite/greedy.hpp"
 #include "epykos/rewrite/verifier.hpp"
 #include "epykos/tape/tape.hpp"
+#include "epykos/verify/differential.hpp"
 #include "stage_a/stage_a_test_helpers.hpp"
 
 namespace ir = epykos::ir;
@@ -51,6 +54,14 @@ ir::Program mul_then_sum_program() {
   p.groups.push_back(ir::Group{1, {mul, sum, passthrough}});
   // domain 1 has ONE row (value id 3): its value is the group's LAST step (passthrough).
   p.outputs = {3};
+  return p;
+}
+
+// Same shape as mul_then_sum_program(), at caller-chosen operands (D57's regression fixture below
+// needs pathological ones the hand-picked 1.25/-0.75/2.5 above cannot exercise).
+ir::Program mul_then_sum_program_at(double x0, double x1, double x2) {
+  ir::Program p = mul_then_sum_program();
+  p.input_values = {x0, x1, x2};
   return p;
 }
 
@@ -92,6 +103,65 @@ TEST(FmaContraction, RewriteAgreesWithTheUnfusedProgramAndDropsOneStep) {
 
   // The rule no longer matches its own output (fixpoint after one application).
   EXPECT_TRUE(rule.match(after, ir::PlanAnnotations{}).empty());
+}
+
+// D57 (a review finding on the M4-gate-1 landing; see fma_contraction.hpp's own header comment,
+// "UNSOUND AT A FLAT ULPS-OF-VALUE BOUND"). This is a targeted, hand-built adversarial input, not
+// the M2 state ball -- a random perturbation around a record point essentially never lands on the
+// exact bit pattern catastrophic cancellation needs, which is exactly why this landmine was latent
+// (0/0 sites on both shipped fixtures, the tests below) rather than caught by any existing gate.
+// Any tolerance violation here is treated as the correctness bug it would be, per the review's own
+// requested fix -- not something a ball is allowed to occasionally miss.
+TEST(FmaContraction, PlainE1ToleranceIsUnsoundButTheD26StyleScaledOneIsSoundUnderCatastrophicCancellation) {
+  // a = 2^27+1, b = 2^27-1: the exact product is 2^54-1, which rounds (ties-to-even) UP to 2^54 in
+  // double precision. c = -2^54, chosen so the UNFUSED path (fl(a*b) then + c) cancels exactly:
+  // fl(a*b) and c are equal in magnitude and opposite in sign, so IEEE subtraction is exact
+  // (Sterbenz's lemma) and gives 0.0 -- losing the "-1" that never got a chance to round away.
+  // fma(a,b,c), by definition, rounds the EXACT a*b+c = -1.0 in a single step and recovers it.
+  const double a = 134217729.0;           // 2^27 + 1
+  const double b = 134217727.0;           // 2^27 - 1
+  const double c = -18014398509481984.0;  // -2^54
+
+  const ir::Program before = mul_then_sum_program_at(a, b, c);
+  const rewrite::FmaContractionRule rule;
+  const std::vector<rewrite::MatchSite> sites = rule.match(before, ir::PlanAnnotations{});
+  ASSERT_EQ(sites.size(), 1u);
+  const rewrite::Proposal proposal = rule.propose(before, ir::PlanAnnotations{}, sites[0]);
+  ASSERT_TRUE(proposal.is_structural());
+  const ir::Program& after = *proposal.program;
+
+  const std::vector<double> out_before = ir::evaluate(before, before.input_values);
+  const std::vector<double> out_after = ir::evaluate(after, after.input_values);
+  ASSERT_EQ(out_before.size(), 1u);
+  ASSERT_EQ(out_after.size(), 1u);
+  // mul_then_sum_program()'s domain-1 value is Neg(sum) (its own "extra passthrough step" to
+  // prove renumbering, see above) -- sign-flipped from the raw a*b(+c) values, which changes
+  // neither |a - b| nor which operand is "the value" for scaling purposes below.
+  const double unfused = out_before[0];  // -(fl(a*b) + c) = -0.0
+  const double fused = out_after[0];     // -fma(a,b,c) = 1.0
+  ASSERT_EQ(unfused, 0.0) << "the unfused path must cancel exactly for this to be the intended pathological case";
+  ASSERT_EQ(fused, 1.0) << "std::fma must recover the true a*b+c for this to be the intended pathological case";
+
+  // THE DANGER, proved rather than argued: a bare, unscaled E1 check -- the SAME
+  // `epykos::verify::Tolerance::e1()` (4 ulps, no scale) every OTHER call site in this file and in
+  // rewrite/verifier.hpp's VerifyOptions defaults to -- reports this pass as failing outright, by
+  // a margin of roughly 4.5e15 ulps, for a rewrite whose OWN output (fma) is the mathematically
+  // correct one and the UNFUSED reference is the one that lost information. This is exactly what
+  // fma_contraction.hpp's header now calls a "false sense of safety": the class label alone (E1,
+  // "<= 1 ulp") does not make a bare tolerance check meaningful for this rule.
+  EXPECT_FALSE(epykos::verify::within(unfused, fused, epykos::verify::Tolerance::e1(), /*scale=*/0.0))
+      << "a flat, unscaled 4-ulp bound must NOT appear to pass here -- if it does, this test (or "
+         "verify::within itself) has regressed, not this rewrite";
+  EXPECT_GT(epykos::verify::ulp_distance(unfused, fused, /*scale=*/0.0), 1e15);
+
+  // THE FIX: scaled to the PRE-FUSION operands (D26's own "difference of legs" pattern, restated
+  // in fma_contraction.hpp's header for this rule: scale = |a*b| + |c|), the identical pair is
+  // comfortably within 1 ulp -- because that scale is what the two roundings being compared are
+  // actually bounded relative to, not the (here, arbitrarily small) result.
+  const double scale = std::fabs(a * b) + std::fabs(c);
+  EXPECT_TRUE(epykos::verify::within(unfused, fused, epykos::verify::Tolerance::e1(), scale))
+      << "ulp_distance=" << epykos::verify::ulp_distance(unfused, fused, scale);
+  EXPECT_LE(epykos::verify::ulp_distance(unfused, fused, scale), 1.0);
 }
 
 TEST(FmaContraction, DoesNotFireOnTheM1Book) {

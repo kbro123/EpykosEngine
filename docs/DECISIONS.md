@@ -1416,7 +1416,7 @@ fire on the real fixture and cannot state that number has not met its gate. This
 onward and to the M4 gate/review packages reading this table. R1–R3's own already-correct, already-disclosed
 zero-fire finding stands as recorded in D52 and is not reopened by this entry.
 
-## D53 — M4/EG integration: AD-mode-per-block rule + its required consumer, a cross-stage-sharing extraction guard, the four PROBLEM.md §7 experiments, and one significant scaling finding (2026-09-24)
+## D54 — M4/EG integration: AD-mode-per-block rule + its required consumer, a cross-stage-sharing extraction guard, the four PROBLEM.md §7 experiments, and one significant scaling finding (2026-09-24)
 
 Registers R1-R7, `fma_contraction` and the five planner rules together in one e-graph (D47-D52 landed each
 separately; this package is the first to run them all at once) and adds the two rule families PROBLEM.md §7
@@ -1425,7 +1425,7 @@ names as M4/EG's own scope beyond EG-core (D49): AD mode per Jacobian block, and
 `include/epykos/rewrite/cross_stage_sharing.hpp`/`.cpp`, an additive extension of
 `include/epykos/optimise/extract.hpp` (`ExtractOptions::reject`, `ExtractResult::candidates_rejected_guard`,
 default `nullptr` / `0`: no existing caller's result changes), and four experiment files under
-`tests/optimise/` and `bench/optimise/` (`docs/DESIGN.md` §7's own "As built (M4/EG integration, D53)"
+`tests/optimise/` and `bench/optimise/` (`docs/DESIGN.md` §7's own "As built (M4/EG integration, D54)"
 paragraph has the full technical description; this entry adds the findings and their evidence).
 
 1. **`jacobian.mode` needed a REAL consumer before a rule populating it meant anything, exactly as R7's own

@@ -1,7 +1,7 @@
 // EpykosEngine — the cross-stage sharing gate as an extraction-time guard (M4/EG "integration";
 // PROBLEM.md §5 "A gate of every stage: the IR shows the cross-stage sharing" and §7 "keep the
 // residual's DF domain and the book's DF domain merged under every rewrite (a rewrite that would
-// split them is rejected or costed)", D53).
+// split them is rejected or costed)", D54).
 //
 // ir/sharing.hpp already answers "is this Program's sharing intact" (SharingReport,
 // assert_all_shared) for a Tape-level caller (M3/G4, M3/G5) that names its own output groups by
@@ -13,7 +13,7 @@
 // every candidate program an e-graph saturation discovers from it.
 //
 // `cross_stage_sharing_guard` turns that same check into the
-// `std::function<bool(const ir::Program&)>` `optimise::ExtractOptions::reject` (extract.hpp, D53)
+// `std::function<bool(const ir::Program&)>` `optimise::ExtractOptions::reject` (extract.hpp, D54)
 // expects: a candidate program REJECTED here is never priced or extracted, however cheap its
 // plan — "a rewrite that would split them is rejected", never merely deprioritised — matching
 // this package's OWN "costed" alternative (a caller that wants the softer form instead can price

@@ -43,11 +43,11 @@ struct ExtractOptions {
   int B = 1;
   int tile = 256;
   int lane_tile = 8;
-  // M4/EG "integration" (D53; PROBLEM.md §5 / §7's cross-stage sharing gate): a PROGRAM-level
+  // M4/EG "integration" (D54; PROBLEM.md §5 / §7's cross-stage sharing gate): a PROGRAM-level
   // invariant a candidate must hold to be extractable at all -- true REJECTS the program node
   // (every one of its plan candidates is skipped, the same treatment an exactness overrun gets,
   // never a silent drop). nullptr (the default): no program is ever rejected, so a caller that
-  // never sets this sees exactly the behaviour this file had before D53 -- this option cannot
+  // never sets this sees exactly the behaviour this file had before D54 -- this option cannot
   // change any existing caller's result. rewrite::cross_stage_sharing_guard (rewrite/
   // cross_stage_sharing.hpp) builds the one this package actually uses (PROBLEM.md §5: "the
   // residual's DF domain and the book's DF domain merged under every rewrite"); it is a plain
@@ -71,7 +71,7 @@ struct ExtractResult {
   std::vector<std::string> history;         // program history followed by plan history
   std::size_t candidates_considered = 0;
   std::size_t candidates_rejected_exactness = 0;
-  std::size_t candidates_rejected_guard = 0;  // rejected by `options.reject`, D53
+  std::size_t candidates_rejected_guard = 0;  // rejected by `options.reject`, D54
 };
 
 ExtractResult extract(const EGraph& graph, const CostModel& model, const ExtractOptions& options = {});

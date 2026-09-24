@@ -2,7 +2,7 @@
   "format": "epykos-m4-experiments 1",
   "package": "M4/EG integration (eg-integrate)",
   "fingerprint": "d448afd70180",
-  "note": "Informational report of the four PROBLEM.md §7 / RESUME.md §3 EG-row experiments. Numbers are measured on this fingerprint unless marked 'estimated' (a CM cost-model prediction) or 'cited' (already committed by an earlier package, reused per D9, never re-derived). See docs/DECISIONS.md D53 for the full landing notes and root-cause discussion.",
+  "note": "Informational report of the four PROBLEM.md §7 / RESUME.md §3 EG-row experiments. Numbers are measured on this fingerprint unless marked 'estimated' (a CM cost-model prediction) or 'cited' (already committed by an earlier package, reused per D9, never re-derived). See docs/DECISIONS.md D54 for the full landing notes and root-cause discussion.",
   "experiments": {
     "1_rediscovery": {
       "gate": "PROBLEM.md §7: planner hard-coded rules off, e-graph with all rules, extract at E0 for the M1 book; target within 1.02x of the M1 greedy default plan; report the plan diff.",

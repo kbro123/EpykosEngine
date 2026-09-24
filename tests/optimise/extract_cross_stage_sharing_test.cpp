@@ -1,5 +1,5 @@
 // M4/EG "integration" gate: rewrite::cross_stage_sharing_guard (rewrite/cross_stage_sharing.hpp)
-// wired onto optimise::ExtractOptions::reject (D53) — PROBLEM.md §7's "a rewrite that would split
+// wired onto optimise::ExtractOptions::reject (D54) — PROBLEM.md §7's "a rewrite that would split
 // [the residual's and the book's shared DF domain] is rejected or costed": this file proves the
 // "rejected" half end to end, extract.hpp included, not just ir::sharing in isolation (already
 // covered by tests/ir/sharing_test.cpp).

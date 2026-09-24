@@ -379,7 +379,7 @@ package's scope, `RESUME.md` §3's EG row): the AD-mode-per-Jacobian-block rule,
 rules, and reconciling the plan tier's per-node keying onto program-tier CLASSES (flagged, not
 silently assumed, in `egraph.hpp`'s own header comment).
 
-**As built (M4/EG integration, D53):** two new rule families and one extraction-time guard, on top
+**As built (M4/EG integration, D54):** two new rule families and one extraction-time guard, on top
 of the now-real R1-R7/fma (R-a/R-b/R-c) registered alongside R0's planner rules.
 `rewrite::ADModePerBlockRule` (`include/epykos/rewrite/ad_mode_rule.hpp`) fills the
 `jacobian.mode` slot D47 left empty: given a caller-named `JacobianBlockSpec` (output domains +

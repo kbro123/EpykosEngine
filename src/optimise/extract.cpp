@@ -25,7 +25,7 @@ ExtractResult extract(const EGraph& graph, const CostModel& model, const Extract
       continue;
     }
     if (options.reject && options.reject(pnode.program)) {
-      // D53: a program-level invariant this candidate fails (e.g. cross-stage sharing). Same
+      // D54: a program-level invariant this candidate fails (e.g. cross-stage sharing). Same
       // "count every plan candidate as rejected, never silently skipped" treatment as exactness.
       best.candidates_rejected_guard += static_cast<std::size_t>(graph.num_plan_nodes(program_id));
       continue;

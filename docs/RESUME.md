@@ -590,7 +590,7 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   the new ones are caught via a crash rather than a clean assertion failure -- `r1.ignores_last_row` and
   `r2.wrong_run_boundary` abort inside the mutation build rather than failing gracefully, which the harness
   treats as caught per its own stated rule but which a follow-up could still tighten to a clean failure).
-2026-09-24  M4/EG integration  D53: registers R1-R7 + `fma_contraction` + the five planner rules together in one
+2026-09-24  M4/EG integration  D54: registers R1-R7 + `fma_contraction` + the five planner rules together in one
   e-graph for the first time, and adds `rewrite::ADModePerBlockRule` + its required consumer
   `adjoint::block_jacobian` (three new mutants: `eg.ad_mode_ignores_cost`, `eg.ad_mode_affine_without_check`,
   `eg.block_jacobian_wrong_coefficient_index`; `docs/WORKLOADS.md` §M2) and `rewrite::cross_stage_sharing_guard`
@@ -610,7 +610,7 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   freshly measured Stage-A-specific adjoint multiplier (21.33x vs 8.0x), with two now-documented, opposite-
   cancelling cost-model gaps (reverse misses B=64 batching/chord sharing; forward's `one_pass_ns` proxy
   understates a wide `Dual<70>` pass by ~13x); (4) E1 EXTRACTION is informational, same root cause as (1). One
-  corrected false alarm reported rather than hidden (full account: D53 point 5): this package's own first
+  corrected false alarm reported rather than hidden (full account: D54 point 5): this package's own first
   CROSS-STAGE attempt read a ball-perturbation NaN as a real `r5.group_formation` bug before tracing it to the
   known implicit-node-tape trap (`tests/rewrite/record_point_check.hpp`) and fixing the TEST, not the rule. Not
   reached: sharing a scenario lane's factored Jacobian by select mask, and the IFT product-order choice

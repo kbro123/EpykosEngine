@@ -42,6 +42,12 @@ struct ExtractOptions {
   rewrite::Exactness max_exactness = rewrite::Exactness::E0;  // E0: no E1 rule anywhere in history
   int B = 1;
   int tile = 256;
+  // D63: this must be the lane-chunk width the interpreter you intend to build would PLAN with,
+  // `Lt = min(Options::lane_tile, Options::max_batch)`, not the nominal `Options::lane_tile`.
+  // exec::Interpreter's constructor derives Lt and hands THAT to rewrite::planner::default_plan,
+  // and the planner's `row_fusion_pays` gate answers differently for 1 and for 8 — so an
+  // extraction run at `lane_tile = 8` prices plans no interpreter with `max_batch = 1` will ever
+  // build. `tools/costmodel/` got this wrong for its own B=1 captures until D63 caught it.
   int lane_tile = 8;
   // M4/EG "integration" (D54; PROBLEM.md §5 / §7's cross-stage sharing gate): a PROGRAM-level
   // invariant a candidate must hold to be extractable at all -- true REJECTS the program node

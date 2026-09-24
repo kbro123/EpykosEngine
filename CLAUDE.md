@@ -40,9 +40,10 @@ been saturated at all); the search still finds nothing better than noise under t
 spot is closed (D63, 2026-09-24)**: it priced step pairing at exactly zero and reconstructed the interpreter's
 materialisation decision instead of reading it, so every fusion candidate tied with its unfused twin and, on the
 M1 book, the two largest domains were priced as materialised when the planner folds them away. `infer_plan` is now
-`rewrite::planner::default_plan`, pairing is priced, the calibration grid varies it, and the prediction error
-falls 84.4%/69.3% to 74.5%/64.6% — a real improvement, still 3x the <25% target. The Stage A search score
-improves sixfold (0.9991x to 0.9948x on the full tape) and is still noise; rediscovery's 1.02x wall-clock clause
+`rewrite::planner::default_plan`, pairing is priced, the calibration grid varies it, a third fix makes the fit
+plan at the lane width the interpreter really uses (`Lt = min(lane_tile, max_batch)`, not the nominal option), and
+the prediction error falls 84.4%/69.3% to 58.6%/49.7% — a real improvement, still about 2x the <25% target. The
+Stage A search score improves elevenfold (0.9991x to 0.9910x on the full tape) and is still noise; rediscovery's 1.02x wall-clock clause
 now passes (1.0164x at B=1, 0.9985x at B=64, where D59 recorded 1.0277x/1.0427x) but passes BY IDENTITY -- the
 extracted candidate is the default plan's own execution, not something better than it. D63 also measured, for the first time,
 what the interpreter's three planning decisions are worth: reduction fusion 1.618x (M1) / 1.066x (Stage A),
@@ -55,7 +56,9 @@ gate is replaced by two structural floors (consolidate something; be a per-kind 
 the M1 book's 10 domains and 3 of the full Stage A tape's 67, and R1, given that R2 pass, on 0 of the M1 book's 10
 and 16 of the 80 domains Stage A becomes. The e-graph search is provably untouched by it -- R2's site count is 0 then 0 on the M1 book and 1 then 1 on the
 bounded book, so the extraction moves only for D63's reasons -- which is the same conclusion again: rules firing
-and the search finding a win are different claims. M5
+and the search finding a win are different claims.
+The repriced model now captures 93% of the pairing effect but only 31% of reduction fusion and 11% of
+inlining, which is where the next package should start. M5
 onward awaits the owner's decision on this failed exit gate. Nothing merges to `main` without the owner.
 
 ## Rules

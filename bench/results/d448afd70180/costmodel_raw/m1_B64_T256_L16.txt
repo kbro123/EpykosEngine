@@ -1,14 +1,14 @@
-costmodel_collect: case=m1 B=64 tile=256 lane_tile=16 fuse_pairs=1 domains=10 reps=20000
+costmodel_collect: case=m1 B=64 tile=256 lane_tile=16 Lt=16 fuse_pairs=1 fuse_reductions=1 inline_producers=1 domains=10 reps=20000
 exec profile over 20000 runs (us per run):
-  slot    0:         1.51 us (  0.1%)
-  slot    1:         0.65 us (  0.0%)
-  slot    2:       970.96 us ( 59.9%)
-  slot    3:         2.74 us (  0.2%)
-  slot    4:       179.45 us ( 11.1%)
-  slot    5:         2.66 us (  0.2%)
-  slot    6:       393.18 us ( 24.3%)
-  slot    7:         0.70 us (  0.0%)
-  slot    8:         3.23 us (  0.2%)
-  slot    9:        63.92 us (  3.9%)
-  slot 4095:         1.08 us (  0.1%)
-  total    :      1620.10 us
+  slot    0:         1.58 us (  0.1%)
+  slot    1:         0.66 us (  0.0%)
+  slot    2:      1004.44 us ( 59.3%)
+  slot    3:         3.33 us (  0.2%)
+  slot    4:       184.37 us ( 10.9%)
+  slot    5:         3.01 us (  0.2%)
+  slot    6:       420.95 us ( 24.9%)
+  slot    7:         0.74 us (  0.0%)
+  slot    8:         3.53 us (  0.2%)
+  slot    9:        68.73 us (  4.1%)
+  slot 4095:         1.31 us (  0.1%)
+  total    :      1692.64 us

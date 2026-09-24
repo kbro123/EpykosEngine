@@ -2,8 +2,8 @@
  "format": "epykos-costmodel-index 1",
  "fingerprint": "d448afd70180",
  "cores": 16,
- "load_1min_min": 3.12,
- "load_1min_max": 5.49,
+ "load_1min_min": 6.0,
+ "load_1min_max": 7.5,
  "runs": [
   {
    "case": "m1",
@@ -12,8 +12,8 @@
    "lane_tile": 8,
    "fuse_pairs": true,
    "path": "m1_B1_T128_L8.txt",
-   "load_1min_before": 5.48,
-   "load_1min_after": 5.49
+   "load_1min_before": 6.41,
+   "load_1min_after": 6.57
   },
   {
    "case": "m1",
@@ -22,8 +22,8 @@
    "lane_tile": 8,
    "fuse_pairs": false,
    "path": "m1_B1_T128_L8_nopair.txt",
-   "load_1min_before": 5.49,
-   "load_1min_after": 5.36
+   "load_1min_before": 6.57,
+   "load_1min_after": 6.47
   },
   {
    "case": "m1",
@@ -32,8 +32,8 @@
    "lane_tile": 8,
    "fuse_pairs": true,
    "path": "m1_B1_T256_L8.txt",
-   "load_1min_before": 5.36,
-   "load_1min_after": 5.17
+   "load_1min_before": 6.47,
+   "load_1min_after": 6.23
   },
   {
    "case": "m1",
@@ -42,8 +42,8 @@
    "lane_tile": 8,
    "fuse_pairs": false,
    "path": "m1_B1_T256_L8_nopair.txt",
-   "load_1min_before": 5.17,
-   "load_1min_after": 5.29
+   "load_1min_before": 6.23,
+   "load_1min_after": 6.56
   },
   {
    "case": "m1",
@@ -52,8 +52,8 @@
    "lane_tile": 8,
    "fuse_pairs": true,
    "path": "m1_B1_T512_L8.txt",
-   "load_1min_before": 5.29,
-   "load_1min_after": 5.27
+   "load_1min_before": 6.56,
+   "load_1min_after": 6.33
   },
   {
    "case": "m1",
@@ -62,8 +62,8 @@
    "lane_tile": 8,
    "fuse_pairs": false,
    "path": "m1_B1_T512_L8_nopair.txt",
-   "load_1min_before": 5.27,
-   "load_1min_after": 4.99
+   "load_1min_before": 6.33,
+   "load_1min_after": 6.13
   },
   {
    "case": "m1",
@@ -72,8 +72,8 @@
    "lane_tile": 8,
    "fuse_pairs": true,
    "path": "m1_B8_T256_L8.txt",
-   "load_1min_before": 4.99,
-   "load_1min_after": 4.84
+   "load_1min_before": 6.13,
+   "load_1min_after": 6.0
   },
   {
    "case": "m1",
@@ -82,8 +82,8 @@
    "lane_tile": 1,
    "fuse_pairs": true,
    "path": "m1_B64_T256_L1.txt",
-   "load_1min_before": 4.84,
-   "load_1min_after": 4.22
+   "load_1min_before": 6.0,
+   "load_1min_after": 6.75
   },
   {
    "case": "m1",
@@ -92,8 +92,8 @@
    "lane_tile": 8,
    "fuse_pairs": true,
    "path": "m1_B64_T256_L8.txt",
-   "load_1min_before": 4.22,
-   "load_1min_after": 4.1
+   "load_1min_before": 6.75,
+   "load_1min_after": 6.54
   },
   {
    "case": "m1",
@@ -102,8 +102,8 @@
    "lane_tile": 8,
    "fuse_pairs": false,
    "path": "m1_B64_T256_L8_nopair.txt",
-   "load_1min_before": 4.1,
-   "load_1min_after": 3.12
+   "load_1min_before": 6.54,
+   "load_1min_after": 6.21
   },
   {
    "case": "m1",
@@ -112,8 +112,8 @@
    "lane_tile": 16,
    "fuse_pairs": true,
    "path": "m1_B64_T256_L16.txt",
-   "load_1min_before": 3.12,
-   "load_1min_after": 3.29
+   "load_1min_before": 6.21,
+   "load_1min_after": 7.25
   },
   {
    "case": "m1",
@@ -122,8 +122,8 @@
    "lane_tile": 32,
    "fuse_pairs": true,
    "path": "m1_B64_T256_L32.txt",
-   "load_1min_before": 3.29,
-   "load_1min_after": 3.56
+   "load_1min_before": 7.25,
+   "load_1min_after": 7.3
   },
   {
    "case": "m1",
@@ -132,8 +132,8 @@
    "lane_tile": 64,
    "fuse_pairs": true,
    "path": "m1_B64_T256_L64.txt",
-   "load_1min_before": 3.56,
-   "load_1min_after": 3.57
+   "load_1min_before": 7.3,
+   "load_1min_after": 7.28
   },
   {
    "case": "stage_a",
@@ -142,8 +142,8 @@
    "lane_tile": 8,
    "fuse_pairs": true,
    "path": "stage_a_B1_T128_L8.txt",
-   "load_1min_before": 3.57,
-   "load_1min_after": 3.78
+   "load_1min_before": 7.28,
+   "load_1min_after": 7.23
   },
   {
    "case": "stage_a",
@@ -152,8 +152,8 @@
    "lane_tile": 8,
    "fuse_pairs": true,
    "path": "stage_a_B1_T256_L8.txt",
-   "load_1min_before": 3.78,
-   "load_1min_after": 3.53
+   "load_1min_before": 7.23,
+   "load_1min_after": 7.5
   },
   {
    "case": "stage_a",
@@ -162,8 +162,8 @@
    "lane_tile": 8,
    "fuse_pairs": false,
    "path": "stage_a_B1_T256_L8_nopair.txt",
-   "load_1min_before": 3.53,
-   "load_1min_after": 3.26
+   "load_1min_before": 7.5,
+   "load_1min_after": 7.24
   },
   {
    "case": "stage_a",
@@ -172,8 +172,8 @@
    "lane_tile": 8,
    "fuse_pairs": true,
    "path": "stage_a_B1_T512_L8.txt",
-   "load_1min_before": 3.26,
-   "load_1min_after": 3.21
+   "load_1min_before": 7.24,
+   "load_1min_after": 7.23
   },
   {
    "case": "stage_a",
@@ -182,8 +182,8 @@
    "lane_tile": 8,
    "fuse_pairs": true,
    "path": "stage_a_B8_T256_L8.txt",
-   "load_1min_before": 3.21,
-   "load_1min_after": 3.44
+   "load_1min_before": 7.23,
+   "load_1min_after": 7.05
   },
   {
    "case": "stage_a",
@@ -192,8 +192,8 @@
    "lane_tile": 8,
    "fuse_pairs": true,
    "path": "stage_a_B64_T256_L8.txt",
-   "load_1min_before": 3.44,
-   "load_1min_after": 5.48
+   "load_1min_before": 7.05,
+   "load_1min_after": 7.3
   },
   {
    "case": "stage_a",
@@ -202,8 +202,8 @@
    "lane_tile": 8,
    "fuse_pairs": false,
    "path": "stage_a_B64_T256_L8_nopair.txt",
-   "load_1min_before": 5.48,
-   "load_1min_after": 5.32
+   "load_1min_before": 7.3,
+   "load_1min_after": 6.91
   },
   {
    "case": "stage_a",
@@ -212,8 +212,8 @@
    "lane_tile": 32,
    "fuse_pairs": true,
    "path": "stage_a_B64_T256_L32.txt",
-   "load_1min_before": 5.32,
-   "load_1min_after": 5.01
+   "load_1min_before": 6.91,
+   "load_1min_after": 6.94
   }
  ]
 }

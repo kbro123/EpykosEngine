@@ -55,40 +55,40 @@
  },
  "stage_a_search_ladder": {
   "command": "egraph_scale --trades N --rounds 24 --max-program-nodes 100000 --max-plan-nodes 1000000 --extract --fingerprint d448afd70180",
-  "comment": "Extracted estimate over the fully-paired default plan's estimate, E0, B=1, tile 256, lane_tile 8. 'before_D62' is the row D62 committed in egraph_scale.json, measured under the pre-D63 model; 'after_D63' is the same command under this entry's model. Both columns are cost-model ESTIMATES, not wall clock.",
+  "comment": "Extracted estimate over the fully-paired default plan's estimate, E0, B=1, tile 256, lane_tile 8. 'before_D62' is the row D62 committed in egraph_scale.json, measured under the pre-D63 model; 'after_D63' is the same command under this entry's model. Both columns are cost-model ESTIMATES, not wall clock. The D63 history is shorter because the PLAN half collapsed into the empty root annotation: with infer_plan == default_plan, 'nothing decided' and the explicit reduction_fusion-then-fused_pairs chain are two spellings of one execution and tie exactly. Re-measured on the landed tree with the R2/adjoint package (89d2a45) present: byte-identical, which supersedes D67's absolute table (taken on aa6643d, before this entry's Lt fix) while confirming D67's zero-delta claim.",
   "rows": [
    {
     "trades": 60,
     "before_D62": 0.999707,
-    "after_D63": 0.99645,
-    "history": "r5 x3, r6.materialise_boundaries, planner.reduction_fusion, planner.fused_pairs"
+    "after_D63": 0.994861,
+    "history": "r5.group_formation x4"
    },
    {
     "trades": 250,
     "before_D62": 0.999583,
-    "after_D63": 0.995837,
-    "history": "r5 x4, r6.materialise_boundaries, planner.reduction_fusion, planner.fused_pairs"
+    "after_D63": 0.993661,
+    "history": "r5.group_formation x5"
    },
    {
     "trades": 500,
     "before_D62": 0.999459,
-    "after_D63": 0.995184,
-    "history": "r5 x4, r6.materialise_boundaries, planner.reduction_fusion, planner.fused_pairs"
+    "after_D63": 0.992365,
+    "history": "r5.group_formation x5"
    },
    {
     "trades": 1000,
     "before_D62": 0.999221,
-    "after_D63": 0.994132,
-    "history": "r5 x4, r6.materialise_boundaries, planner.reduction_fusion, planner.fused_pairs"
+    "after_D63": 0.990441,
+    "history": "r5.group_formation x5"
    },
    {
     "trades": 2000,
     "before_D62": 0.999055,
-    "after_D63": 0.99477,
-    "history": "r5 x2, r6.materialise_boundaries, planner.reduction_fusion, planner.fused_pairs"
+    "after_D63": 0.991029,
+    "history": "r5.group_formation x3"
    }
   ],
-  "verdict": "Still noise: 0.35-0.59% sits an order of magnitude inside the model's own 64.6% mean relative error on the domains an optimisation decision turns on. cross_stage_wins remains 0."
+  "verdict": "Still noise: 0.5-1.0% sits well inside the model's own 49.7% mean relative error on the domains an optimisation decision turns on. cross_stage_wins remains 0."
  },
  "prediction_error": {
   "source": "bench/results/d448afd70180/cost_model_validation.md",
@@ -118,12 +118,80 @@
     "fit": "+ infer_plan = rewrite::planner::default_plan",
     "all": 74.4688,
     "significant": 64.624
+   },
+   {
+    "fit": "+ the fit plans at the interpreter's real Lt = min(lane_tile, max_batch)",
+    "all": 58.6434,
+    "significant": 49.6842
    }
   ],
   "fuse_pairs_1_subset_only": {
-   "all": 75.3446,
-   "significant": 65.0091
+   "all": 58.7343,
+   "significant": 48.9953
   },
-  "target_met": false
+  "target_met": false,
+  "per_case_final": {
+   "m1": {
+    "all": 52.3601,
+    "significant": 44.2988
+   },
+   "stage_a": {
+    "all": 60.1673,
+    "significant": 55.6172
+   }
+  },
+  "lane_tile_ab": {
+   "comment": "The Lt fix measured over IDENTICAL captures, two feature matrices, so machine load cannot enter the comparison. Stage A's own captures all have Lt == lane_tile and were never mis-planned; its share of the improvement is second-hand, which is the clearest evidence that the fit is joint.",
+   "nominal_lane_tile": {
+    "all": 74.062,
+    "significant": 63.116,
+    "m1_all": 71.3974,
+    "m1_significant": 59.2271,
+    "stage_a_all": 74.7082,
+    "stage_a_significant": 67.4003
+   },
+   "interpreter_Lt": {
+    "all": 58.5874,
+    "significant": 49.0169,
+    "m1_all": 53.0519,
+    "m1_significant": 42.9041,
+    "stage_a_all": 59.93,
+    "stage_a_significant": 55.7514
+   }
+  }
+ },
+ "model_vs_measured_knobs": {
+  "comment": "What the FINAL fitted model predicts for each knob-off contrast on the M1 book at the interpreter's real Lt=1, against what the knob sweep above measured. Before D63 the fuse_pairs row was 1.000x predicted by construction. This is the entry's own statement of what the model still cannot see.",
+  "fuse_pairs": {
+   "measured": 1.032,
+   "predicted": 1.0297,
+   "share_seen_pct": 93.0
+  },
+  "fuse_reductions": {
+   "measured": 1.618,
+   "predicted": 1.1948,
+   "share_seen_pct": 31.5
+  },
+  "inline_producers": {
+   "measured": 1.124,
+   "predicted": 1.0139,
+   "share_seen_pct": 11.2
+  }
+ },
+ "m1_tie_break": {
+  "comment": "The specific tie that produced D54 experiment 1's reported 1.0 rediscovery ratio: the candidate it extracted (planner.reduction_fusion alone, non-empty domain, empty group, 0 pairings) against the fully-paired default plan, priced under the fitted model.",
+  "default_plan_ns": 68817.97,
+  "reduction_fusion_alone_ns": 70240.41,
+  "ratio_after_D63": 1.02067,
+  "ratio_before_D63": 1.0
+ },
+ "captures": {
+  "load_1min_range": [
+   6.0,
+   7.5
+  ],
+  "cores": 16,
+  "points_above_cores_over_2": 0,
+  "comment": "Every point of the committed grid is under bench/run.sh's own cores/2 = 8.0 bar; per-point loads are in costmodel_raw/index.json."
  }
 }

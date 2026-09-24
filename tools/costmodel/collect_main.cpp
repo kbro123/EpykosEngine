@@ -64,6 +64,14 @@ struct Args {
   bool inline_producers = true;   // D63: exec::Options::inline_producers
 };
 
+// D63: the lane-chunk width the interpreter will actually PLAN with, which is not `--lane-tile`.
+// `exec::Interpreter`'s constructor computes `Lt = min(options.lane_tile, options.max_batch)` and
+// hands THAT to `rewrite::planner::default_plan` — so at B=1 a `--lane-tile 8` run plans at Lt=1,
+// where `row_fusion_pays` is true and the planner inlines, while `--lane-tile 8` on its own says
+// it is false and nothing inlines. Every capture records it so `costmodel_fit` builds its feature
+// matrix for the plan the interpreter ran, not for the one its command line suggests.
+int effective_lane_tile(const exec::Options& o) noexcept { return std::min(o.lane_tile, o.max_batch); }
+
 [[noreturn]] void usage_error(const std::string& msg) {
   std::cerr << "costmodel_collect: " << msg << "\n"
             << "usage: costmodel_collect --case m1|stage_a --B N --tile N --lane-tile N [--reps N] [--trades N] [--fuse-pairs 0|1] [--fuse-reductions 0|1] [--inline-producers 0|1]\n";
@@ -106,6 +114,7 @@ void run_m1(const Args& a) {
   opt.fuse_reductions = a.fuse_reductions;
   opt.inline_producers = a.inline_producers;
   const exec::Interpreter interp(program, opt);
+  const int lt = effective_lane_tile(opt);
   const std::vector<double> all = tape.input_values();
   std::vector<double> state(all.size() * static_cast<std::size_t>(a.B));
   for (std::size_t k = 0; k < all.size(); ++k) {
@@ -114,7 +123,7 @@ void run_m1(const Args& a) {
   std::vector<double> out(static_cast<std::size_t>(program.outputs.size()) * static_cast<std::size_t>(a.B));
   const long reps = a.reps > 0 ? a.reps : 200000;
   std::cerr << "costmodel_collect: case=m1 B=" << a.B << " tile=" << a.tile << " lane_tile=" << a.lane_tile
-            << " fuse_pairs=" << (a.fuse_pairs ? 1 : 0) << " fuse_reductions=" << (a.fuse_reductions ? 1 : 0)
+            << " Lt=" << lt << " fuse_pairs=" << (a.fuse_pairs ? 1 : 0) << " fuse_reductions=" << (a.fuse_reductions ? 1 : 0)
             << " inline_producers=" << (a.inline_producers ? 1 : 0) << " domains=" << program.domains.size() << " reps=" << reps << "\n";
   for (long r = 0; r < reps; ++r) interp.run(state.data(), a.B, out.data());
 }
@@ -130,6 +139,7 @@ void run_stage_a(const Args& a) {
   po.interpreter.fuse_pairs = a.fuse_pairs;
   po.interpreter.fuse_reductions = a.fuse_reductions;
   po.interpreter.inline_producers = a.inline_producers;
+  const int lt = effective_lane_tile(po.interpreter);
   solver::ImplicitProgram prog(t.tape, t.registry, po);
   const std::vector<double> all = t.tape.input_values();  // the record point: quotes, solved knots, diagnostics
   const std::size_t n_in = all.size();
@@ -141,7 +151,7 @@ void run_stage_a(const Args& a) {
   std::vector<double> out(n_out * static_cast<std::size_t>(a.B));
   const long reps = a.reps > 0 ? a.reps : 300;
   std::cerr << "costmodel_collect: case=stage_a B=" << a.B << " tile=" << a.tile << " lane_tile=" << a.lane_tile
-            << " fuse_pairs=" << (a.fuse_pairs ? 1 : 0) << " fuse_reductions=" << (a.fuse_reductions ? 1 : 0)
+            << " Lt=" << lt << " fuse_pairs=" << (a.fuse_pairs ? 1 : 0) << " fuse_reductions=" << (a.fuse_reductions ? 1 : 0)
             << " inline_producers=" << (a.inline_producers ? 1 : 0) << " domains=" << prog.program().domains.size() << " reps=" << reps << "\n";
   for (long r = 0; r < reps; ++r) prog.interpreter().run(state.data(), a.B, out.data());
 }

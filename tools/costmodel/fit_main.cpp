@@ -81,6 +81,7 @@ struct MeasuredDomain {
 // scripts/exec_coverage.py reads). Slot 4095 is the output copy, not a domain, and is skipped.
 struct ParsedProfile {
   long runs = 0;
+  int lane_tile_effective = 0;  // D63: `Lt=` from the capture's own header; 0 when it predates it
   std::vector<MeasuredDomain> slots;
 };
 
@@ -88,12 +89,14 @@ ParsedProfile parse_profile(const fs::path& path) {
   std::ifstream f(path);
   if (!f) throw std::runtime_error("cannot open " + path.string());
   static const std::regex runs_re(R"(exec profile over (\d+) runs)");
+  static const std::regex lt_re(R"(\bLt=(\d+))");
   static const std::regex slot_re(R"(^\s*slot\s+(\d+):\s+([0-9.]+) us)");
   ParsedProfile p;
   std::string line;
   while (std::getline(f, line)) {
     std::smatch m;
     if (std::regex_search(line, m, runs_re)) p.runs = std::stol(m[1]);
+    if (std::regex_search(line, m, lt_re)) p.lane_tile_effective = std::stoi(m[1]);
     if (std::regex_search(line, m, slot_re)) {
       const int slot = std::stoi(m[1]);
       if (slot == 4095) continue;
@@ -228,7 +231,20 @@ int main(int argc, char** argv) {
     for (const RunSpec& spec : specs) {
       const ir::Program& program = program_for(program_cache, spec.case_name);
       const ParsedProfile prof = parse_profile(spec.path);
-      optimise::Plan plan = optimise::infer_plan(program, spec.tile, spec.lane_tile);
+      // D63: PLAN at the lane-chunk width the interpreter really used. `exec::Interpreter`
+      // computes `Lt = min(lane_tile, max_batch)` and plans with that, so a B=1 capture of a
+      // `--lane-tile 8` run was planned at Lt=1 — where `row_fusion_pays` is TRUE and the planner
+      // inlines, the opposite of what lane_tile 8 says. Fitting those captures against a
+      // lane_tile-8 plan asked the solver to explain an inlined domain's ~0 us with a fully
+      // materialised feature vector. A capture written before this key falls back to the nominal
+      // lane_tile, loudly.
+      int plan_lane_tile = prof.lane_tile_effective;
+      if (plan_lane_tile <= 0) {
+        plan_lane_tile = spec.lane_tile;
+        std::cerr << "costmodel_fit: " << spec.path.string() << " predates D63 and records no `Lt=`; planning at the nominal lane_tile "
+                  << spec.lane_tile << ", which is WRONG whenever max_batch < lane_tile (re-run tools/costmodel/calibrate.py)\n";
+      }
+      optimise::Plan plan = optimise::infer_plan(program, spec.tile, plan_lane_tile);
       if (!spec.fuse_pairs) {
         // D63: the capture ran with exec::Options::fuse_pairs off, so rewrite::planner's two
         // pairing rules never fired and exec::Interpreter ran one kernel per step. infer_plan

@@ -118,7 +118,7 @@ Order: {G0, G1, G3, G4} → G2 → G5 → G6 → review → fix → close.
 |---|---|---|
 | R0 | rewrite framework; planner decisions (reduction fusion, pairs, tails, inlining, emit) re-expressed as rules with exactness classes | verifier catches a wrong rule |
 | CM | cost model from EPYKOS_EXEC_PROFILE timers per fingerprint; prediction error reported | predicts per-domain time within a stated error on Stage A |
-| R-a / R-b / R-c | R1–R3 / R4–R5 / R6–R7 with E0/E1 diff + mutation tests, fired on the Stage A tape | E0 / E1; mutants caught |
+| R-a / R-b / R-c | R1–R3 / R4–R5 / R6–R7 with E0/E1 diff + mutation tests, fired on the Stage A tape | E0 / E1; mutants caught; **and** the rule's fire-count on the M1 book and the Stage A tape is stated as a number (0 is an allowed answer, silence is not) — a rule that never fires on either real fixture is a finding for the M4 gate to weigh, not a rule that silently passed (D53) |
 | EG | e-graph over the domain IR; saturation bound; extraction by cost at E0 or E1; AD-mode-per-block rule; cross-stage sharing rules | rediscovers M1's three fusions with the planner's hard-coded rules off; ≥ 1 cross-stage win; extracted programs pass §6 |
 | C1 | catalogue from the Stage A hot groups; regen no-op; coverage | ≥ stated coverage of evaluation time |
 | M4 gate, review ×2, fix, close | | self-regression vs the M3 baseline; informational rows per D27 pairings |

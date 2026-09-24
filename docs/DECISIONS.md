@@ -1403,3 +1403,15 @@ tests (`tests/rewrite/r{1,2,3}_*_e0_test.cpp`). All three E0. Findings, reported
    measured directly, sometimes into `log`/`sqrt`/`div`'s undefined region entirely. `tests/rewrite/
    record_point_check.hpp` checks the exact record point only (self-consistent for a plain Interpreter/Adjoint
    exactly as it is for `solver::ImplicitProgram`) instead, for every rule's Stage A test.
+
+## D53 — A package's gate must state whether its deliverable actually fires (2026-09-24)
+An independent audit found that M4/R-a's own gate ("E0/E1; mutants caught") was narrower than its own deliverable
+text ("fired on the Stage A tape"): R1, R2 and R3 are correct and fully tested but fire on zero domains on both the
+M1 book and the Stage A tape, and nothing in the gate column's own wording would have caught that as a finding if
+R-a's own agent had not chosen to disclose it in prose. It did disclose it, honestly and in detail (D52), so this is
+a process-design gap, not an actual false claim anywhere in the record. Closing the gap for future packages: every
+`docs/RESUME.md` §3 gate that lists "fired on X" (or the equivalent) as part of its own deliverable text must state
+the fire-count as an explicit number in its landing report, zero included; a package whose deliverable claims to
+fire on the real fixture and cannot state that number has not met its gate. This applies from M4/R-b, R-c, EG, C1
+onward and to the M4 gate/review packages reading this table. R1–R3's own already-correct, already-disclosed
+zero-fire finding stands as recorded in D52 and is not reopened by this entry.

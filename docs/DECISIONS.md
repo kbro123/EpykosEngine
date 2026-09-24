@@ -2054,3 +2054,157 @@ work to any hot path, it reorders two operand slots once per step at plan time.
 
 No SwapEngine file opened. No `-ffast-math`. No test threshold relaxed, no platform `#ifdef`, and no registry
 regenerated on GCC to paper the difference over: the three assertions that were failing are unchanged.
+
+## D62 — M4/EG-scale: `EGraph::saturate` dedups before it constructs, matches only class representatives, and gains a re-firing policy; the full 517,036-node Stage A tape now saturates to a fixpoint (2026-09-24)
+
+Closes what D59 recorded as M4's single most significant open finding and what D54 point 4 first measured:
+`EGraph::saturate` had no redundancy check and grew unboundedly past a small bound, so the full Stage A tape had
+never been saturated at all. Owner-directed work (`docs/PROBLEM.md` §7; D18/D35/D36). Touches
+`include/epykos/optimise/egraph.hpp`, `src/optimise/egraph.cpp`, one new gate
+(`tests/optimise/egraph_saturation_memo_verify_test.cpp`), two new mutants, and a new measurement tool
+(`tools/egraph_scale/`). Nothing about extraction, verification, exactness or any rule changed.
+
+**The defect, re-derived here rather than taken on trust.** `tools/egraph_scale/egraph_scale --policy all-rules
+--no-dedup` reproduces D49's original behaviour exactly, in the same binary as the fix, and on the 60-trade Stage A
+fixture it reproduces D54's own numbers to the node: program nodes 7 -> 39 -> 191 -> 831 over four rounds, plan
+nodes 14 -> 126 -> 876 -> 4,944, 2,341.5 MiB resident at round 4 and no fixpoint. Two mechanisms, measured
+separately:
+
+- **(A) pay-first-check-later.** A proposal was fully built (a whole `ir::Program` clone), `ir::validate`d and
+  `ir::serialize`d BEFORE `program_known` discovered the content already existed. Counted from the BEFORE run's own
+  per-rule log over those four rounds: 1,064 candidate Programs built, validated and serialised, 234 of them
+  (22.0%) thrown away at `program_known` — and that is only the share the old code could SEE, because every
+  ACCEPTED node's own (node, rule, site) triples were re-matched and re-proposed in every later round as well, and
+  the plan tier re-merged every delta onto every plan node of its tier every round. (A larger figure — 75.4% at a
+  500-node cap — was quoted to this package from a prior investigation; it is not restated as fact here because
+  this package's own counters measure a different denominator and 22.0% is what they actually show. D60's lesson,
+  applied.) The waste is not incidental: a program node's `program` is never mutated and the plan context a structural `match` sees is always that node's
+  own plan-tier root, the empty `ir::PlanAnnotations{}`, which nothing ever writes to — so by `rule.hpp`'s own
+  purity contract (points 1 and 2) a given (program node, rule, site) triple has exactly ONE answer, for ever, and
+  every round after the first re-derived it and threw it away.
+- **(B) the e-graph is whole-program-valued, not term-valued.** Every e-node is a full clone of the entire
+  Program and `Rule::propose` can only return a whole rewritten Program, never a localized sub-term edit into
+  shared structure, so k independent local edits on one node cost k whole clones and, over the rounds, 2^k of
+  them. A real term-level e-graph is the proper fix; it is explicitly NOT attempted here.
+
+**What landed. Four changes, two of them lossless and two of them a stated narrowing of the search.**
+
+1. **An application memo (lossless), under `SaturationLimits::dedup_before_construction`, default on.** Each
+   (program node, rule) pair's site list is computed once; each structural site is applied once ever; each
+   annotation site remembers how far up its node's growing plan tier it has already merged. Because every skipped
+   call would have returned content the graph already holds, no reachable candidate is lost — that is an
+   equivalence, and it is gated as one (below), not asserted in prose.
+2. **Only a program CLASS's representative is matched (lossless; the same flag).** This is D49 point 3's own flagged "Known
+   limitation" in its cheapest sound form. A non-representative node is by definition congruent to the
+   representative `extract` already visits, so its sites and proposals are identical; matching it only bought a
+   duplicate plan tier. Measured on the 60-trade fixture under the new policy: 71 program nodes collapse to 39,
+   with 22 classes either way. One honest interaction, stated in the code: under a re-firing policy the
+   self-chaining privilege follows the representative's own producing rule.
+3. **`RefirePolicy::NoFreshCrossRule` (the new default; a real completeness loss).** A rule this graph has already
+   seen propose structurally is matched against a program node some OTHER structural rule produced only when it is
+   that node's own producing rule. Self-chaining is preserved deliberately: `r5.group_formation` applied twice is
+   the shape of the only structurally-novel candidate this framework has ever found (D54 experiment 2), and a
+   registered mutant (`eg.refire_blocks_self_chain`) exists precisely so that a future change cannot quietly take
+   it away. Because a rule is unrestricted until the first time it proposes, D52's own predicted R2-then-R1
+   mechanism (R1 matches nothing on the unrewritten tape; R2's bucketing gives it something to fold) still fires
+   on Stage A — measured, and visible in `optimise_egraph_full_rules_stage_a_test`'s own stdout. **What is given
+   up, plainly:** every later cross-rule structural step. Any optimum needing two different structural rewrites
+   composed after both have already fired once is now unreachable. This is a narrower SEARCH, never a wronger
+   answer: candidates that are enumerated are built by the same `propose` calls, carry the same accumulated
+   `Exactness`, and are extracted and verified at their declared class exactly as before.
+4. **`RefirePolicy::PipelineOrderedPlans` (opt-in; a second, larger completeness loss).** With (3) alone the
+   PROGRAM tier reaches a real fixpoint on 60 trades (39 nodes / 22 classes by round 4) and the PLAN tier becomes
+   the binding constraint instead — it is a pure 2^k subset lattice over the k ~ 12 independent per-domain deltas
+   one program offers (`r6.materialise_boundaries`' per-domain sites plus the five planner rules), so saturating
+   it to a fixpoint costs 105,977 plan nodes and 10,528 MiB. Cause (B) again, in the other tier. Under this policy
+   a rule at slot i may extend a plan node only when every rule already in that node's derivation sits at a
+   strictly lower slot, which makes the tier prod_rule (1 + sites) instead of 2^k. The M1 planner's own five-rule
+   pipeline is in the caller's declared order by construction (D47's fixed dependency order), so the default plan
+   stays reachable and extraction still cannot do worse than it. **Given up:** plans needing one rule applied
+   twice, or two rules out of the declared order. It is NOT the default, so no existing caller's result changes
+   by accident; `egraph_test.cpp`'s `CongruenceAfterRebuildUnifiesPathIndependentDuplicates` in particular still
+   exercises the deferred-union pattern D49 point 2 describes, unmodified.
+
+**Measured, fingerprint d448afd70180, release preset, 1-minute load 7.4-14.2 of 16 (informational only, D9: no
+`bench/targets.json` entry, no `--accept`, never compared across fingerprints). 60-trade Stage A fixture, the one
+D54 measured, `tools/egraph_scale/`:**
+
+| round | BEFORE prog / plan nodes | BEFORE ms | BEFORE peak MiB | AFTER prog / plan nodes | AFTER ms | AFTER peak MiB |
+|---|---|---|---|---|---|---|
+| 1 | 7 / 14 | 429 | 408.6 | 7 / 14 | 461 | 427.6 |
+| 2 | 39 / 126 | 2,485 | 480.5 | 21 / 81 | 1,134 | 444.7 |
+| 3 | 191 / 876 | 11,722 | 876.2 | 35 / 230 | 1,344 | 466.5 |
+| 4 | 831 / 4,944 | 49,006 | 2,341.5 | 39 / 418 | 507 | 482.6 |
+| 5-8 | not reached: still growing, no fixpoint | | | 39 / 641 | 409 total | 483.1 |
+
+BEFORE is `--policy all-rules --no-dedup`, AFTER is `--policy pipeline-ordered-plans` (the default policy sits
+between the two: program tier 39/22 at a fixpoint, plan tier unbounded as described in point 4). To the same
+round-4 depth: 63.6 s -> 3.4 s and 2,341.5 -> 482.6 MiB. Run all the way out, AFTER reaches a REAL fixpoint —
+`queued=0`, not a bound — in 8 rounds, 3.9 s, 39 program nodes / 22 classes / 641 plan nodes, 483.1 MiB peak, of
+which ~425 MiB is the recorded tape itself.
+
+**The crossover, pushed until it stopped moving — and it did not stop.** Same tool, same policy, saturated to a
+real fixpoint (`queued=0`) at every size, extraction run at E0 under this fingerprint's REAL fitted
+`bench/results/d448afd70180/cost_model.json` (never `CostCoefficients::defaults()`, D57):
+
+| trades | domains | tape nodes | rounds to fixpoint | program nodes / classes | plan nodes | saturate s | peak RSS MiB | extracted / default (fitted) |
+|---|---|---|---|---|---|---|---|---|
+| 60 | 57 | 184,749 | 8 | 39 / 22 | 641 | 3.9 | 483 | 0.999707 |
+| 250 | 61 | 235,546 | 9 | 54 / 25 | 677 | 7.0 | 885 | 0.999583 |
+| 500 | 63 | 280,076 | 9 | 54 / 25 | 677 | 8.3 | 1,228 | 0.999459 |
+| 1,000 | 63 | 360,878 | 9 | 54 / 25 | 677 | 10.5 | 2,062 | 0.999221 |
+| **2,000** | **67** | **517,036** | **7** | **14 / 9** | **197** | **3.9** | **3,085** | **0.999055** |
+
+**The headline, and it was run, not extrapolated: the FULL 2,000-trade Stage A tape — 517,036 nodes, 67 IR
+domains, the exact tape M3 recorded (D44) — now saturates to a real fixpoint in 7 rounds and 3.9 s of saturation
+at 3,084.8 MiB peak resident.** That peak is the RECORDING's own (it is already 3,084.8 MiB at round 0 and does
+not move by a single MiB through round 7): the e-graph's whole contribution on the full tape fits inside the
+memory the tape already occupies. There is no crossover to report — nothing broke before the largest fixture that
+exists. D54's estimate that the full tape "would very plausibly exhaust memory before converging" was correct
+about the code as it then stood and is now superseded. Honest caveat on the 2,000-trade row: it has FEWER nodes
+than the 250-1,000 rows (14/9 vs 54/25), and that is a property of the fixture, not a truncation — on the full
+tape `r1.fold_uniform_columns` and `r2.bucket_rows` match NOTHING at all (they do fire on the smaller books) and
+`r5.group_formation` opens 3 sites at round 1 rather than 4, so there is simply less to enumerate. `bound_hit` is
+false and the last round queues nothing; the search really did run out of candidates, not out of budget.
+
+**Re-checking the one thing the search actually found: still nothing better than noise.** At every fixture size
+the E0 extraction picks the same family D54 found — `r5.group_formation` applied three or four times, plus
+`r6.materialise_boundaries`, plus `planner.reduction_fusion` — and priced under the REAL fitted cost model the
+ratio against the M1-shaped default plan is 0.999707 / 0.999583 / 0.999459 / 0.999221 / 0.999055 as the book grows
+from 60 to 2,000 trades. That is 0.03% to 0.09%. The ratio does improve monotonically with book size, which is
+the only interesting thing about it, and it is not a win: it sits well below the cost model's own 84.4% mean
+relative error (D48 point 5), there is no wall-clock bench corroborating it, and `PROBLEM.md` §7's
+cross-stage-win clause is NOT satisfied by it. Reported as "still noise" rather than dressed up. That the search now runs to a genuine
+fixpoint on the 60-trade fixture (8 rounds, where before it was truncated at round 3-4 and still growing) AND runs
+at all on a tape 2.8x bigger, and still turns up the same candidate family, is itself the informative part: the
+candidate set was never the binding constraint on M4's failed gate — the cost model's accuracy is.
+
+**Not attempted, stated rather than silently dropped.** A term-level e-graph (proper sub-term e-classes, so k
+independent edits are one shared choice point instead of 2^k whole-Program clones) is the real fix for cause (B)
+and is out of this package's scope by direction; both re-firing policies are workarounds for its absence and say
+so in their own comments. Intra-round duplicate suppression in the PROGRAM tier (the 831 nodes of the BEFORE table
+are only 138 classes) was considered and deliberately NOT taken: it would silently change what
+`EGraph.StructuralHashConsingFoldsIdenticalProposalsIntoOneClass` pins about D49 point 2's deferred-union pattern,
+and (2) above already removes the duplicates' real cost. Sharing ONE plan tier per program CLASS rather than per
+node — D49 point 3's limitation in full — is still open; (2) sidesteps its cost without closing it.
+
+Every row above is committed as `bench/results/d448afd70180/egraph_scale.json` (informational, the same standing
+D54's own `m4_experiments.json` has: not a `bench/run.sh` product, no baseline, no `bench/targets.json` entry).
+
+**Verification (fingerprint d448afd70180).** `ctest --preset release` 109/109 and `--preset reference` 109/109, 0
+failed each, ON THE LANDED (rebased) TREE — 107 before this package, 108 with its own new
+`optimise_egraph_saturation_memo_verify_test`, 109 after rebasing onto D61 and picking up that entry's own
+`catalogue_signature_commutative_e0_test`;
+`scripts/mutation_test.sh` 45/45 registered mutants caught, 0 survivors, on this package's own pre-rebase tree (43
+before, plus `eg.memo_ignores_site` and `eg.refire_blocks_self_chain`, both registered in `mutation.hpp`,
+`tests/mutation/registry_test.cpp` and `docs/WORKLOADS.md` §M2 per D32/D53; each caught by the new gate and by
+nothing else, which is what a mutant of the SEARCH should look like). Stated precisely rather than rounded up: this
+package rebased onto D61 after that sweep, so the landed registry holds 46 — D61's own
+`catalogue.signature_ignores_commutativity` is the 46th, verified by D61's package and by CI's ubuntu mutation job,
+which runs the merged registry in full on the landed commit. This package's own change cannot reach it (disjoint
+files: `src/optimise/` vs `src/catalogue/`), and the 45 it did sweep include every mutant that existed before it. The new gate is deliberately synthetic-rule-only and runs in milliseconds,
+because the mutation harness runs every gate once per registered mutant. Exactness: this package declares none of
+its own and changes none — it adds no rewrite, so there is no arithmetic to classify (the same precedent D49 set
+for EG-core); every candidate it enumerates is still extracted and verified at its rule chain's own accumulated
+class, and `tests/optimise/egraph_full_rules_stage_a_test.cpp`'s two record-point checks (including D57's check
+against the TRUE unrewritten tape) pass unchanged. No `-ffast-math`. No SwapEngine file opened.

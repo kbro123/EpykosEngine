@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "epykos/mutation/mutation.hpp"
 #include "epykos/rewrite/greedy.hpp"
 
 namespace epykos::optimise {
@@ -212,6 +213,43 @@ std::vector<int> EGraph::plan_class_representatives(int program_id) const {
   return order;
 }
 
+// ---- the application memo (D62) -----------------------------------------------------------------
+
+bool EGraph::sync_memo(const std::vector<const rewrite::Rule*>& rules) {
+  bool same = memo_rules_.size() == rules.size();
+  if (same) {
+    for (std::size_t i = 0; i < rules.size(); ++i) {
+      if (memo_rules_[i] != rules[i]) { same = false; break; }
+      if (rules[i] != nullptr && memo_rule_names_[i] != rules[i]->name()) { same = false; break; }
+    }
+  }
+  if (!same) {
+    memo_.clear();
+    // A slot index taken from a different rules vector means nothing; reopen every plan node to
+    // every rule rather than silently restricting the search against stale indices.
+    for (std::vector<PlanNode>& tier : plans_) {
+      for (PlanNode& n : tier) n.max_rule_slot = -1;
+    }
+    memo_rules_ = rules;
+    memo_rule_names_.assign(rules.size(), std::string{});
+    for (std::size_t i = 0; i < rules.size(); ++i) {
+      if (rules[i] != nullptr) memo_rule_names_[i] = rules[i]->name();
+    }
+    rule_kind_.assign(rules.size(), ProposalKind::Unknown);
+  }
+  // Grow to the current node count; a node added since the last call starts with an empty memo.
+  memo_.resize(programs_.size());
+  for (std::vector<SiteMemo>& row : memo_) row.resize(rules.size());
+  return same;
+}
+
+void EGraph::note_rule_kind(std::size_t slot, ProposalKind kind) {
+  if (slot >= rule_kind_.size()) return;
+  ProposalKind& cur = rule_kind_[slot];
+  if (cur == ProposalKind::Unknown) cur = kind;
+  else if (cur != kind) cur = ProposalKind::Mixed;
+}
+
 // ---- saturation -------------------------------------------------------------------------------
 
 SaturationReport EGraph::saturate(const std::vector<const rewrite::Rule*>& rules, const SaturationLimits& limits) {
@@ -223,14 +261,46 @@ SaturationReport EGraph::saturate(const std::vector<const rewrite::Rule*>& rules
     return total;
   };
 
+  // The memo and the rule-kind table are keyed by slot in THIS `rules` vector; sync_memo discards
+  // both if the caller has changed the rule set since the last call. `rule_kind_` is needed by the
+  // re-firing policy even when the memo itself is off, so this runs either way.
+  sync_memo(rules);
+
   for (int iter = 0; iter < limits.max_iterations; ++iter) {
     report.iterations_run = iter + 1;
     pending_programs_.clear();
     pending_plans_.clear();
+    if (!limits.dedup_before_construction) {
+      // Wiped at the top of EVERY round, so the loop below re-matches and re-proposes exactly as
+      // D49's original did — the "before" behaviour, reproducible on demand.
+      for (std::vector<SiteMemo>& row : memo_) {
+        for (SiteMemo& m : row) m = SiteMemo{};
+      }
+    }
 
     const int program_frontier = num_programs();
     std::vector<int> plan_frontier(plans_.size());
     for (std::size_t p = 0; p < plans_.size(); ++p) plan_frontier[p] = static_cast<int>(plans_[p].size());
+
+    // D62, and D49 point 3's own flagged "Known limitation" in its cheapest sound form: only a
+    // program CLASS's representative (the lowest-id member, exactly the node `extract` visits) is
+    // matched and grows a plan tier. A non-representative node is BY DEFINITION congruent to its
+    // representative — same `ir::Program` content, same empty plan-tier root — so by rule.hpp's
+    // purity contract every site it would match and every proposal it would make are identical to
+    // the representative's. Skipping it costs no reachable content and saves both the match/
+    // propose work and, far more importantly, a whole duplicate plan tier per duplicate node
+    // (measured on the 60-trade Stage A fixture: 71 program nodes, 22 classes — 69% of all plan-
+    // tier growth was on nodes `extract` never looks at). One honest interaction with
+    // RefirePolicy::NoFreshCrossRule, stated rather than buried: the self-chaining privilege
+    // follows the REPRESENTATIVE's own producing rule, so when two different rules reach the same
+    // content it is the lower-id derivation's rule that may continue the chain.
+    std::vector<std::uint8_t> is_representative(static_cast<std::size_t>(program_frontier),
+                                                limits.dedup_before_construction ? 0 : 1);
+    if (limits.dedup_before_construction) {
+      for (int rep : program_class_representatives()) {
+        if (rep < program_frontier) is_representative[static_cast<std::size_t>(rep)] = 1;
+      }
+    }
 
     std::size_t program_total = programs_.size();
     std::size_t plan_total = total_plan_count();
@@ -238,23 +308,78 @@ SaturationReport EGraph::saturate(const std::vector<const rewrite::Rule*>& rules
     bool bound_hit_this_round = false;
     std::string bound_reason_this_round;
 
-    for (const rewrite::Rule* rule : rules) {
+    for (std::size_t slot = 0; slot < rules.size(); ++slot) {
+      const rewrite::Rule* rule = rules[slot];
       if (rule == nullptr) continue;
       std::size_t sites_matched = 0;
       std::size_t nodes_added = 0;
+      std::size_t proposals_memoised = 0;
+      std::size_t nodes_blocked = 0;
       bool cut = false;
       std::string note;
 
       for (int pid = 0; pid < program_frontier && !cut; ++pid) {
+        if (!is_representative[static_cast<std::size_t>(pid)]) continue;  // see above
+        // (B) D62's re-firing policy. A rule this graph has only ever seen propose STRUCTURALLY is
+        // not matched against a program node some OTHER structural rule produced. The root
+        // (parent < 0) is always matched against everything; a rule whose kind is still Unknown
+        // (it has proposed nothing yet) is never restricted. See egraph.hpp's RefirePolicy comment
+        // for exactly which candidates this makes unreachable.
+        // The mutant makes the policy refuse a rule its OWN output too, collapsing "homogeneous
+        // structural chains" to "at most one structural rewrite ever" — which would silently drop
+        // the r5.group_formation-applied-twice candidate (D54 experiment 2).
+        const bool rule_is_this_nodes_own =
+            !epykos::mutant("eg.refire_blocks_self_chain") &&
+            programs_[static_cast<std::size_t>(pid)].rule == rule->name();
+        if (limits.refire != RefirePolicy::AllRules &&  // NoFreshCrossRule and everything above it
+            programs_[static_cast<std::size_t>(pid)].parent >= 0 &&
+            rule_kind_[slot] == ProposalKind::Structural && !rule_is_this_nodes_own) {
+          ++nodes_blocked;
+          continue;
+        }
+
         const ir::Program& prog = programs_[static_cast<std::size_t>(pid)].program;
         // Structural rules (R1-R7) never depend on plan content today (their own `match` is
         // unconditionally empty); a rule that DOES want plan context for a Program-kind site
-        // sees the program's OWN root (unplanned) annotation, node 0 of its plan tier.
+        // sees the program's OWN root (unplanned) annotation, node 0 of its plan tier. That
+        // annotation is `ir::PlanAnnotations{}` and nothing ever writes to it, which is precisely
+        // why (A)'s memo below is sound: `match`'s two inputs never change for this node.
         const ir::PlanAnnotations& ctx = plans_[static_cast<std::size_t>(pid)][0].content;
-        std::vector<rewrite::MatchSite> sites = rule->match(prog, ctx);
-        sites_matched += sites.size();
 
-        for (const rewrite::MatchSite& site : sites) {
+        SiteMemo& memo = memo_[static_cast<std::size_t>(pid)][slot];
+        if (!memo.matched) {
+          memo.sites = rule->match(prog, ctx);
+          // The mutant retires a whole (node, rule) pair on its FIRST site, so every later site
+          // this rule matches on this node is never applied at all — a dedup that has quietly
+          // become a narrowing of the search.
+          if (limits.dedup_before_construction && epykos::mutant("eg.memo_ignores_site") && memo.sites.size() > 1) {
+            memo.sites.resize(1);
+          }
+          memo.kind.assign(memo.sites.size(), static_cast<std::uint8_t>(ProposalKind::Unknown));
+          memo.plan_parents_done.assign(memo.sites.size(), 0);
+          memo.matched = true;
+          sites_matched += memo.sites.size();
+        }
+
+        for (std::size_t si = 0; si < memo.sites.size(); ++si) {
+          const rewrite::MatchSite& site = memo.sites[si];
+          const int frontier = plan_frontier[static_cast<std::size_t>(pid)];
+
+          // (A) The memo's two skips. A structural site has exactly one answer and it has already
+          // been given (queued, deduped against an existing node, or rejected as invalid) — never
+          // pay for the Program clone, the ir::validate and the ir::serialize again. An annotation
+          // site's own delta is likewise fixed; only its node's plan tier grows, so the only work
+          // left is merging onto plan parents not yet seen.
+          if (memo.kind[si] == static_cast<std::uint8_t>(ProposalKind::Structural)) {
+            ++proposals_memoised;
+            continue;
+          }
+          if (memo.kind[si] == static_cast<std::uint8_t>(ProposalKind::Annotation) &&
+              memo.plan_parents_done[si] >= frontier) {
+            ++proposals_memoised;
+            continue;
+          }
+
           rewrite::Proposal proposal = rule->propose(prog, ctx, site);
 
           if (proposal.is_structural()) {
@@ -263,14 +388,18 @@ SaturationReport EGraph::saturate(const std::vector<const rewrite::Rule*>& rules
               bound_hit_this_round = true;
               note = "max_program_nodes";
               bound_reason_this_round = "max_program_nodes";
-              break;
+              break;  // NOT memoised: this site was never actually applied.
             }
+            memo.kind[si] = static_cast<std::uint8_t>(ProposalKind::Structural);
+            note_rule_kind(slot, ProposalKind::Structural);
             try {
               ir::validate(*proposal.program);
             } catch (const std::exception& e) {
               // A malformed proposal from THIS site is logged and skipped, never a `cut`: that
               // field means "a resource bound stopped exploration", not "one bad proposal was
               // seen" — the rest of this rule's other sites still get a fair chance this round.
+              // It is memoised all the same: `propose` is a pure function, so the next round's
+              // identical call would throw the identical exception.
               note = std::string("rejected (invalid program): ") + e.what();
               continue;
             }
@@ -284,8 +413,23 @@ SaturationReport EGraph::saturate(const std::vector<const rewrite::Rule*>& rules
               any_queued = true;
             }
           } else if (proposal.is_annotation()) {
-            for (int plid = 0; plid < plan_frontier[static_cast<std::size_t>(pid)]; ++plid) {
+            memo.kind[si] = static_cast<std::uint8_t>(ProposalKind::Annotation);
+            note_rule_kind(slot, ProposalKind::Annotation);
+            // Plan parents below `plan_parents_done[si]` were merged in an earlier round: the
+            // delta and the parent are both unchanged, so the merge result is unchanged, so it is
+            // either already a node of this tier or was already rejected by `plan_known` — either
+            // way re-doing it can add nothing.
+            int plid = memo.plan_parents_done[si];
+            for (; plid < frontier; ++plid) {
               const PlanNode& base = plans_[static_cast<std::size_t>(pid)][static_cast<std::size_t>(plid)];
+              // (B) in the plan tier: PipelineOrderedPlans lets a rule extend only plan nodes
+              // every one of whose own rules sits at a strictly lower slot, so a plan derivation
+              // runs in the caller's declared rule order and uses each rule at most once. See
+              // egraph.hpp's RefirePolicy comment for the combinations that costs.
+              if (limits.refire == RefirePolicy::PipelineOrderedPlans &&
+                  base.max_rule_slot >= static_cast<int>(slot)) {
+                continue;
+              }
               ir::PlanAnnotations merged = base.content;
               rewrite::merge_annotations(merged, *proposal.annotations);
               if (plan_known(pid, merged)) continue;  // ditto, for the plan tier
@@ -298,10 +442,14 @@ SaturationReport EGraph::saturate(const std::vector<const rewrite::Rule*>& rules
               }
               rewrite::Exactness ex = combine_exactness(base.exactness, rule->exactness_class());
               pending_plans_.push_back(
-                  PendingPlan{pid, plid, std::move(merged), rule->name(), ex});
+                  PendingPlan{pid, plid, std::move(merged), rule->name(), ex, static_cast<int>(slot)});
               ++nodes_added;
               any_queued = true;
             }
+            // Exactly the parents actually visited, so a bound that cut this loop short leaves
+            // the rest to be retried rather than silently skipped.
+            memo.plan_parents_done[si] = plid;
+            if (cut) break;
           } else {
             // rule.hpp's own contract: a site match() returned must never propose() empty.
             cut = true;
@@ -309,10 +457,14 @@ SaturationReport EGraph::saturate(const std::vector<const rewrite::Rule*>& rules
           }
         }
       }
-      report.log.push_back(SaturationLogEntry{iter, rule->name(), sites_matched, nodes_added, cut, note});
+      report.log.push_back(SaturationLogEntry{iter, rule->name(), sites_matched, nodes_added,
+                                              proposals_memoised, nodes_blocked, cut, note});
     }
 
     rebuild();
+    // rebuild() appended this round's nodes; give each one a memo row before the next round.
+    memo_.resize(programs_.size());
+    for (std::vector<SiteMemo>& row : memo_) row.resize(rules.size());
 
     if (bound_hit_this_round) {
       report.bound_hit = true;
@@ -364,6 +516,7 @@ void EGraph::rebuild() {
     node.exactness = combine_exactness(parent.exactness, pending.exactness);
     node.history = parent.history;
     node.history.push_back(pending.rule);
+    node.max_rule_slot = pending.rule_slot > parent.max_rule_slot ? pending.rule_slot : parent.max_rule_slot;
     int id = plan_uf_[static_cast<std::size_t>(pending.program_id)].make();
     plans_[static_cast<std::size_t>(pending.program_id)].push_back(std::move(node));
     hash_cons_plan(pending.program_id, id,

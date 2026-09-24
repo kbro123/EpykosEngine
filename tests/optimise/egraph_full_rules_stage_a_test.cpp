@@ -4,29 +4,34 @@
 // domains — tests/rewrite/r7_block_linmap_e0_test.cpp's own `small_stage_a()` fixture: 60 trades,
 // 0 scenarios, fast to BUILD).
 //
-// MEASURED FINDING, reported rather than hidden (CLAUDE.md, HARD RULE 10): saturating this fixture
-// to the SAME bound egraph_full_rules_m1_test.cpp uses for the M1 book (24 iterations, 2000
-// program nodes) does not merely run slowly, it grows unboundedly in practice -- round 2 alone
-// (r1/r2/r5/r6/r7 all firing) already produces 39 distinct program nodes in ~4.4s; by round 4 the
-// process was still growing (measured directly: 1.87 GB resident and climbing at 51s, killed
-// rather than let it continue) with no sign of approaching a fixpoint. Root cause, as far as this
-// package traced it without a deeper rewrite of its own: `EGraph::saturate` matches EVERY rule
-// against EVERY node discovered so far, every round (egraph.hpp's own documented BFS shape) --
-// fine when structural rules rarely fire (the M1 book: R1-R3 fire 0 times, D52) or fire once
-// (R7's single linmap split), but on Stage A FIVE structural rules fire at once from round 1
+// MEASURED FINDING as this file first landed (D54), reported rather than hidden (CLAUDE.md, HARD
+// RULE 10): saturating this fixture to the SAME bound egraph_full_rules_m1_test.cpp uses for the
+// M1 book (24 iterations, 2000 program nodes) did not merely run slowly, it grew unboundedly in
+// practice -- round 2 alone (r1/r2/r5/r6/r7 all firing) already produced 39 distinct program nodes
+// in ~4.4s; by round 4 the process was still growing (measured directly: 1.87 GB resident and
+// climbing at 51s, killed rather than let it continue) with no sign of approaching a fixpoint.
+// Root cause, as far as D54 traced it: `EGraph::saturate` matched EVERY rule against EVERY node
+// discovered so far, every round (egraph.hpp's own documented BFS shape) -- fine when structural
+// rules rarely fire (the M1 book: R1-R3 fire 0 times, D52) or fire once (R7's single linmap
+// split), but on Stage A FIVE structural rules fire at once from round 1
 // (r1.fold_uniform_columns, r2.bucket_rows, r5.group_formation, r6.materialise_boundaries,
-// r7.block_linmap), each potentially re-matching on the OTHERS' output next round, so the
-// candidate set can grow combinatorially rather than converge -- exactly the failure mode
-// equality-saturation systems are known to hit without a redundancy/subsumption rule (D12: no
-// external e-graph library; this package did not have time to add one). PRACTICAL CONSEQUENCE:
-// this file bounds saturation to 3 iterations / 500 program nodes (measured safe and fast, ~10s)
-// and does NOT assert `!report.bound_hit` -- hitting the iteration cap here is an intended safety
-// choice, not a failure, and is reported as such rather than papered over. Running the FULL
-// 2,000-trade Stage A tape (517,036 nodes) through the unbounded default limits is NOT attempted
-// by this package: given the 60-trade fixture's own trajectory, it would very plausibly exhaust
-// memory before converging. This is this package's most important negative finding and is
-// flagged for whoever picks up R1-R7's interaction next (a redundancy check, a rule-application
-// budget per node, or restricting which rules re-fire on another rule's OWN output).
+// r7.block_linmap), each re-matching on the OTHERS' output next round, so the candidate set grew
+// combinatorially rather than converging -- exactly the failure mode equality-saturation systems
+// are known to hit without a redundancy/subsumption rule (D12: no external e-graph library).
+//
+// CLOSED BY D62, re-measured here rather than asserted: `EGraph::saturate` now memoises each
+// (program node, rule, site) application (its two inputs are fixed for a node's whole life, so
+// re-deriving it can only reproduce content the graph already holds), matches only a program
+// CLASS's representative, and by default applies `RefirePolicy::NoFreshCrossRule`. On THIS fixture
+// under this file's own 3-iteration bound that turns 191 program nodes into 35 and, importantly,
+// `report.bound_hit` into false -- the 500-node cap below is now slack, not a tourniquet. Run to a
+// real fixpoint (8 rounds, `RefirePolicy::PipelineOrderedPlans`) the same fixture settles at 39
+// program nodes / 22 classes / 641 plan nodes and 483 MiB, and the FULL 2,000-trade, 517,036-node
+// Stage A tape -- not attempted at all before D62 -- reaches a fixpoint in 7 rounds at 3.1 GB
+// (tools/egraph_scale/, D62's own numbers, fingerprint d448afd70180). The bound below and the
+// deliberate absence of an `EXPECT_FALSE(report.bound_hit)` are kept as they were: this file's job
+// is the structural result, not the scaling result, and a bound being hit must stay a logged
+// event rather than a failure whichever way the search is configured.
 //
 // SCOPED, HONESTLY (this file does not claim more than it checks, given the above): it does NOT
 // wire rewrite::cross_stage_sharing_guard onto Stage A's own residual/book output-ordinal groups

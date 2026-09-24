@@ -83,6 +83,8 @@ const std::vector<std::string> documented = {
     "catalogue.binding_wrong_operand_order",
     "catalogue.signature_ignores_konst",
     "catalogue.signature_ignores_commutativity",
+    "eg.memo_ignores_site",
+    "eg.refire_blocks_self_chain",
 };
 
 std::vector<std::string> registry_names() {

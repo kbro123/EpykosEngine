@@ -182,6 +182,16 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   | `catalogue.binding_wrong_operand_order` | `bind_domain`: visits a step's `b` operand before `a`, transposing the operand tables of any step whose `a` and `b` are the same slot kind (e.g. `div(gat, gat)`, real on the Stage A tape) | the on/off bitwise comparison: an asymmetric op computed with its operands swapped is a different number |
   | `catalogue.signature_ignores_konst` | `signature_of`: a step's `konst` slot contributes no shape or back-reference, so two domains differing only in `konst`'s kind (e.g. an `Affine` with a `Literal` vs. a `Column` leading constant) collide onto one `Signature` | the coverage assertion (a domain whose true signature no longer matches the registry's stops being served) |
   | `catalogue.signature_ignores_commutativity` | `canonical_swap_ab`: a commutative step (`Add`, `Mul`, `CmpEq`) is fingerprinted in its recorded operand order instead of the canonical one, so `mul(gat, lit)` and `mul(lit, gat)` — one isomorphism class to `ir::infer`, and which of the two orders a Program carries is compiler-dependent (D61) — become two `Signature`s | the coverage assertion (every domain whose recorded order is not already canonical stops matching the registry, which is generated canonically) and `tests/catalogue/signature_commutative_e0_test.cpp` |
+
+  and the two M4/EG scaling mutants (`src/optimise/egraph.cpp`, D62), both caught by
+  `tests/optimise/egraph_saturation_memo_verify_test.cpp` — the application memo is only ever allowed to skip work
+  whose result the graph already holds, and the re-firing policy is only ever allowed to narrow across rules, never
+  to stop a rule chaining onto its own output:
+
+  | mutant | defect (one line) | exercised by |
+  |---|---|---|
+  | `eg.memo_ignores_site` | `EGraph::saturate`'s application memo: a (program node, rule) pair is retired after its FIRST matched site, so every later site of a multi-site rule on that node is never applied | `EGraphSaturationMemo.MemoReachesExactlyTheSameProgramsAndPlansAsNoMemo` (memo on vs memo off must reach the same program contents and the same per-program plan classes) |
+  | `eg.refire_blocks_self_chain` | `EGraph::saturate`'s `RefirePolicy`: the re-firing restriction also refuses a rule its OWN output, so a structural rewrite can never chain onto itself (it would drop D54's `r5.group_formation`-applied-twice candidate) | `EGraphSaturationRefire.NoFreshCrossRuleStillLetsARuleChainOntoItsOwnOutput` |
 - **Near-miss shapes** (`include/epykos/fixtures/nearmiss_shapes.hpp`, the gate fixture the mutation harness showed
   was missing, D32): 42 templated shapes over six positive inputs, each an op tree that differs from a neighbour in
   exactly one respect a signature may overlook — a constant on the left or the right of `−` and `/`, a constant in

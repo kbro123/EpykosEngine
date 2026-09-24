@@ -366,6 +366,16 @@ hash-consing to one `rebuild()` per round (real congruence: two derivations conv
 content in ONE round are unioned there); a persistent-table pre-check keeps an always-matching
 rule (every one of R0's five) from re-queuing its own already-known result forever, so the
 `saturate()` loop reaches an actual fixpoint rather than running to its iteration bound every time.
+**Amended (M4/EG-scale, D62):** that pre-check was still pay-first-check-later — a proposal was
+cloned, validated and serialised before the duplicate was found — and nothing stopped the node
+count growing multiplicatively once several structural rules fire at once. `saturate()` now
+memoises each (program node, rule, site) application (both of a node's inputs to `match`/`propose`
+are fixed for its whole life, so the answer is), matches only a program CLASS's representative,
+and takes a `RefirePolicy`: `AllRules` is D49's complete shape, `NoFreshCrossRule` (the default)
+lets a structural rule extend only its own output once it has fired, and `PipelineOrderedPlans`
+additionally runs plan derivations in the caller's declared rule order. The last two are a stated
+completeness tradeoff in the SEARCH, never in what is extracted; both are documented with what
+they give up in `egraph.hpp`'s own header.
 `include/epykos/optimise/extract.hpp` picks the cheapest (program-class, plan-class) pair by
 CM's `estimate_program`, filtering out any node whose accumulated `rewrite::Exactness` (the max
 over every rule in its own derivation) exceeds the caller's request — E0 extraction can never

@@ -41,6 +41,8 @@ option(EPYKOS_BUILD_TESTS "Build the gtest executables under tests/"            
 option(EPYKOS_BUILD_BENCH "Build the Google Benchmark executables under bench/"               ON)
 option(EPYKOS_WERROR      "Treat warnings as errors in epykos targets (not third_party)"       OFF)
 option(EPYKOS_MUTATIONS   "Compile the registered mutants (include/epykos/mutation) into libepykos; EPYKOS_MUTANT=<name> selects one at run time. The mutation preset only, never a gated build (D32)" OFF)
+option(EPYKOS_EXEC_PROFILE "Compile exec::Interpreter's per-domain wall-clock timers (src/exec/interpreter.cpp); prints to stderr at process exit. The profile preset only (tools/costmodel/'s calibration): never a gated or perf-gated build, the instrumentation adds overhead to every run()" OFF)
+option(EPYKOS_BUILD_TOOLS "Build the executables under tools/ (tools/costmodel/'s cost-model calibration; D9 numbers, never engine API)" ON)
 
 # ---------------------------------------------------------------------------------------------
 # Flags (D13).  Gated build: -O3 -march=x86-64-v3 -fno-math-errno, never -ffast-math.
@@ -168,6 +170,13 @@ if(EPYKOS_MUTATIONS)
   target_compile_definitions(epykos PUBLIC EPYKOS_MUTATIONS=1)
   message(STATUS "EpykosEngine: mutants compiled in (EPYKOS_MUTATIONS=ON); EPYKOS_MUTANT=<name> selects one")
 endif()
+# Per-domain profiling (M4/CM's calibration tool, the `profile` preset only): src/exec/interpreter.cpp's
+# ProfileTable / ProfileScope, guarded by #ifdef so a normal build has no trace of it (D45 named the
+# earlier ad hoc -DEPYKOS_EXEC_PROFILE rebuild a simplification; this option makes it reproducible).
+if(EPYKOS_EXEC_PROFILE)
+  target_compile_definitions(epykos PRIVATE EPYKOS_EXEC_PROFILE=1)
+  message(STATUS "EpykosEngine: exec::Interpreter per-domain profiling compiled in (EPYKOS_EXEC_PROFILE=ON) — never a gated or perf-gated build")
+endif()
 target_compile_definitions(epykos PRIVATE
   EPYKOS_BUILD_CONFIG="${CMAKE_BUILD_TYPE}"
   EPYKOS_BUILD_FLAGS="${EPYKOS_CXX_FLAGS}"
@@ -185,4 +194,7 @@ if(EPYKOS_BUILD_TESTS OR EPYKOS_BUILD_BENCH)
 endif()
 if(EPYKOS_BUILD_TESTS)
   add_subdirectory(tests)
+endif()
+if(EPYKOS_BUILD_TOOLS)
+  add_subdirectory(tools)
 endif()

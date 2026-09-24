@@ -48,13 +48,23 @@
       "cacheVariables": {
         "EPYKOS_MUTATIONS": "ON"
       }
+    },
+    {
+      "name": "profile",
+      "displayName": "profile: release flags + EPYKOS_EXEC_PROFILE=ON (tools/costmodel/)",
+      "description": "The release build with exec::Interpreter's per-domain -DEPYKOS_EXEC_PROFILE timers compiled in (D45 named this 'ad hoc, not a checked-in preset' for M3; M4/CM makes it one). Never a gated or measured-for-perf-gate build: the instrumentation adds overhead to every run().",
+      "inherits": "release",
+      "cacheVariables": {
+        "EPYKOS_EXEC_PROFILE": "ON"
+      }
     }
   ],
   "buildPresets": [
     { "name": "release",   "configurePreset": "release" },
     { "name": "reference", "configurePreset": "reference" },
     { "name": "debug",     "configurePreset": "debug" },
-    { "name": "mutation",  "configurePreset": "mutation" }
+    { "name": "mutation",  "configurePreset": "mutation" },
+    { "name": "profile",   "configurePreset": "profile" }
   ],
   "testPresets": [
     {

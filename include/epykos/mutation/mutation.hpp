@@ -68,6 +68,9 @@ inline constexpr std::string_view registry[] = {
     "r5.drop_last_step",             // rewrite::group_formation: the merged group drops the producer's last step when splicing (M4/R-b's own verify_rule gate)
     "fma.wrong_operand",             // rewrite::fma_contraction: fma(a,b,c) built as fma(a,b,b), dropping the Add's real other operand (M4/R-b's own verify_rule gate)
     "fma.drop_remap",                // rewrite::fma_contraction: kept steps after the fused one are not reindexed after the Mul step is removed (M4/R-b's own verify_rule gate)
+    "eg.ad_mode_ignores_cost",       // rewrite::decide_ad_mode: always chooses Reverse regardless of the three priced modes (tests/rewrite/ad_mode_rule_e0_test.cpp)
+    "eg.ad_mode_affine_without_check", // rewrite::decide_ad_mode: marks every block ClosedFormAffine-eligible without checking is_linmap_domain (tests/rewrite/ad_mode_rule_e0_test.cpp)
+    "eg.block_jacobian_wrong_coefficient_index", // adjoint::block_jacobian (ClosedFormAffine): reads a row's coefficient one member off (tests/rewrite/ad_mode_rule_e0_test.cpp)
 };
 inline constexpr std::size_t registry_size = sizeof(registry) / sizeof(registry[0]);
 

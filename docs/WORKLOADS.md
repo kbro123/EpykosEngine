@@ -167,6 +167,9 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   | `r5.drop_last_step` | `group_formation`: the merged group drops the producer's last step when splicing the two step lists together | same gate |
   | `fma.wrong_operand` | `fma_contraction`: builds `fma(a, b, b)` instead of `fma(a, b, c)`, dropping the Add's real other operand | `tests/rewrite/fma_contraction_verify_test.cpp`'s `verify_rule` gate (E1, 4 ulps) |
   | `fma.drop_remap` | `fma_contraction`: kept steps after the fused one keep their pre-removal Step-slot indices | same gate |
+  | `eg.ad_mode_ignores_cost` | `rewrite::decide_ad_mode` (M4/EG): always chooses `AdMode::Reverse` regardless of the three priced modes | `tests/rewrite/ad_mode_rule_e0_test.cpp`'s `ADModeRule.PicksTheCheapestModePerBlock` (a narrow, many-input block where forward must win) |
+  | `eg.ad_mode_affine_without_check` | `rewrite::decide_ad_mode` (M4/EG): marks every block `ClosedFormAffine`-eligible without checking `is_linmap_domain` | same file's `BlockJacobian.ClosedFormAffineRefusesANonAffineBlock` (the consumer's own independent check then throws where the unmutated rule would never have picked that mode) |
+  | `eg.block_jacobian_wrong_coefficient_index` | `adjoint::block_jacobian` (M4/EG, `ClosedFormAffine`): reads a row's coefficient one member off | same file's `BlockJacobian.ClosedFormAffineMatchesReverseExactlyOnALinmapBlock` |
 - **Near-miss shapes** (`include/epykos/fixtures/nearmiss_shapes.hpp`, the gate fixture the mutation harness showed
   was missing, D32): 42 templated shapes over six positive inputs, each an op tree that differs from a neighbour in
   exactly one respect a signature may overlook — a constant on the left or the right of `−` and `/`, a constant in

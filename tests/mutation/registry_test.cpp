@@ -77,6 +77,9 @@ const std::vector<std::string> documented = {
     "r5.drop_last_step",
     "fma.wrong_operand",
     "fma.drop_remap",
+    "eg.ad_mode_ignores_cost",
+    "eg.ad_mode_affine_without_check",
+    "eg.block_jacobian_wrong_coefficient_index",
 };
 
 std::vector<std::string> registry_names() {

@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "epykos/catalogue/kernel.hpp"
 #include "epykos/tape/op.hpp"
 
 namespace epykos::exec::detail {
@@ -253,6 +254,17 @@ struct GroupPlan {
   bool scan = false;
   std::vector<std::int32_t> wave_rows;
   std::vector<std::int32_t> wave_begin;  // waves + 1
+
+  // M4/C1 (docs/PROBLEM.md §7, DESIGN.md §7 tier 1): this domain's op sequence matches a
+  // registered catalogue kernel AND is eligible for it (a plain per-tile Materialize domain —
+  // not fused, not inlined, not a scan; interpreter.cpp's own already-optimised whole-segment
+  // path is deliberately left alone, see catalogue/signature.hpp). false unless
+  // Options::use_catalogue is on and Interpreter::Impl::build_group found and bound a kernel;
+  // run() then calls `cat_kernel` with `cat_binding` over the whole domain instead of walking
+  // `steps` tile by tile.
+  bool catalogued = false;
+  catalogue::Kernel cat_kernel = nullptr;
+  catalogue::DomainBinding cat_binding;
 };
 
 // Evaluates an elementwise group for n rows (r0, idx: see the row modes above) of lane chunk ctx;

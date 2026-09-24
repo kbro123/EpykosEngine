@@ -16,6 +16,9 @@
 #include <string>
 #include <vector>
 
+#include "epykos/catalogue/kernel.hpp"
+#include "epykos/catalogue/registry.hpp"
+#include "epykos/catalogue/signature.hpp"
 #include "epykos/mutation/mutation.hpp"
 #include "epykos/rewrite/planner.hpp"
 #include "epykos/rewrite/planner_rules.hpp"
@@ -187,6 +190,23 @@ struct Interpreter::Impl {
   mutable std::vector<double> values;   // num_values · Lt
   mutable std::vector<double> scratch;  // (max_steps + 3 temporaries + accumulator + member) · tile_elems
   std::vector<GroupPlan> groups;
+  std::size_t cat_groups = 0;    // M4/C1: domains dispatched to a catalogued kernel (groups.size() candidates)
+  std::size_t cat_candidates = 0;  // domains eligible for a catalogue lookup at all (plain Materialize, non-scan)
+  std::size_t cat_rows = 0;      // rows of catalogued domains
+  std::size_t cat_candidate_rows = 0;  // rows of eligible domains
+#ifdef EPYKOS_EXEC_PROFILE
+  // Per-instance timing, independent of the process-wide ProfileTable above (which
+  // scripts/exec_coverage.py and tools/costmodel/fit_main.cpp parse by its own stderr format —
+  // this package adds coverage() without touching either): summed over every run() call this
+  // instance has made, split into catalogued-domain time and everything else.
+  mutable double cat_ns = 0.0;
+  mutable double total_ns = 0.0;
+#endif
+  // Read once, in the constructor (tests/mutation/registry_test.cpp requires exactly one call
+  // site querying the interpreter.tile_boundary mutant under src/): run() reads this flag
+  // instead of querying the selector itself, and build_group's own catalogue-eligibility check
+  // below reads the same flag rather than adding a second call site.
+  bool trim_mutant = false;
   std::vector<char> fused;              // per domain: evaluated inside its consumers' reductions
   std::vector<std::vector<std::int32_t>> keep_rows;  // per fused domain: rows materialised anyway
   std::vector<char> emitted;            // per value: an output written by the reduction block that computes it
@@ -822,6 +842,39 @@ void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
     for (int v = 0; v < n_lane_variants; ++v) g.seg_fn[v] = seg_whole_kernel(v, affine);
     return;
   }
+  // M4/C1 (PROBLEM.md §7, DESIGN.md §7 tier 1): dispatch to a catalogued kernel for a plain
+  // per-tile Materialize domain — not fused into a reduction, not inlined into a consumer's
+  // tiles, not a scan (dom.recurrent; scan's wave scheduling and this Interpreter's own already-
+  // optimised whole-segment path above are deliberately out of this package's scope for the
+  // Interpreter side — see catalogue/signature.hpp's file header; adjoint::Adjoint's forward
+  // pass, which has no such optimisations of its own to disturb, covers both), AND not itself a
+  // consumer that inlines one or more OTHER domains' rows (inline_refs[d] non-empty): the
+  // catalogued kernel's Gather operands always read this Interpreter's own shared `values`
+  // buffer directly (kernel.hpp), but an inline_producers consumer's gather into an inlined
+  // producer is redirected (build_group's own `inline_operand`) to a per-tile temporary that
+  // producer's rows are computed into on the fly — the producer's own slice of `values` is never
+  // written at all (`if (g.inlined_into >= 0) continue;` in run(), below), so a catalogued
+  // kernel reading it directly would read stale or zero-initialised memory. Excluded when the
+  // mutant interpreter.tile_boundary is selected: that mutant corrupts the tiled loop below, and
+  // a domain this hook bypasses would silently stop exercising it, which could hide the mutant
+  // from scripts/mutation_test.sh's gate on any Program where that domain happens to be
+  // catalogued (this package registers its own mutants for its own binding/lookup logic instead
+  // — tests/mutation/registry_test.cpp).
+  if (opt.use_catalogue && !dom.recurrent && !g.fused && g.inlined_into < 0 && inline_refs[d].empty() && !trim_mutant) {
+    const ir::domain_id did = static_cast<ir::domain_id>(d);
+    if (catalogue::is_cataloguable(*p, did)) {
+      ++cat_candidates;
+      cat_candidate_rows += static_cast<std::size_t>(dom.rows);
+      const catalogue::Signature sig = catalogue::signature_of(*p, did);
+      if (const catalogue::Kernel k = catalogue::lookup(sig)) {
+        g.catalogued = true;
+        g.cat_kernel = k;
+        g.cat_binding = catalogue::bind_domain(*p, did);
+        ++cat_groups;
+        cat_rows += static_cast<std::size_t>(dom.rows);
+      }
+    }
+  }
   // Kernel calls: a fused pair where two consecutive steps form a chain nobody else reads
   // (build_pair_step), otherwise one call per step. M4/R0: WHICH steps pair, and which further
   // steps chain on as a tail, is `plan_.group[d]` (planner.fused_pairs / planner.chain_tails) —
@@ -1006,6 +1059,7 @@ Interpreter::Interpreter(const ir::Program& program, Options options) : impl_(st
   im.tile_elems = static_cast<std::size_t>(options.tile) * static_cast<std::size_t>(im.Lt);
   im.values.assign(program.num_values() * static_cast<std::size_t>(im.Lt), 0.0);
   im.groups.resize(program.domains.size());
+  im.trim_mutant = mutant("interpreter.tile_boundary");
   im.build_plan();
   im.decide_fusion();
   im.decide_inline();
@@ -1028,7 +1082,7 @@ void Interpreter::run(const double* state, int B, double* out) const {
   double* values = im.values.data();
   // Mutant interpreter.tile_boundary: the last row of every elementwise tile is skipped (its slot
   // keeps whatever the value buffer held). Constexpr 0 outside the mutation build.
-  const int trim = mutant("interpreter.tile_boundary") ? 1 : 0;
+  const int trim = im.trim_mutant ? 1 : 0;
   const int drop_last_wave = mutant("interpreter.scan_drop_last_wave") ? 1 : 0;
   for (int b0 = 0; b0 < B; b0 += im.Lt) {
     const int L = std::min(im.Lt, B - b0);
@@ -1047,6 +1101,22 @@ void Interpreter::run(const double* state, int B, double* out) const {
     for (const GroupPlan& g : im.groups) {
       double* dom = values + static_cast<std::size_t>(g.value_base) * Ls;
       EPYKOS_EXEC_PROFILE_SCOPE(g.domain);
+#ifdef EPYKOS_EXEC_PROFILE
+      // M4/C1's own per-instance coverage timer (Interpreter::coverage()), independent of the
+      // process-wide ProfileTable above: a RAII object in the loop BODY so every `continue`
+      // below still runs its destructor before the next domain, whatever branch this one took.
+      bool cat_hit = g.catalogued;
+      struct CatTimer {
+        const Impl& im;
+        bool& hit;
+        std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+        ~CatTimer() {
+          const double ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count();
+          im.total_ns += ns;
+          if (hit) im.cat_ns += ns;
+        }
+      } cat_timer{im, cat_hit};
+#endif
       if (g.inlined_into >= 0) continue;   // evaluated per tile of its consumer
       if (g.fused) {
         // Evaluated inside its consumers' reductions; only the kept rows are materialised:
@@ -1091,6 +1161,10 @@ void Interpreter::run(const double* state, int B, double* out) const {
         }
         continue;
       }
+      if (g.catalogued) {
+        g.cat_binding.call(g.cat_kernel, values, g.value_base, 0, g.rows, L);
+        continue;
+      }
       for (int r0 = 0; r0 < g.rows; r0 += tile) {
         const int n = std::min(tile, g.rows - r0) - trim;
         eval_group(g, ctx, r0, nullptr, n, dom + static_cast<std::size_t>(r0) * Ls);
@@ -1102,6 +1176,19 @@ void Interpreter::run(const double* state, int B, double* out) const {
     }
   }
   EPYKOS_EXEC_PROFILE_RUN();
+}
+
+catalogue::Coverage Interpreter::coverage() const noexcept {
+  const Impl& im = *impl_;
+  catalogue::Coverage c;
+  c.groups_total = im.cat_candidates;
+  c.groups_catalogued = im.cat_groups;
+  c.rows_total = im.cat_candidate_rows;
+  c.rows_catalogued = im.cat_rows;
+#ifdef EPYKOS_EXEC_PROFILE
+  if (im.total_ns > 0.0) c.time_fraction = im.cat_ns / im.total_ns;
+#endif
+  return c;
 }
 
 std::string Interpreter::describe() const {

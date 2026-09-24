@@ -34,6 +34,7 @@
 #include <string>
 
 #include "epykos/adjoint/plan.hpp"
+#include "epykos/catalogue/coverage.hpp"
 #include "epykos/ir/program.hpp"
 
 namespace epykos::adjoint {
@@ -42,6 +43,14 @@ struct Options {
   int tile = 256;      // rows per tile of a group's forward / reverse pass
   int max_batch = 64;  // lanes the buffers are sized for; run(B > max_batch) throws
   int lane_tile = 8;   // lanes per chunk (B is split into chunks of at most this many)
+  // M4/C1 (PROBLEM.md §7, DESIGN.md §7 "As built (M4/R0...)": "the reverse of a fused group is
+  // rewrite / catalogue work (M4)"): the forward pass below materialises every domain's rows
+  // unconditionally (unlike exec::Interpreter, Adjoint applies none of the fuse/inline
+  // optimisations of its own), so a catalogued kernel is always a safe drop-in replacement for
+  // ANY catalogue-eligible domain's forward materialisation, whatever this Program's structure —
+  // see adjoint_e0.cpp's forward(). true by default; false disables the lookup entirely (the
+  // differential gate's "registry off" side).
+  bool use_catalogue = true;
 };
 
 class Adjoint {
@@ -75,6 +84,11 @@ class Adjoint {
   std::size_t edge_bytes() const noexcept;    // the gather and segment edge-slot adjoint buffers
   std::size_t scratch_bytes() const noexcept; // per-tile step values, operand loads and step adjoints
   std::size_t table_bytes() const noexcept;   // the plan's tables
+
+  // M4/C1: how much of this Adjoint's own forward materialisation the catalogue serves — by
+  // domain count, by row count, and (built with -DEPYKOS_EXEC_PROFILE, after >= 1 run()) by this
+  // instance's own measured wall-clock time. See include/epykos/catalogue/coverage.hpp.
+  catalogue::Coverage coverage() const noexcept;
 
  private:
   struct Impl;

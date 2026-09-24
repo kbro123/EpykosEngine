@@ -18,7 +18,14 @@
 #include <string>
 #include <vector>
 
+#ifdef EPYKOS_EXEC_PROFILE
+#include <chrono>
+#endif
+
 #include "epykos/adjoint/adjoint.hpp"
+#include "epykos/catalogue/kernel.hpp"
+#include "epykos/catalogue/registry.hpp"
+#include "epykos/catalogue/signature.hpp"
 #include "epykos/mutation/mutation.hpp"
 
 namespace epykos::adjoint {
@@ -61,6 +68,16 @@ struct Ctx {
   bool select_wrong_arm = false;  // adjoint.select_wrong_arm: the adjoint goes to the other arm
   bool recip_rule_sign = false;   // adjoint.recip_rule_sign: abar += (ybar*y)*y instead of -=
   bool scan_forward_order = false;  // adjoint.scan_forward_order: the reverse scan runs forwards
+  // M4/C1: per domain, the catalogued kernel for its signature (registry.hpp), or nullptr — both
+  // arrays sized p->domains.size(), owned by Impl, built once at construction (nullptr
+  // everywhere when Options::use_catalogue is false). forward() below calls the kernel directly
+  // over the WHOLE domain instead of this file's own generic per-step loop.
+  const catalogue::Kernel* cat_kernels = nullptr;
+  const catalogue::DomainBinding* cat_bindings = nullptr;
+#ifdef EPYKOS_EXEC_PROFILE
+  double* cat_ns = nullptr;    // Impl-owned accumulators (this instance only)
+  double* total_ns = nullptr;
+#endif
 };
 
 // ---- flat elementwise kernels over N = n·L contiguous elements (row-major, lane innermost).
@@ -421,6 +438,25 @@ struct Lanes {
       const Group& g = p.groups[d];
       const int last = static_cast<int>(g.steps.size()) - 1;
       double* dom_values = c.values + idx(dom.value_base) * static_cast<size_t>(L);
+#ifdef EPYKOS_EXEC_PROFILE
+      const auto t0 = std::chrono::steady_clock::now();
+#endif
+      // M4/C1 (PROBLEM.md §7; DESIGN.md §7's "the reverse of a fused group is rewrite /
+      // catalogue work (M4)"): this file applies none of exec::Interpreter's fuse/inline
+      // optimisations -- every domain's rows are always materialised here, unconditionally --
+      // so a catalogued kernel is a safe, unconditional replacement for ANY catalogue-eligible
+      // domain, scan included: it writes rows in ascending order into the SAME shared `values`
+      // this loop would have, so a scan's carry (an ordinary Gather into this same domain's
+      // earlier rows) resolves exactly as it would one row at a time.
+      if (c.cat_kernels != nullptr && c.cat_kernels[d] != nullptr) {
+        c.cat_bindings[d].call(c.cat_kernels[d], c.values, dom.value_base, 0, dom.rows, L);
+#ifdef EPYKOS_EXEC_PROFILE
+        const double ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count();
+        *c.total_ns += ns;
+        *c.cat_ns += ns;
+#endif
+        continue;
+      }
       // A scan's rows read earlier rows of the domain through the carry: one row per tile, in
       // row order, so that every operand load sees the previous row's value (D41).
       const int tile = c.plan->domains[d].is_scan ? 1 : c.tile;
@@ -432,6 +468,9 @@ struct Lanes {
           forward_step(c, static_cast<int>(d), g.steps[idx(k)], k, r0, n, y);
         }
       }
+#ifdef EPYKOS_EXEC_PROFILE
+      *c.total_ns += std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count();
+#endif
     }
     if (c.out != nullptr) {
       for (size_t o = 0; o < p.outputs.size(); ++o) {
@@ -545,6 +584,14 @@ struct Adjoint::Impl {
   int Lt = 0;              // lanes the buffers hold: min(lane_tile, max_batch)
   size_t tile_elems = 0;   // tile · Lt
   std::vector<double> values, vbar, gbar, segbar, fs, sbar, ops;
+  // M4/C1: per domain, the catalogued kernel and its binding, or {nullptr, {}} — see forward()
+  // above. Populated once here, in domain order, when opt.use_catalogue is true.
+  std::vector<catalogue::Kernel> cat_kernels;
+  std::vector<catalogue::DomainBinding> cat_bindings;
+  std::size_t cat_candidates = 0, cat_groups = 0, cat_candidate_rows = 0, cat_rows = 0;
+#ifdef EPYKOS_EXEC_PROFILE
+  double cat_ns = 0.0, total_ns = 0.0;
+#endif
 };
 
 Adjoint::Adjoint(const Program& program, Options options) : impl_(std::make_unique<Impl>()) {
@@ -566,6 +613,24 @@ Adjoint::Adjoint(const Program& program, Options options) : impl_(std::make_uniq
   im.fs.assign(steps * im.tile_elems, 0.0);
   im.sbar.assign(steps * im.tile_elems, 0.0);
   im.ops.assign(3 * steps * im.tile_elems, 0.0);
+
+  im.cat_kernels.assign(program.domains.size(), nullptr);
+  im.cat_bindings.resize(program.domains.size());
+  if (options.use_catalogue) {
+    for (std::size_t d = 0; d < program.domains.size(); ++d) {
+      const ir::domain_id did = static_cast<ir::domain_id>(d);
+      if (!catalogue::is_cataloguable(program, did)) continue;
+      ++im.cat_candidates;
+      im.cat_candidate_rows += static_cast<std::size_t>(program.domains[d].rows);
+      const catalogue::Signature sig = catalogue::signature_of(program, did);
+      if (const catalogue::Kernel k = catalogue::lookup(sig)) {
+        im.cat_kernels[d] = k;
+        im.cat_bindings[d] = catalogue::bind_domain(program, did);
+        ++im.cat_groups;
+        im.cat_rows += static_cast<std::size_t>(program.domains[d].rows);
+      }
+    }
+  }
 }
 
 Adjoint::~Adjoint() = default;
@@ -599,6 +664,12 @@ void Adjoint::run(const double* state, int B, const double* out_bar, double* out
   c.select_wrong_arm = mutant("adjoint.select_wrong_arm");
   c.recip_rule_sign = mutant("adjoint.recip_rule_sign");
   c.scan_forward_order = mutant("adjoint.scan_forward_order");
+  c.cat_kernels = m.cat_kernels.empty() ? nullptr : m.cat_kernels.data();
+  c.cat_bindings = m.cat_bindings.empty() ? nullptr : m.cat_bindings.data();
+#ifdef EPYKOS_EXEC_PROFILE
+  c.cat_ns = &m.cat_ns;
+  c.total_ns = &m.total_ns;
+#endif
   for (int b0 = 0; b0 < B; b0 += im.Lt) {
     c.b0 = b0;
     c.L = std::min(im.Lt, B - b0);
@@ -637,5 +708,18 @@ std::size_t Adjoint::scratch_bytes() const noexcept {
   return (impl_->fs.size() + impl_->sbar.size() + impl_->ops.size()) * sizeof(double);
 }
 std::size_t Adjoint::table_bytes() const noexcept { return impl_->plan.table_bytes(); }
+
+catalogue::Coverage Adjoint::coverage() const noexcept {
+  const Impl& im = *impl_;
+  catalogue::Coverage c;
+  c.groups_total = im.cat_candidates;
+  c.groups_catalogued = im.cat_groups;
+  c.rows_total = im.cat_candidate_rows;
+  c.rows_catalogued = im.cat_rows;
+#ifdef EPYKOS_EXEC_PROFILE
+  if (im.total_ns > 0.0) c.time_fraction = im.cat_ns / im.total_ns;
+#endif
+  return c;
+}
 
 }  // namespace epykos::adjoint

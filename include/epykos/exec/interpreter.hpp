@@ -69,6 +69,7 @@
 #include <string>
 #include <vector>
 
+#include "epykos/catalogue/coverage.hpp"
 #include "epykos/ir/program.hpp"
 
 namespace epykos::exec {
@@ -83,6 +84,13 @@ struct Options {
   bool fuse_reductions = true;       // evaluate reduction-only elementwise domains inside the reductions (E0); false: materialise every domain
   bool fuse_pairs = true;            // evaluate two consecutive chained steps in one kernel with the middle value in registers (E0); false: one kernel per step
   bool inline_producers = true;      // evaluate a domain read only through one elementwise domain's gathers inside that domain's tiles (E0); false: materialise it
+  // M4/C1 (PROBLEM.md §7, DESIGN.md §7 tier 1): for a plain per-tile Materialize domain (not
+  // fused, not inlined, not a scan) whose op sequence matches a kernel
+  // include/epykos/catalogue/registry.hpp carries, evaluate it with that kernel instead of the
+  // generic per-step tile loop (E0: same op order, same operand rules, same fold — see
+  // catalogue/kernel.hpp). true by default; false disables the lookup entirely, for the
+  // differential gate's "registry off" side and for a caller that wants the generic path only.
+  bool use_catalogue = true;
 };
 
 class Interpreter {
@@ -115,6 +123,12 @@ class Interpreter {
   std::size_t value_bytes() const noexcept;  // the value buffer, as allocated
   std::size_t scratch_bytes() const noexcept;  // step scratch + operand temporaries + reduction accumulator and member buffers
   std::size_t table_bytes() const noexcept;    // the plan's own index / coefficient tables
+
+  // M4/C1: how much of this Interpreter's own plan the catalogue serves — by domain count, by
+  // row count (an always-available proxy for time) and, when this binary was built with
+  // -DEPYKOS_EXEC_PROFILE and run() has executed at least once, by this instance's own measured
+  // wall-clock time (catalogue::Coverage::time_fraction; -1.0 otherwise). See coverage.hpp.
+  catalogue::Coverage coverage() const noexcept;
 
  private:
   struct Impl;

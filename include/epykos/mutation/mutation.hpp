@@ -71,6 +71,8 @@ inline constexpr std::string_view registry[] = {
     "eg.ad_mode_ignores_cost",       // rewrite::decide_ad_mode: always chooses Reverse regardless of the three priced modes (tests/rewrite/ad_mode_rule_e0_test.cpp)
     "eg.ad_mode_affine_without_check", // rewrite::decide_ad_mode: marks every block ClosedFormAffine-eligible without checking is_linmap_domain (tests/rewrite/ad_mode_rule_e0_test.cpp)
     "eg.block_jacobian_wrong_coefficient_index", // adjoint::block_jacobian (ClosedFormAffine): reads a row's coefficient one member off (tests/rewrite/ad_mode_rule_e0_test.cpp)
+    "catalogue.binding_wrong_operand_order",  // catalogue::bind_domain: a step's operand tables are built visiting b before a, silently transposing the operands of every asymmetric two-input catalogued op (div, sub, ...) (M4/C1's own catalogue on/off e0 gates)
+    "catalogue.signature_ignores_konst",      // catalogue::signature_of: a step's konst slot contributes no shape (or back-reference) to its Signature, so two domains differing only in konst's kind collide onto one signature and the catalogue silently stops matching one of them (M4/C1's own catalogue on/off e0 gates, which require full coverage of their fixtures' candidate domains)
 };
 inline constexpr std::size_t registry_size = sizeof(registry) / sizeof(registry[0]);
 

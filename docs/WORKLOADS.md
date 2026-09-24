@@ -170,6 +170,17 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   | `eg.ad_mode_ignores_cost` | `rewrite::decide_ad_mode` (M4/EG): always chooses `AdMode::Reverse` regardless of the three priced modes | `tests/rewrite/ad_mode_rule_e0_test.cpp`'s `ADModeRule.PicksTheCheapestModePerBlock` (a narrow, many-input block where forward must win) |
   | `eg.ad_mode_affine_without_check` | `rewrite::decide_ad_mode` (M4/EG): marks every block `ClosedFormAffine`-eligible without checking `is_linmap_domain` | same file's `ADModeRule.PicksTheCheapestModePerBlock` (`EXPECT_FALSE(nonlinear_decision.affine_eligible)` on a nonlinear fixture) |
   | `eg.block_jacobian_wrong_coefficient_index` | `adjoint::block_jacobian` (M4/EG, `ClosedFormAffine`): reads a row's coefficient one member off | same file's `BlockJacobian.ClosedFormAffineMatchesReverseExactlyOnALinmapBlock` |
+
+  then the M4/C1 catalogue mutants (`src/catalogue/`), each caught by the catalogue's own on/off `_e0_test.cpp`
+  gates on the M1 book and the Stage A tape (`tests/exec/interpreter_catalogue_e0_test.cpp`,
+  `tests/adjoint/adjoint_catalogue_e0_test.cpp`), which compare `Options::use_catalogue = true` against `= false`
+  bitwise and require every catalogue-eligible domain of both fixtures to be served (`coverage().groups_catalogued
+  == groups_total`):
+
+  | mutant | defect (one line) | exercised by |
+  |---|---|---|
+  | `catalogue.binding_wrong_operand_order` | `bind_domain`: visits a step's `b` operand before `a`, transposing the operand tables of any step whose `a` and `b` are the same slot kind (e.g. `div(gat, gat)`, real on the Stage A tape) | the on/off bitwise comparison: an asymmetric op computed with its operands swapped is a different number |
+  | `catalogue.signature_ignores_konst` | `signature_of`: a step's `konst` slot contributes no shape or back-reference, so two domains differing only in `konst`'s kind (e.g. an `Affine` with a `Literal` vs. a `Column` leading constant) collide onto one `Signature` | the coverage assertion (a domain whose true signature no longer matches the registry's stops being served) |
 - **Near-miss shapes** (`include/epykos/fixtures/nearmiss_shapes.hpp`, the gate fixture the mutation harness showed
   was missing, D32): 42 templated shapes over six positive inputs, each an op tree that differs from a neighbour in
   exactly one respect a signature may overlook — a constant on the left or the right of `−` and `/`, a constant in

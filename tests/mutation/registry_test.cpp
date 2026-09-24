@@ -80,6 +80,8 @@ const std::vector<std::string> documented = {
     "eg.ad_mode_ignores_cost",
     "eg.ad_mode_affine_without_check",
     "eg.block_jacobian_wrong_coefficient_index",
+    "catalogue.binding_wrong_operand_order",
+    "catalogue.signature_ignores_konst",
 };
 
 std::vector<std::string> registry_names() {

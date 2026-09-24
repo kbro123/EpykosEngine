@@ -1432,13 +1432,18 @@ paragraph has the full technical description; this entry adds the findings and t
    header and D50 point 5 said.** `rewrite::ADModePerBlockRule::propose` prices Forward / Reverse /
    ClosedFormAffine by `optimise::estimate_jacobian_ns` and writes the cheapest into `jacobian.mode[name]` —
    but nothing checked that decision until `adjoint::block_jacobian` existed to actually COMPUTE a Jacobian
-   the named way. Two new mutants prove the point: `eg.ad_mode_ignores_cost` (always Reverse) is caught by a
-   synthetic block where forward must win on cost; `eg.ad_mode_affine_without_check` (skips the
-   `is_linmap_domain` eligibility check) is caught not by the RULE's own test but by `block_jacobian`'s own
-   INDEPENDENT re-check of the same predicate — the consumer never trusts the rule's eligibility flag, so a
-   rule that wrongly claims a nonlinear block is affine-derived produces a THROW, not a silently wrong
-   answer, the moment anything tries to actually use the decision (`eg.block_jacobian_wrong_coefficient_index`
-   guards the closed-form path's own arithmetic separately).
+   the named way. Three new mutants, each verified caught directly (the mutation-preset binary run with
+   `EPYKOS_MUTANT` set, exit 1, 2026-09-24 — not merely reasoned about): `eg.ad_mode_ignores_cost` (always
+   Reverse) is caught by a synthetic block where forward must win on cost
+   (`ADModeRule.PicksTheCheapestModePerBlock`); `eg.ad_mode_affine_without_check` (skips the
+   `is_linmap_domain` eligibility check) is caught by that SAME test's own
+   `EXPECT_FALSE(nonlinear_decision.affine_eligible)` on a nonlinear fixture — `block_jacobian`'s own
+   INDEPENDENT re-check of `is_linmap_domain` (never trusting the rule's eligibility flag) is still real
+   defense in depth, exercised separately by `BlockJacobian.ClosedFormAffineRefusesANonAffineBlock`, but
+   an earlier draft of this entry wrongly credited THAT test with catching this specific mutant, which it
+   does not (it forces the mode directly, bypassing `decide_ad_mode` entirely) — corrected here rather than
+   left inaccurate; `eg.block_jacobian_wrong_coefficient_index` guards the closed-form path's own arithmetic
+   separately, caught by `BlockJacobian.ClosedFormAffineMatchesReverseExactlyOnALinmapBlock`.
 2. **ClosedFormAffine is deliberately narrower than R7's own general linmap case.** A linmap's members can be
    Program Inputs directly (the common case this package handles exactly, no evaluation needed at all: a
    linmap's weights ARE its Jacobian) or another domain's computed values (would need THAT domain's own

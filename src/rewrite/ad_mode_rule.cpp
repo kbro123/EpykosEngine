@@ -34,9 +34,9 @@ ADModeDecision decide_ad_mode(const ir::Program& program, const JacobianBlockSpe
   ADModeDecision d;
   // Mutant eg.ad_mode_affine_without_check: skip the structural eligibility check and treat every
   // block as affine-derived, so a genuinely nonlinear block's Jacobian would be built by the
-  // closed-form (constant-coefficient) path and silently mis-differentiated -- caught by
-  // adjoint::block_jacobian's own differential test comparing ClosedFormAffine against Reverse on
-  // a NONLINEAR fixture (see tests/rewrite/ad_mode_rule_e0_test.cpp).
+  // closed-form (constant-coefficient) path and silently mis-differentiated -- caught directly by
+  // ADModeRule.PicksTheCheapestModePerBlock's own `EXPECT_FALSE(nonlinear_decision.affine_eligible)`
+  // on a nonlinear fixture (tests/rewrite/ad_mode_rule_e0_test.cpp; verified caught, 2026-09-24).
   d.affine_eligible = epykos::mutant("eg.ad_mode_affine_without_check") ? true : every_domain_is_linmap(program, block.output_domains);
   d.forward_ns = optimise::estimate_jacobian_ns(one_pass_ns, block.n_inputs, block.n_outputs, optimise::ADMode::Forward, model, adjoint_multiplier);
   d.reverse_ns = optimise::estimate_jacobian_ns(one_pass_ns, block.n_inputs, block.n_outputs, optimise::ADMode::Reverse, model, adjoint_multiplier);

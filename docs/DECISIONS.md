@@ -2219,6 +2219,215 @@ mutants are caught there by `optimise_egraph_saturation_memo_verify_test` and by
 clang. Credit where it belongs: D61's fix, landed immediately before this package, is what turned ubuntu green;
 this entry's change kept it green rather than turning it so.
 
+## D63 — M4/CM fix: the cost model reads the plan the interpreter will run instead of reconstructing it; step pairing and the materialisation decision both get a price (2026-09-24)
+
+*(Numbered D63 by the owner when this work was commissioned; it landed after D64 and D66, which are
+docs-only entries from packages running in parallel. Kept in numeric order here, which is this file's
+convention, rather than in landing order.)*
+
+Owner-directed follow-up to D59's failed M4 exit gate, and to D62's own closing finding that "the candidate set was
+never the binding constraint on M4's failed gate — the cost model's accuracy is". Touches
+`include/epykos/optimise/cost.hpp`, `src/optimise/cost.cpp`, `src/optimise/plan_bridge.cpp`,
+`include/epykos/optimise/plan_bridge.hpp`, `tools/costmodel/` (all three files), one new gate
+(`tests/optimise/cost_step_pairing_verify_test.cpp`), two new mutants, and two corrected tests in
+`tests/optimise/cost_test.cpp`. No rewrite, no exactness class, no adjoint, no interpreter, no catalogue: this
+package changes only what the cost model PREDICTS, never what any program computes.
+
+### 1. The defect, in the code's own words before this entry
+
+`include/epykos/optimise/plan_bridge.hpp` said it outright: "`ir::PlanAnnotations::group` (StepPairing) and
+`::emitted` therefore have no effect on the price this file produces ... A rewrite that changes only step pairing
+looks free to extraction." `optimise::Plan` carried no pairing field at all, and `estimate_domain` charged one
+dispatch per IR STEP rather than per kernel call, so a fused pair cost exactly what its unfused twin cost. The
+consequence is visible in `bench/results/d448afd70180/m4_experiments.json`, experiment `1_rediscovery`: the
+extracted plan had 0 step-pairings against the default plan's 5 and the estimated cost was IDENTICAL (ratio
+exactly 1.0), so extraction's deterministic ascending-id tie-break kept the LESS fused program — measured
+1.081x-1.104x slower in wall clock. The reported 1.0 was an artifact of a tie, not a rediscovery.
+
+### 2. What was built
+
+**(a) Step pairing has a price.** `optimise::DomainPlan` gains `std::vector<ir::StepPairing> pairings` — the
+interpreter's own annotation type, not a parallel one. `optimise::internal_steps` names the steps a run fuses away
+(every step a `StepPairing` covers but its last), `optimise::kernel_calls` counts what the interpreter really
+dispatches, and `estimate_domain` prices two things a fused pair removes: one dispatch per tile (the existing
+`dispatch_ns`, now multiplied by kernel calls instead of IR steps) and the store plus reload of the intermediate
+through the per-step tile scratch (`src/exec/interpreter.cpp`'s `step_buffer`).
+
+**(b) The scratch gets its own coefficient, `intermediate_ns`, not the `byte_ns` ladder.** Sharing `byte_ns` was
+tried first and does not work: the same coefficient prices every materialised domain's value-buffer traffic, and
+the fit resolves the conflict by driving `byte_ns[L1]` to ~0, i.e. by pricing fusion at nothing. They are
+physically different (a buffer streamed once through a tile-sized window, versus a step boundary that costs a
+store, a reload and the register a fused kernel would have kept the value in). `cost_model.json` gains the key;
+a file written before this entry is read with the documented default and a warning, never silently at zero.
+
+**(c) `plan_from_annotations` translates `group` instead of discarding it**, and does so by mirroring
+`exec::Interpreter::Impl::build_plan` + `build_group` exactly, because that is what decides whether a candidate's
+pairings are real: `group.size() == domains.size()` -> those pairings verbatim; the WHOLE annotation `empty()` ->
+`infer_plan`'s, because the interpreter derives its own default plan in that case; anything else -> no pairings at
+all, which is literally what `build_group`'s `if (d < plan_.group.size())` does with such an annotation. That last
+case is experiment 1's extracted plan (history `planner.reduction_fusion` alone), and it is the case that used to
+tie with the fully-paired default.
+
+**(d) `infer_plan` is now `rewrite::planner::default_plan`, not a reproduction of it** — D48 point 6's
+follow-up, completed. This was NOT in the brief; it was found while validating (a), and it is the larger half of
+the entry. Four file-local predicates (`is_reduction_shape`, `is_scan`, `row_fusion_pays`,
+`has_uniform_row_length`) were `infer_plan`'s own copy of `exec/interpreter.cpp`'s `decide_fusion` /
+`decide_inline`; they are deleted. D48 point 2 had already had to correct one of them against measurement once.
+
+**(e) The calibration grid varies step pairing** (`tools/costmodel/calibrate.py`: 15 points -> 21,
+`costmodel_collect --fuse-pairs 0|1`, `--fuse-reductions`, `--inline-producers`). With pairing held constant every
+per-row-per-lane term in this model is collinear with the per-op rates, so `intermediate_ns` would not have been
+identifiable at all — which is exactly the case the brief anticipated. `fit_main` reads each capture's
+`fuse_pairs`, fits the new coefficient, reports the error over the `fuse_pairs=1` subset (D48's original grid, for
+a like-for-like comparison) and prints a step-pairing contrast table: measured off/on against predicted off/on,
+per configuration.
+
+**(f) Measurement discipline, learned the hard way and now enforced by the tool.** The first extended run put
+every `fuse_pairs=True` point first and every `False` point last, and the ~12 minutes of load drift across the run
+landed straight on the contrast the grid exists to measure: Stage A came out 0.65x FASTER with pairing off,
+uniformly across every domain including slot 4095, the output copy, which no interpreter option can touch. Each
+False point is now run IMMEDIATELY after its True twin, and every point records the 1-minute load before and after
+itself. **The 1.29x-1.41x pairing effect that first run appeared to show is not real and is not reported below.**
+
+### 3. Measured (fingerprint `d448afd70180`, Apple clang 21, Xeon W-3223; loads stated per measurement)
+
+**What the interpreter's three planning decisions are actually worth.** `costmodel_collect` at B=1, tile 256,
+lane_tile 8, one knob off at a time, baseline re-measured in the same alternating sequence, 2 repetitions each,
+1-minute load 3.5-4.3 throughout:
+
+| knob off | M1 book | Stage A |
+|---|---|---|
+| `fuse_pairs` | **1.032x** (61.5 -> 63.5 us) | **1.014x** (1583.5 -> 1605.4 us) |
+| `inline_producers` | **1.124x** (61.5 -> 69.1 us) | **0.999x** (no effect) |
+| `fuse_reductions` | **1.618x** (61.5 -> 99.5 us) | **1.066x** (1583.5 -> 1687.5 us) |
+
+A dedicated, alternating 3-repetition A/B of the pairing row alone (load 4.3-4.6, control slot 4095 stable at
+0.61-0.64 us) puts it at **1.021x** (61.36 -> 62.66 us mean). **Step pairing — the mechanism this entry was
+commissioned to price — is the SMALLEST of the three decisions, worth ~2-3% on the M1 book and ~1.4% on Stage A.**
+That is reported first because it bounds everything else here.
+
+**What `infer_plan` believed instead.** On the M1 book the planner folds domain 3 (16,103 rows, keep_rows 37) and
+domain 5 (15,703 rows, keep_rows 25) into the reduction that reads them. `infer_plan`'s own predicates concluded
+"every domain Materialized", and `tests/optimise/cost_test.cpp` pinned that belief
+(`Cost.InferPlanOnM1BookHasNoFusionOrInlining`, now replaced). `tools/costmodel/fit_main.cpp` builds the fit's
+feature matrix from `infer_plan`, so every fit to date asked the solver to explain domain 3's measured 0.29 us
+with a 16,103-row materialised-domain feature vector, and domain 6's 32.91 us without the folded work that is
+actually inside it. The per-domain profile confirms the fold directly: with `fuse_reductions` off, slot 3 goes
+0.29 -> 11.68 us, slot 5 goes 0.33 -> 42.37 us and slot 6 drops 32.91 -> 16.86 us.
+
+**Prediction error, attributable step by step** (mean absolute relative error over every measured domain / over
+domains >= 1% of their config's time; target < 25%, `PROBLEM.md` §7):
+
+| fit | all domains | >= 1% | m1 (all / >=1%) | stage_a (all / >=1%) |
+|---|---|---|---|---|
+| D48 as committed (15 points) | 84.4241% | 69.2692% | 74.3842 / 57.5033 | 86.6718 / 81.0350 |
+| + pairing priced, SAME 15 captures | 84.5094% | 69.3947% | 75.7308 / 57.6598 | 86.4747 / 81.1295 |
+| + pairing contrast in the grid, fresh 21 captures, scratch on `byte_ns` | 83.7205% | 65.5283% | 71.6640 / 54.3719 | 86.6447 / 77.8193 |
+| + `intermediate_ns` as its own coefficient | 82.5795% | 64.6628% | 68.4091 / 53.1499 | 86.0164 / 77.3465 |
+| **+ `infer_plan` = `rewrite::planner::default_plan`** | **74.4688%** | **64.6240%** | 71.9305 / 62.4098 | 75.0845 / 67.0634 |
+
+Scored over the `fuse_pairs=1` captures only, for a like-for-like comparison with D48's own grid: **75.3446% /
+65.0091%**. **The < 25% target is NOT met, and is not close to met.** Row 2 is the important negative result: with
+the grid holding pairing constant, pricing pairing changed the fit by nothing at all, because there was no
+contrast to identify it against.
+
+**Fitted coefficients**, for the record: `dispatch_ns` 23.11 ns (it was 0.90), `byte_ns` [5.74e-3, 9.65e-3, 3, 12]
+(L1 was 2.75e-4), `gather_ns` 0, `reduction_epilogue_ns` 0, `intermediate_ns` 0. Three of the four data-movement
+terms fit to exactly zero — see §5.
+
+**The step-pairing contrast the model now predicts**, against the same measurement:
+
+| config | measured off/on | predicted off/on | share of the effect the model sees |
+|---|---|---|---|
+| `m1 B=1 tile=128` | 1.02925x | 1.01735x | 59.3% |
+| `m1 B=1 tile=256` | 1.01676x | 1.00957x | 57.1% |
+| `m1 B=1 tile=512` | 1.05964x | 1.00538x | 9.0% |
+| `m1 B=64 tile=256` | 1.04638x | 1.00181x | 3.9% |
+| `stage_a B=1 tile=256` | 0.993026x | 1.00603x | 0% (measured effect is negative, i.e. noise) |
+| `stage_a B=64 tile=256` | 0.99811x | 1.00113x | 0% (same) |
+
+Before this entry every row of that table would read `1.000x` predicted, by construction.
+
+### 4. The two experiments the gate turns on, re-run
+
+**Rediscovery (`PROBLEM.md` §7, target within 1.02x of the M1 greedy default plan).** The tie is gone as a
+DEFECT: no candidate lacking the pairings ties with the default any more. What extraction now returns on the M1
+book is the empty root annotation, priced at 283,853 ns, tying the explicit five-rule default plan at the same
+283,853 ns — but those two are the same execution, not two different ones: `exec::Interpreter::Impl::build_plan`
+expands an empty annotation into exactly `rewrite::planner::default_plan`, and `infer_plan` now prices it as
+exactly that. The gate's own estimate-level reading ("no worse than the search space's own default point") holds
+for the right reason. Measured wall clock: see the verification block.
+
+**Stage A search, `tools/egraph_scale/egraph_scale --extract`, E0, lane_tile 8, B=1, tile 256**, extracted
+estimate over the fully-paired default plan's estimate:
+
+| trades | D62 (before) | D63 (after) | extracted history |
+|---|---|---|---|
+| 60 | 0.999707 | **0.996450** | r5 x3, r6.materialise_boundaries, planner.reduction_fusion, planner.fused_pairs |
+| 250 | 0.999583 | **0.995837** | r5 x4, r6, reduction_fusion, fused_pairs |
+| 500 | 0.999459 | **0.995184** | r5 x4, r6, reduction_fusion, fused_pairs |
+| 1,000 | 0.999221 | **0.994132** | r5 x4, r6, reduction_fusion, fused_pairs |
+| 2,000 | 0.999055 | **0.994770** | r5 x2, r6, reduction_fusion, fused_pairs |
+
+The predicted gain grew about sixfold (0.03-0.09% -> 0.35-0.59%) and the winning family CHANGED: `planner.fused_pairs`
+and `r6.materialise_boundaries` are both in the extracted history now and neither was before. **It is still not a
+win.** 0.59% sits an order of magnitude inside the model's own 64.6% error on the domains an optimisation decision
+turns on, there is no wall-clock bench corroborating it, and `PROBLEM.md` §7's cross-stage-win clause is not
+satisfied by it. `cross_stage_wins` stays 0.
+
+### 5. The next binding constraint, named as precisely as the brief named this one
+
+**Every data-movement coefficient in the fitted model is zero or nearly zero, so a rewrite that changes only data
+movement is priced at noise by construction — and R1-R7 are all data-movement rewrites.** `gather_ns` = 0,
+`reduction_epilogue_ns` = 0, `intermediate_ns` = 0, `byte_ns[L1]` = 5.7e-3 ns/byte (0.046 ns per double). The fit
+puts essentially all of a program's predicted time into the per-op rates, because within a domain every other term
+is proportional to rows x lanes and there is nothing in the grid to separate them. `dispatch_ns` is the one
+exception, and only because the grid sweeps `tile`.
+
+The fix is the one this entry demonstrated for pairing, applied to the two decisions that are actually worth
+something: **add `fuse_reductions` and `inline_producers` contrast points to the calibration grid** (the
+`costmodel_collect` flags now exist and the measurements in §3 were taken with them; what remains is teaching
+`fit_main` to build the matching plan for such a capture, which means `infer_plan` taking a
+`DefaultPlanOptions` rather than assuming all-on). Reduction fusion is worth 1.618x on the M1 book and 1.066x on
+Stage A — 20x and 5x the pairing effect this entry priced — and the model currently has no contrast identifying
+the coefficients that would express it.
+
+**A second finding, about the problem rather than the model, and it may matter more.** On the Stage A tape all
+three of the interpreter's planning decisions TOGETHER are worth at most 6.6% (1.066x, and the other two are
+1.014x and 1.000x). Even a perfect plan-level cost model therefore has at most ~6.6% to find on Stage A by
+re-planning. The search's 0.5% is not obviously far from that ceiling. `PROBLEM.md` §7's "at least one cross-stage
+optimisation the greedy pipeline cannot express" may be asking for something the Stage A tape's structure does not
+contain at the plan level at all — the compounding scan dominates its time (D55 measured `exec::Interpreter` at
+9.56% of Stage A's wall clock in the first place), and no amount of materialisation or pairing choice touches
+that. This is a hypothesis with one measurement behind it, labelled as such; the obvious way to test it is the
+same knob-off measurement at the other lane_tiles and on the adjoint path, which this entry did not do.
+
+### 6. Verification
+
+Gate: `tests/optimise/cost_step_pairing_verify_test.cpp`, four tests, run against `CostCoefficients::defaults()`
+and never a fitted file (the property is an ORDERING that must hold for any non-degenerate coefficients, not a
+number for one machine). It pins that `infer_plan` agrees with `rewrite::planner::fused_pairs_plan`; that two
+plans differing ONLY in `ir::StepPairing` price differently and the paired one is cheaper, with the saving in the
+dispatch and intermediate terms and the arithmetic unchanged; that `plan_from_annotations` translates `group`,
+models a non-empty annotation without `group` as unpaired and an empty one as inferred; and that over a saturated
+e-graph EVERY unpaired candidate is strictly more expensive than the cheapest paired one, which is the assertion
+the defect cannot satisfy (under it they all tie exactly). Named `*_verify_test` so
+`scripts/mutation_test.sh`'s gate regex selects it, the precedent D62 set for a search/estimation-level gate.
+
+Two mutants, registered in `mutation.hpp`, `tests/mutation/registry_test.cpp` and `docs/WORKLOADS.md` §M2 per
+D32/D53, one guarded line each: `cost.pairing_unpriced` (dispatch per IR step, scratch at zero — the pre-D63 model
+exactly) and `plan_bridge.discards_group` (`group` dropped on the way to `optimise::Plan`).
+
+Two existing tests were CORRECTED rather than deleted, both because `infer_plan` now returns the interpreter's own
+answer: `Cost.InferPlanOnM1BookHasNoFusionOrInlining` -> `Cost.InferPlanIsThePlannersOwnDecisionOnTheM1Book` (its
+premise, "no domain the planner folds away", is false by 1.618x), and `Cost.UniformAffineProducerCanBeInlined` ->
+`Cost.AFoldedDomainIsNotPricedAsMaterialised` (D48 point 2's property is preserved, at the domain the planner
+really folds: on that fixture the real rule folds domain 0 into domain 1's affine and then declines to inline
+domain 1, `inline_producers_plan`'s own `materialised` test).
+
+Exactness: this package declares none and changes none. It adds no rewrite, so there is no arithmetic to classify
+— the same precedent D49 and D62 set. No `-ffast-math`. No SwapEngine file opened.
+
 ## D64 — Correction to D60: D59's rule fire-counts were right all along; "0/3" meant `M1 book / Stage A`, not `fired / candidates` (2026-09-24)
 
 (D63 is deliberately left free: a concurrent package was told to take it before this entry was written. Numbering

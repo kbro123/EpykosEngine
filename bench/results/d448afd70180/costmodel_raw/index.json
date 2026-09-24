@@ -1,111 +1,219 @@
 {
  "format": "epykos-costmodel-index 1",
  "fingerprint": "d448afd70180",
+ "cores": 16,
+ "load_1min_min": 3.12,
+ "load_1min_max": 5.49,
  "runs": [
   {
    "case": "m1",
    "B": 1,
    "tile": 128,
    "lane_tile": 8,
-   "path": "m1_B1_T128_L8.txt"
+   "fuse_pairs": true,
+   "path": "m1_B1_T128_L8.txt",
+   "load_1min_before": 5.48,
+   "load_1min_after": 5.49
+  },
+  {
+   "case": "m1",
+   "B": 1,
+   "tile": 128,
+   "lane_tile": 8,
+   "fuse_pairs": false,
+   "path": "m1_B1_T128_L8_nopair.txt",
+   "load_1min_before": 5.49,
+   "load_1min_after": 5.36
   },
   {
    "case": "m1",
    "B": 1,
    "tile": 256,
    "lane_tile": 8,
-   "path": "m1_B1_T256_L8.txt"
+   "fuse_pairs": true,
+   "path": "m1_B1_T256_L8.txt",
+   "load_1min_before": 5.36,
+   "load_1min_after": 5.17
+  },
+  {
+   "case": "m1",
+   "B": 1,
+   "tile": 256,
+   "lane_tile": 8,
+   "fuse_pairs": false,
+   "path": "m1_B1_T256_L8_nopair.txt",
+   "load_1min_before": 5.17,
+   "load_1min_after": 5.29
   },
   {
    "case": "m1",
    "B": 1,
    "tile": 512,
    "lane_tile": 8,
-   "path": "m1_B1_T512_L8.txt"
+   "fuse_pairs": true,
+   "path": "m1_B1_T512_L8.txt",
+   "load_1min_before": 5.29,
+   "load_1min_after": 5.27
+  },
+  {
+   "case": "m1",
+   "B": 1,
+   "tile": 512,
+   "lane_tile": 8,
+   "fuse_pairs": false,
+   "path": "m1_B1_T512_L8_nopair.txt",
+   "load_1min_before": 5.27,
+   "load_1min_after": 4.99
   },
   {
    "case": "m1",
    "B": 8,
    "tile": 256,
    "lane_tile": 8,
-   "path": "m1_B8_T256_L8.txt"
+   "fuse_pairs": true,
+   "path": "m1_B8_T256_L8.txt",
+   "load_1min_before": 4.99,
+   "load_1min_after": 4.84
   },
   {
    "case": "m1",
    "B": 64,
    "tile": 256,
    "lane_tile": 1,
-   "path": "m1_B64_T256_L1.txt"
+   "fuse_pairs": true,
+   "path": "m1_B64_T256_L1.txt",
+   "load_1min_before": 4.84,
+   "load_1min_after": 4.22
   },
   {
    "case": "m1",
    "B": 64,
    "tile": 256,
    "lane_tile": 8,
-   "path": "m1_B64_T256_L8.txt"
+   "fuse_pairs": true,
+   "path": "m1_B64_T256_L8.txt",
+   "load_1min_before": 4.22,
+   "load_1min_after": 4.1
+  },
+  {
+   "case": "m1",
+   "B": 64,
+   "tile": 256,
+   "lane_tile": 8,
+   "fuse_pairs": false,
+   "path": "m1_B64_T256_L8_nopair.txt",
+   "load_1min_before": 4.1,
+   "load_1min_after": 3.12
   },
   {
    "case": "m1",
    "B": 64,
    "tile": 256,
    "lane_tile": 16,
-   "path": "m1_B64_T256_L16.txt"
+   "fuse_pairs": true,
+   "path": "m1_B64_T256_L16.txt",
+   "load_1min_before": 3.12,
+   "load_1min_after": 3.29
   },
   {
    "case": "m1",
    "B": 64,
    "tile": 256,
    "lane_tile": 32,
-   "path": "m1_B64_T256_L32.txt"
+   "fuse_pairs": true,
+   "path": "m1_B64_T256_L32.txt",
+   "load_1min_before": 3.29,
+   "load_1min_after": 3.56
   },
   {
    "case": "m1",
    "B": 64,
    "tile": 256,
    "lane_tile": 64,
-   "path": "m1_B64_T256_L64.txt"
+   "fuse_pairs": true,
+   "path": "m1_B64_T256_L64.txt",
+   "load_1min_before": 3.56,
+   "load_1min_after": 3.57
   },
   {
    "case": "stage_a",
    "B": 1,
    "tile": 128,
    "lane_tile": 8,
-   "path": "stage_a_B1_T128_L8.txt"
+   "fuse_pairs": true,
+   "path": "stage_a_B1_T128_L8.txt",
+   "load_1min_before": 3.57,
+   "load_1min_after": 3.78
   },
   {
    "case": "stage_a",
    "B": 1,
    "tile": 256,
    "lane_tile": 8,
-   "path": "stage_a_B1_T256_L8.txt"
+   "fuse_pairs": true,
+   "path": "stage_a_B1_T256_L8.txt",
+   "load_1min_before": 3.78,
+   "load_1min_after": 3.53
+  },
+  {
+   "case": "stage_a",
+   "B": 1,
+   "tile": 256,
+   "lane_tile": 8,
+   "fuse_pairs": false,
+   "path": "stage_a_B1_T256_L8_nopair.txt",
+   "load_1min_before": 3.53,
+   "load_1min_after": 3.26
   },
   {
    "case": "stage_a",
    "B": 1,
    "tile": 512,
    "lane_tile": 8,
-   "path": "stage_a_B1_T512_L8.txt"
+   "fuse_pairs": true,
+   "path": "stage_a_B1_T512_L8.txt",
+   "load_1min_before": 3.26,
+   "load_1min_after": 3.21
   },
   {
    "case": "stage_a",
    "B": 8,
    "tile": 256,
    "lane_tile": 8,
-   "path": "stage_a_B8_T256_L8.txt"
+   "fuse_pairs": true,
+   "path": "stage_a_B8_T256_L8.txt",
+   "load_1min_before": 3.21,
+   "load_1min_after": 3.44
   },
   {
    "case": "stage_a",
    "B": 64,
    "tile": 256,
    "lane_tile": 8,
-   "path": "stage_a_B64_T256_L8.txt"
+   "fuse_pairs": true,
+   "path": "stage_a_B64_T256_L8.txt",
+   "load_1min_before": 3.44,
+   "load_1min_after": 5.48
+  },
+  {
+   "case": "stage_a",
+   "B": 64,
+   "tile": 256,
+   "lane_tile": 8,
+   "fuse_pairs": false,
+   "path": "stage_a_B64_T256_L8_nopair.txt",
+   "load_1min_before": 5.48,
+   "load_1min_after": 5.32
   },
   {
    "case": "stage_a",
    "B": 64,
    "tile": 256,
    "lane_tile": 32,
-   "path": "stage_a_B64_T256_L32.txt"
+   "fuse_pairs": true,
+   "path": "stage_a_B64_T256_L32.txt",
+   "load_1min_before": 5.32,
+   "load_1min_after": 5.01
   }
  ]
 }

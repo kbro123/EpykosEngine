@@ -87,6 +87,8 @@ const std::vector<std::string> documented = {
     "catalogue.signature_ignores_commutativity",
     "eg.memo_ignores_site",
     "eg.refire_blocks_self_chain",
+    "cost.pairing_unpriced",
+    "plan_bridge.discards_group",
 };
 
 std::vector<std::string> registry_names() {

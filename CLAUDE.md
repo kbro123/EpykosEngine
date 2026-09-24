@@ -36,7 +36,16 @@ closed (D62, 2026-09-24)**: `EGraph::saturate` now dedups before it constructs (
 application memo, and only a program class's representative is matched) and carries a re-firing policy, so the full
 2,000-trade / 517,036-node Stage A tape saturates to a real fixpoint in 7 rounds and 3.9 s at 3.1 GB (it had never
 been saturated at all); the search still finds nothing better than noise under the real fitted cost model
-(0.9991x on the full tape), which points at the cost model, not the search. M5
+(0.9991x on the full tape), which points at the cost model, not the search. **The cost model's own largest blind
+spot is closed (D63, 2026-09-24)**: it priced step pairing at exactly zero and reconstructed the interpreter's
+materialisation decision instead of reading it, so every fusion candidate tied with its unfused twin and, on the
+M1 book, the two largest domains were priced as materialised when the planner folds them away. `infer_plan` is now
+`rewrite::planner::default_plan`, pairing is priced, the calibration grid varies it, and the prediction error
+falls 84.4%/69.3% to 74.5%/64.6% — a real improvement, still 3x the <25% target. The Stage A search score
+improves sixfold (0.9991x to 0.9948x on the full tape) and is still noise. D63 also measured, for the first time,
+what the interpreter's three planning decisions are worth: reduction fusion 1.618x (M1) / 1.066x (Stage A),
+inlining 1.124x / 1.000x, step pairing 1.021x / 1.014x — so on Stage A the whole plan-level search has at most
+~6.6% available to it. M5
 onward awaits the owner's decision on this failed exit gate. Nothing merges to `main` without the owner.
 
 ## Rules

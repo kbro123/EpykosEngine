@@ -13,7 +13,22 @@
 // runs), which is a cheap way to check a config parses and the program builds before spending a
 // profile-preset rebuild on it.
 //
+// D63: `--fuse-pairs 0` runs the SAME program with exec::Options::fuse_pairs off (one kernel per
+// step, no chain tails). That contrast is the only thing in the grid that varies step pairing
+// while holding rows, lanes and the op mix fixed, and it is what makes `dispatch_ns` and the
+// byte ladder identifiable against the per-op rates at all: every other feature the model has is
+// proportional to rows x lanes inside a domain, so before this point the fit could not tell an
+// op's cost from the scratch traffic around it (byte_ns[L1] fitted to 2.8e-4 ns/byte, i.e. zero).
+//
+// `--fuse-reductions 0` and `--inline-producers 0` are the same contrast for the interpreter's
+// other two planning knobs. They are NOT in calibrate.py's grid (they change a domain's
+// TREATMENT, which fit_main's plan construction would have to mirror before such a capture could
+// enter a fit); they are here because the D63 pairing contrast immediately raised the question of
+// how much the planner's OTHER decisions are worth on this fingerprint, and that is a question
+// one process per knob answers directly. See D63's "next binding constraint".
+//
 // Usage: costmodel_collect --case m1|stage_a --B N --tile N --lane-tile N [--reps N] [--trades N]
+//                          [--fuse-pairs 0|1] [--fuse-reductions 0|1] [--inline-producers 0|1]
 #include <algorithm>
 #include <cstdlib>
 #include <exception>
@@ -44,11 +59,14 @@ struct Args {
   int lane_tile = 8;
   long reps = 0;    // 0 -> a case-specific default
   int trades = -1;  // stage_a only; -1 = the blueprint's own count
+  bool fuse_pairs = true;         // D63: exec::Options::fuse_pairs
+  bool fuse_reductions = true;    // D63: exec::Options::fuse_reductions
+  bool inline_producers = true;   // D63: exec::Options::inline_producers
 };
 
 [[noreturn]] void usage_error(const std::string& msg) {
   std::cerr << "costmodel_collect: " << msg << "\n"
-            << "usage: costmodel_collect --case m1|stage_a --B N --tile N --lane-tile N [--reps N] [--trades N]\n";
+            << "usage: costmodel_collect --case m1|stage_a --B N --tile N --lane-tile N [--reps N] [--trades N] [--fuse-pairs 0|1] [--fuse-reductions 0|1] [--inline-producers 0|1]\n";
   std::exit(2);
 }
 
@@ -66,6 +84,9 @@ Args parse_args(int argc, char** argv) {
     else if (arg == "--lane-tile") a.lane_tile = std::stoi(next("--lane-tile"));
     else if (arg == "--reps") a.reps = std::stol(next("--reps"));
     else if (arg == "--trades") a.trades = std::stoi(next("--trades"));
+    else if (arg == "--fuse-pairs") a.fuse_pairs = std::stoi(next("--fuse-pairs")) != 0;
+    else if (arg == "--fuse-reductions") a.fuse_reductions = std::stoi(next("--fuse-reductions")) != 0;
+    else if (arg == "--inline-producers") a.inline_producers = std::stoi(next("--inline-producers")) != 0;
     else usage_error("unknown argument '" + arg + "'");
   }
   if (a.case_name != "m1" && a.case_name != "stage_a") usage_error("--case must be m1 or stage_a");
@@ -81,6 +102,9 @@ void run_m1(const Args& a) {
   opt.tile = a.tile;
   opt.lane_tile = a.lane_tile;
   opt.max_batch = a.B;
+  opt.fuse_pairs = a.fuse_pairs;
+  opt.fuse_reductions = a.fuse_reductions;
+  opt.inline_producers = a.inline_producers;
   const exec::Interpreter interp(program, opt);
   const std::vector<double> all = tape.input_values();
   std::vector<double> state(all.size() * static_cast<std::size_t>(a.B));
@@ -90,7 +114,8 @@ void run_m1(const Args& a) {
   std::vector<double> out(static_cast<std::size_t>(program.outputs.size()) * static_cast<std::size_t>(a.B));
   const long reps = a.reps > 0 ? a.reps : 200000;
   std::cerr << "costmodel_collect: case=m1 B=" << a.B << " tile=" << a.tile << " lane_tile=" << a.lane_tile
-            << " domains=" << program.domains.size() << " reps=" << reps << "\n";
+            << " fuse_pairs=" << (a.fuse_pairs ? 1 : 0) << " fuse_reductions=" << (a.fuse_reductions ? 1 : 0)
+            << " inline_producers=" << (a.inline_producers ? 1 : 0) << " domains=" << program.domains.size() << " reps=" << reps << "\n";
   for (long r = 0; r < reps; ++r) interp.run(state.data(), a.B, out.data());
 }
 
@@ -102,6 +127,9 @@ void run_stage_a(const Args& a) {
   solver::ProgramOptions po = fixtures::stage_a_program_options(s, std::max(64, a.B));
   po.interpreter.tile = a.tile;
   po.interpreter.lane_tile = a.lane_tile;
+  po.interpreter.fuse_pairs = a.fuse_pairs;
+  po.interpreter.fuse_reductions = a.fuse_reductions;
+  po.interpreter.inline_producers = a.inline_producers;
   solver::ImplicitProgram prog(t.tape, t.registry, po);
   const std::vector<double> all = t.tape.input_values();  // the record point: quotes, solved knots, diagnostics
   const std::size_t n_in = all.size();
@@ -113,7 +141,8 @@ void run_stage_a(const Args& a) {
   std::vector<double> out(n_out * static_cast<std::size_t>(a.B));
   const long reps = a.reps > 0 ? a.reps : 300;
   std::cerr << "costmodel_collect: case=stage_a B=" << a.B << " tile=" << a.tile << " lane_tile=" << a.lane_tile
-            << " domains=" << prog.program().domains.size() << " reps=" << reps << "\n";
+            << " fuse_pairs=" << (a.fuse_pairs ? 1 : 0) << " fuse_reductions=" << (a.fuse_reductions ? 1 : 0)
+            << " inline_producers=" << (a.inline_producers ? 1 : 0) << " domains=" << prog.program().domains.size() << " reps=" << reps << "\n";
   for (long r = 0; r < reps; ++r) prog.interpreter().run(state.data(), a.B, out.data());
 }
 

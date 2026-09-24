@@ -51,6 +51,7 @@ namespace json = epykos::json;
 struct RunSpec {
   std::string case_name;
   int B = 1, tile = 256, lane_tile = 8;
+  bool fuse_pairs = true;  // D63: the exec::Options::fuse_pairs the capture ran with
   fs::path path;
 };
 
@@ -63,6 +64,7 @@ std::vector<RunSpec> read_index(const fs::path& index_path) {
     s.B = static_cast<int>(r.at("B").as_int());
     s.tile = static_cast<int>(r.at("tile").as_int());
     s.lane_tile = static_cast<int>(r.at("lane_tile").as_int());
+    if (const json::Value* fp = r.find("fuse_pairs")) s.fuse_pairs = fp->as_bool();
     s.path = index_path.parent_path() / r.at("path").as_string();
     specs.push_back(std::move(s));
   }
@@ -126,13 +128,20 @@ const ir::Program& program_for(std::map<std::string, ir::Program>& cache, const 
 }
 
 // Flat coefficient indexing: [0, kOpNsCount) = op_ns[v][op] at v*op_count+op; then byte_ns[0..3];
-// then gather_ns, dispatch_ns, reduction_epilogue_ns. kNumCoeffs total unknowns.
+// then gather_ns, dispatch_ns, reduction_epilogue_ns, intermediate_ns (D63). kNumCoeffs total
+// unknowns. intermediate_ns has data support only when the index contains fuse_pairs=False
+// captures: with pairing constant it is exactly collinear with the per-op rates, and the active-
+// column test below will not notice that (its column is nonzero either way) -- what saves the
+// solve is the ridge term, which leaves an unidentified coefficient at its documented default
+// instead of letting it and op_ns trade off arbitrarily. The report's step-pairing contrast table
+// is where an unidentified one shows up as a predicted ratio of 1.000.
 constexpr int kOpNsCount = optimise::n_lane_variants * epykos::op_count;
 constexpr int kByteNsBase = kOpNsCount;
 constexpr int kGatherNs = kByteNsBase + 4;
 constexpr int kDispatchNs = kGatherNs + 1;
 constexpr int kReductionNs = kDispatchNs + 1;
-constexpr int kNumCoeffs = kReductionNs + 1;
+constexpr int kIntermediateNs = kReductionNs + 1;  // D63
+constexpr int kNumCoeffs = kIntermediateNs + 1;
 
 optimise::CostCoefficients coeffs_from_flat(const std::vector<double>& x) {
   optimise::CostCoefficients c{};
@@ -145,6 +154,7 @@ optimise::CostCoefficients coeffs_from_flat(const std::vector<double>& x) {
   c.gather_ns = x[kGatherNs];
   c.dispatch_ns = x[kDispatchNs];
   c.reduction_epilogue_ns = x[kReductionNs];
+  c.intermediate_ns = x[kIntermediateNs];
   return c;
 }
 
@@ -159,12 +169,14 @@ std::vector<double> flat_from_coeffs(const optimise::CostCoefficients& c) {
   x[static_cast<std::size_t>(kGatherNs)] = c.gather_ns;
   x[static_cast<std::size_t>(kDispatchNs)] = c.dispatch_ns;
   x[static_cast<std::size_t>(kReductionNs)] = c.reduction_epilogue_ns;
+  x[static_cast<std::size_t>(kIntermediateNs)] = c.intermediate_ns;
   return x;
 }
 
 struct Row {
   std::string case_name;
   int B = 0, tile = 0, lane_tile = 0, domain = 0;
+  bool fuse_pairs = true;
   double measured_ns = 0.0;
   std::vector<double> features;  // length kNumCoeffs
 };
@@ -216,7 +228,14 @@ int main(int argc, char** argv) {
     for (const RunSpec& spec : specs) {
       const ir::Program& program = program_for(program_cache, spec.case_name);
       const ParsedProfile prof = parse_profile(spec.path);
-      const optimise::Plan plan = optimise::infer_plan(program, spec.tile, spec.lane_tile);
+      optimise::Plan plan = optimise::infer_plan(program, spec.tile, spec.lane_tile);
+      if (!spec.fuse_pairs) {
+        // D63: the capture ran with exec::Options::fuse_pairs off, so rewrite::planner's two
+        // pairing rules never fired and exec::Interpreter ran one kernel per step. infer_plan
+        // fills the pairings the DEFAULT options would produce; clear them so the features
+        // describe the program this capture actually executed.
+        for (optimise::DomainPlan& dp : plan.domains) dp.pairings.clear();
+      }
       const std::size_t nd = program.domains.size();
 
       std::vector<std::vector<double>> feature_by_domain(nd, std::vector<double>(static_cast<std::size_t>(kNumCoeffs), 0.0));
@@ -236,6 +255,7 @@ int main(int argc, char** argv) {
         row.B = spec.B;
         row.tile = spec.tile;
         row.lane_tile = spec.lane_tile;
+        row.fuse_pairs = spec.fuse_pairs;
         row.domain = md.domain;
         row.measured_ns = md.us * 1000.0;
         row.features = feature_by_domain[static_cast<std::size_t>(md.domain)];
@@ -334,15 +354,39 @@ int main(int argc, char** argv) {
     // are reported so neither the gate number nor "the model is fine really" is one-sided.
     auto config_key = [](const Row& r) {
       std::ostringstream os;
-      os << r.case_name << '|' << r.B << '|' << r.tile << '|' << r.lane_tile;
+      os << r.case_name << '|' << r.B << '|' << r.tile << '|' << r.lane_tile << '|' << (r.fuse_pairs ? 'p' : 'u');
       return os.str();
     };
     std::map<std::string, double> config_total_ns;
     for (const Row& r : rows) config_total_ns[config_key(r)] += r.measured_ns;
 
+    // D63: the step-pairing contrast, config by config. For every (case, B, tile, lane_tile) the
+    // index captured BOTH ways, this is the one number the whole exercise turns on: how much of
+    // the measured fuse_pairs=0 / fuse_pairs=1 slowdown the model predicts. A model that prices
+    // pairing at zero reports 1.000 here whatever the measurement says (that was the state before
+    // D63); a model that prices it correctly reproduces the measured ratio. Anything in between
+    // is the residual, and is reported as such rather than folded into the headline mean.
+    auto pairing_key = [](const Row& r) {
+      std::ostringstream os;
+      os << r.case_name << " B=" << r.B << " tile=" << r.tile << " lane_tile=" << r.lane_tile;
+      return os.str();
+    };
+    struct PairContrast {
+      double measured_paired = 0.0, measured_unpaired = 0.0;
+      double predicted_paired = 0.0, predicted_unpaired = 0.0;
+      bool has_paired = false, has_unpaired = false;
+    };
+    std::map<std::string, PairContrast> contrast;
+
     double sum_rel = 0.0, worst_rel = -1.0;
     double sum_rel_significant = 0.0;
     int n_significant = 0;
+    // D63: the same fitted coefficients, scored over the fuse_pairs=1 rows alone -- the subset
+    // that IS D48's original 15-point grid, so this number is the apples-to-apples comparison
+    // against the 84.4241% that entry reported, with the extra pairs-off captures used for the
+    // FIT but not for the score.
+    double sum_rel_paired = 0.0, sum_rel_paired_significant = 0.0;
+    int n_paired = 0, n_paired_significant = 0;
     std::string worst_desc;
     std::map<std::string, std::pair<double, int>> per_case, per_case_significant;
     for (const Row& r : rows) {
@@ -351,6 +395,18 @@ int main(int argc, char** argv) {
       const double denom = std::max(1.0, std::fabs(r.measured_ns));
       const double rel = std::fabs(pred - r.measured_ns) / denom;
       sum_rel += rel;
+      {
+        PairContrast& pc2 = contrast[pairing_key(r)];
+        if (r.fuse_pairs) {
+          pc2.measured_paired += r.measured_ns;
+          pc2.predicted_paired += pred;
+          pc2.has_paired = true;
+        } else {
+          pc2.measured_unpaired += r.measured_ns;
+          pc2.predicted_unpaired += pred;
+          pc2.has_unpaired = true;
+        }
+      }
       std::pair<double, int>& pc = per_case[r.case_name];
       pc.first += rel;
       pc.second += 1;
@@ -363,10 +419,19 @@ int main(int argc, char** argv) {
         pcs.first += rel;
         pcs.second += 1;
       }
+      if (r.fuse_pairs) {
+        sum_rel_paired += rel;
+        ++n_paired;
+        if (significant) {
+          sum_rel_paired_significant += rel;
+          ++n_paired_significant;
+        }
+      }
       if (rel > worst_rel) {
         worst_rel = rel;
         std::ostringstream os;
-        os << r.case_name << " B=" << r.B << " tile=" << r.tile << " lane_tile=" << r.lane_tile << " domain " << r.domain << " (measured "
+        os << r.case_name << " B=" << r.B << " tile=" << r.tile << " lane_tile=" << r.lane_tile
+           << " fuse_pairs=" << (r.fuse_pairs ? 1 : 0) << " domain " << r.domain << " (measured "
            << (r.measured_ns / 1000.0) << " us, predicted " << (pred / 1000.0) << " us, " << (100.0 * share) << "% of that config's time)";
         worst_desc = os.str();
       }
@@ -383,6 +448,13 @@ int main(int argc, char** argv) {
     report << "**Mean absolute relative error, domains >= 1% of their config's time (" << n_significant << " of " << rows.size()
            << " points — the ones an optimisation decision actually turns on): " << (100.0 * mean_rel_significant) << "%.**\n\n";
     report << "Worst domain (every measured domain, including negligible ones): " << worst_desc << ", relative error " << (100.0 * worst_rel) << "%.\n\n";
+    if (n_paired > 0 && n_paired != static_cast<int>(rows.size())) {
+      report << "Same fitted coefficients, scored over the `fuse_pairs=1` captures ONLY (D48's original grid, for a\n"
+                "like-for-like comparison with the number that entry reported): **" << (100.0 * sum_rel_paired / static_cast<double>(n_paired))
+             << "%** over " << n_paired << " points; **"
+             << (n_paired_significant > 0 ? 100.0 * sum_rel_paired_significant / static_cast<double>(n_paired_significant) : 0.0)
+             << "%** over the " << n_paired_significant << " of them that are >= 1% of their config's time.\n\n";
+    }
     report << "Per case, every domain:\n\n";
     for (const std::pair<const std::string, std::pair<double, int>>& kv : per_case) {
       report << "  * `" << kv.first << "`: mean " << (100.0 * kv.second.first / static_cast<double>(kv.second.second)) << "% over " << kv.second.second
@@ -393,11 +465,38 @@ int main(int argc, char** argv) {
       report << "  * `" << kv.first << "`: mean " << (100.0 * kv.second.first / static_cast<double>(kv.second.second)) << "% over " << kv.second.second
              << " points\n";
     }
+    {
+      bool any = false;
+      for (const std::pair<const std::string, PairContrast>& kv : contrast) {
+        if (kv.second.has_paired && kv.second.has_unpaired) any = true;
+      }
+      if (any) {
+        report << "\n## Step-pairing contrast (D63)\n\n";
+        report << "Measured and predicted whole-config time with `exec::Options::fuse_pairs` off vs on, for every\n"
+                  "configuration the grid captured BOTH ways. `1.000` predicted is what a model that prices step\n"
+                  "pairing at zero reports whatever the measurement says -- the defect D63 fixed. The gap between the\n"
+                  "two ratio columns is the part of the interpreter's own core fusion mechanism the model still does\n"
+                  "not see.\n\n";
+        report << "| config | measured off/on | predicted off/on | model sees |\n|---|---|---|---|\n";
+        for (const std::pair<const std::string, PairContrast>& kv : contrast) {
+          const PairContrast& c = kv.second;
+          if (!c.has_paired || !c.has_unpaired) continue;
+          const double measured_ratio = c.measured_paired > 0.0 ? c.measured_unpaired / c.measured_paired : 0.0;
+          const double predicted_ratio = c.predicted_paired > 0.0 ? c.predicted_unpaired / c.predicted_paired : 0.0;
+          const double seen = (measured_ratio > 1.0) ? 100.0 * (predicted_ratio - 1.0) / (measured_ratio - 1.0) : 0.0;
+          report << "| `" << kv.first << "` | " << measured_ratio << "x | " << predicted_ratio << "x | " << seen << "% |\n";
+        }
+        report << "\n";
+      }
+    }
+
     report << "\nWhat this cannot capture (include/epykos/optimise/cost.hpp's header comment): libm `std::exp` vs "
               "`exp_poly` share one Exp coefficient (fitted for whichever ExpMode the capture used); cache effects "
-              "across domains live at once, not per domain; fused pairs / chain tails are priced as two ops and two "
-              "dispatches; a fused-into-reduction domain's `kept_rows` and an inlined domain's exact re-fetch count "
-              "are approximated from IR structure (infer_plan), not from a live interpreter plan; a domain measuring "
+              "across domains live at once, not per domain; a scan group's fixed-arity three-operand Sum is one "
+              "kernel call here and two in the interpreter (D63 priced fused pairs / chain tails, and deliberately "
+              "left this one); an inlined domain's exact re-fetch count is approximated from IR structure "
+              "(DomainFacts::gather_refs), though the materialisation decision and `kept_rows` are no longer "
+              "approximated at all -- D63's infer_plan calls rewrite::planner::default_plan; a domain measuring "
               "a few tens of nanoseconds is measuring the profiler's own std::chrono calls as much as its own work.\n";
 
     std::cout << report.str();

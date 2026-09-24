@@ -1,0 +1,129 @@
+{
+ "format": "epykos-costmodel-knobs 1",
+ "fingerprint": "d448afd70180",
+ "decision": "D63",
+ "preset": "profile",
+ "tool": "tools/costmodel/costmodel_collect",
+ "note": "Informational only (D9): not a bench/run.sh product, no baseline, no bench/targets.json entry, never compared across fingerprints. What each of exec::Options' three planning knobs is worth on this machine, measured by running the SAME program with that one knob off. Every configuration at B=1, tile 256, lane_tile 8; baseline and knob-off captures run back to back in one alternating sequence so load drift cannot land on the contrast (D63 section 2(f): a first run that did not do this made Stage A look 0.65x FASTER with pairing off, uniformly including slot 4095, the output copy).",
+ "cores": 16,
+ "load_1min_range": [
+  3.49,
+  4.61
+ ],
+ "knob_sweep": {
+  "command": "costmodel_collect --case <case> --B 1 --tile 256 --lane-tile 8 --reps <m1:150000|stage_a:3000> --fuse-pairs/--fuse-reductions/--inline-producers <0|1>",
+  "units": "microseconds per run, summed over every profile slot",
+  "cases": {
+   "m1": {
+    "baseline_us_mean": 61.49,
+    "repetitions": 2,
+    "fuse_pairs_off_us_mean": 63.47,
+    "fuse_pairs_off_over_on": 1.0322,
+    "fuse_reductions_off_us_mean": 99.47,
+    "fuse_reductions_off_over_on": 1.6177,
+    "inline_producers_off_us_mean": 69.13,
+    "inline_producers_off_over_on": 1.1242
+   },
+   "stage_a": {
+    "baseline_us_mean": 1583.53,
+    "repetitions": 2,
+    "fuse_pairs_off_us_mean": 1605.4,
+    "fuse_pairs_off_over_on": 1.0138,
+    "fuse_reductions_off_us_mean": 1687.49,
+    "fuse_reductions_off_over_on": 1.0657,
+    "inline_producers_off_us_mean": 1582.12,
+    "inline_producers_off_over_on": 0.9991
+   }
+  }
+ },
+ "pairing_ab": {
+  "command": "costmodel_collect --case m1 --B 1 --tile 256 --lane-tile 8 --reps 150000 --fuse-pairs <1|0>, alternating, 3 repetitions",
+  "comment": "The dedicated A/B for the one knob D63 was commissioned to price. slot 4095 (the output copy, which no interpreter option can touch) stayed at 0.61-0.64 us across all six captures except one 0.88 us outlier, which is this control's own noise floor.",
+  "fuse_pairs_on_us": [
+   62.46,
+   60.49,
+   61.13
+  ],
+  "fuse_pairs_off_us": [
+   63.35,
+   62.07,
+   62.57
+  ],
+  "mean_on_us": 61.36,
+  "mean_off_us": 62.66,
+  "off_over_on": 1.0212
+ },
+ "stage_a_search_ladder": {
+  "command": "egraph_scale --trades N --rounds 24 --max-program-nodes 100000 --max-plan-nodes 1000000 --extract --fingerprint d448afd70180",
+  "comment": "Extracted estimate over the fully-paired default plan's estimate, E0, B=1, tile 256, lane_tile 8. 'before_D62' is the row D62 committed in egraph_scale.json, measured under the pre-D63 model; 'after_D63' is the same command under this entry's model. Both columns are cost-model ESTIMATES, not wall clock.",
+  "rows": [
+   {
+    "trades": 60,
+    "before_D62": 0.999707,
+    "after_D63": 0.99645,
+    "history": "r5 x3, r6.materialise_boundaries, planner.reduction_fusion, planner.fused_pairs"
+   },
+   {
+    "trades": 250,
+    "before_D62": 0.999583,
+    "after_D63": 0.995837,
+    "history": "r5 x4, r6.materialise_boundaries, planner.reduction_fusion, planner.fused_pairs"
+   },
+   {
+    "trades": 500,
+    "before_D62": 0.999459,
+    "after_D63": 0.995184,
+    "history": "r5 x4, r6.materialise_boundaries, planner.reduction_fusion, planner.fused_pairs"
+   },
+   {
+    "trades": 1000,
+    "before_D62": 0.999221,
+    "after_D63": 0.994132,
+    "history": "r5 x4, r6.materialise_boundaries, planner.reduction_fusion, planner.fused_pairs"
+   },
+   {
+    "trades": 2000,
+    "before_D62": 0.999055,
+    "after_D63": 0.99477,
+    "history": "r5 x2, r6.materialise_boundaries, planner.reduction_fusion, planner.fused_pairs"
+   }
+  ],
+  "verdict": "Still noise: 0.35-0.59% sits an order of magnitude inside the model's own 64.6% mean relative error on the domains an optimisation decision turns on. cross_stage_wins remains 0."
+ },
+ "prediction_error": {
+  "source": "bench/results/d448afd70180/cost_model_validation.md",
+  "comment": "Mean absolute relative error, every measured domain / domains >= 1% of their config's time. Target < 25% (PROBLEM.md section 7). Rows 1-2 share D48's own 15 captures; rows 3-5 use the fresh 21-capture grid, so the 2->3 step mixes the grid change with a new measurement session.",
+  "ladder": [
+   {
+    "fit": "D48 as committed (15 points)",
+    "all": 84.4241,
+    "significant": 69.2692
+   },
+   {
+    "fit": "+ pairing priced, same 15 captures",
+    "all": 84.5094,
+    "significant": 69.3947
+   },
+   {
+    "fit": "+ pairing contrast in the grid, fresh 21 captures, scratch priced on byte_ns",
+    "all": 83.7205,
+    "significant": 65.5283
+   },
+   {
+    "fit": "+ intermediate_ns as its own coefficient",
+    "all": 82.5795,
+    "significant": 64.6628
+   },
+   {
+    "fit": "+ infer_plan = rewrite::planner::default_plan",
+    "all": 74.4688,
+    "significant": 64.624
+   }
+  ],
+  "fuse_pairs_1_subset_only": {
+   "all": 75.3446,
+   "significant": 65.0091
+  },
+  "target_met": false
+ }
+}

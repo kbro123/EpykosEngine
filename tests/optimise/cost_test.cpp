@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -21,6 +22,8 @@
 #include "epykos/fixtures/record_m1.hpp"
 #include "epykos/ir/program.hpp"
 #include "epykos/ir/signature.hpp"
+#include "epykos/rewrite/planner.hpp"
+#include "epykos/rewrite/planner_rules.hpp"
 
 namespace {
 
@@ -173,14 +176,18 @@ TEST(Cost, MaterialisedCostsMoreThanFusedPastL1) {
   EXPECT_GT(materialized.total_ns, fused.total_ns);
 }
 
-// Regression: a whole-domain Affine producer with a UNIFORM member count per row (an
-// interpolation: the same two knots read at every row) is still eligible to be inlined into its
-// one consumer (exec/interpreter.cpp's decide_inline, DESIGN.md §6 R4a/R7) — it is not
-// disqualified just because its own group is a reduction shape. Caught on the Stage A tape's
-// interpolated-DF domain during calibration: treating it as unconditionally Materialized
-// overpriced it by three orders of magnitude (a 16,917-row domain the real interpreter never
-// separately dispatches at all).
-TEST(Cost, UniformAffineProducerCanBeInlined) {
+// D48 point 2's regression, restated for D63. The property that matters is unchanged: a domain
+// the planner FOLDS AWAY must not be priced as if the interpreter dispatched and materialised it
+// (caught on the Stage A tape's interpolated-DF domain during calibration — treating a 16,917-row
+// folded domain as Materialized overpriced it by three orders of magnitude). What changed is who
+// decides which domain that is. Until D63 `infer_plan` re-derived the decision from its own
+// predicates and, on this very fixture, answered "domain 1 is Inlined"; `rewrite::planner`, the
+// rule `exec::Interpreter` actually runs, folds domain 0 into domain 1's affine instead and then
+// declines to inline domain 1 (its segment members now live in a folded domain —
+// inline_producers_plan's own `materialised` test). infer_plan now calls that rule, so the
+// fixture still exercises "a folded domain costs nothing of its own", at the domain the
+// interpreter really folds.
+TEST(Cost, AFoldedDomainIsNotPricedAsMaterialised) {
   const int n = 200;
   ir::Program p;
   ir::Domain input_dom;
@@ -253,27 +260,70 @@ TEST(Cost, UniformAffineProducerCanBeInlined) {
   p.outputs.push_back(2 * n);
 
   // lane_tile 32: row fusion pays only at lane_tile == 1 or >= 16 (exec/interpreter.cpp's
-  // row_fusion_pays; docs/RESUME.md §5 "M3 result" fusion-coverage note) — 8 (the Stage A grid's
-  // own default) would NOT inline here, which is not this test's point.
+  // row_fusion_pays), so the inlining rule runs at all here.
   const optimise::Plan plan = optimise::infer_plan(p, /*tile=*/256, /*lane_tile=*/32);
-  EXPECT_EQ(plan.of(1).treatment, optimise::Treatment::Inlined) << "a uniform-arity affine producer with one consumer should inline";
+  EXPECT_EQ(plan.of(0).treatment, optimise::Treatment::FusedIntoReduction) << "the planner folds domain 0 into domain 1's affine";
+  EXPECT_EQ(plan.of(1).treatment, optimise::Treatment::Materialized);
   EXPECT_EQ(plan.of(2).treatment, optimise::Treatment::Materialized);
 
   const optimise::CostModel model = flat_model();
   const optimise::ProgramCost pc = optimise::estimate_program(p, plan, /*B=*/1, model);
-  EXPECT_DOUBLE_EQ(pc.per_domain_ns[1], 0.0) << "an inlined domain's own slot never gets a dispatch/write/read cost";
+  EXPECT_DOUBLE_EQ(pc.per_domain_ns[0], 0.0) << "a folded domain's own slot never gets a dispatch/write/read cost";
+  EXPECT_GT(pc.per_domain_ns[1], 0.0) << "its work is priced onto the consumer it was folded into";
 }
 
-TEST(Cost, InferPlanOnM1BookHasNoFusionOrInlining) {
-  // The M1 book (D16, DESIGN.md §5) has no scan and, at its size, no domain the planner folds
-  // away either (docs/RESUME.md §5 "M1 result": its own hand-fused-kernel comparison prices
-  // every domain of the generic path). infer_plan should agree: every domain Materialized.
+// D63 (replaces `Cost.InferPlanOnM1BookHasNoFusionOrInlining`, whose premise was measurably
+// false). `infer_plan` must BE `rewrite::planner::default_plan` — the decision
+// exec::Interpreter::Impl::build_plan makes for a Program that carries no plan of its own —
+// translated into this header's vocabulary, not a second implementation of it.
+//
+// What the old test asserted, and why it mattered: it pinned "every domain of the M1 book is
+// Materialized", which is what infer_plan's own predicates concluded. The planner folds domains
+// 3 (16,103 rows) and 5 (15,703 rows) into the reduction that reads them, keeping 37 and 25 rows.
+// Measured on fingerprint d448afd70180 (tools/costmodel/costmodel_collect --fuse-reductions 0,
+// 2 repetitions, load 3.5-4.1): turning that fold off costs the M1 book 1.618x of its whole
+// runtime, 61.5 us -> 99.5 us. The cost model was blind to the largest single decision the
+// interpreter makes, and `tools/costmodel/fit_main.cpp` builds the fit's feature matrix from
+// this very function.
+TEST(Cost, InferPlanIsThePlannersOwnDecisionOnTheM1Book) {
   const epykos::fixtures::Book book = epykos::fixtures::make_m1_book();
   const epykos::Tape tape = epykos::fixtures::record_m1(book);
   const ir::Program program = ir::infer(tape);
-  const optimise::Plan plan = optimise::infer_plan(program, /*tile=*/256, /*lane_tile=*/8);
-  for (const optimise::DomainPlan& dp : plan.domains) {
-    EXPECT_EQ(dp.treatment, optimise::Treatment::Materialized) << "domain " << dp.domain;
+  constexpr int kLaneTile = 8;
+  const optimise::Plan plan = optimise::infer_plan(program, /*tile=*/256, kLaneTile);
+
+  const ir::PlanAnnotations planned = epykos::rewrite::planner::default_plan(
+      program, epykos::rewrite::planner::DefaultPlanOptions{/*fuse_reductions=*/true, /*fuse_pairs=*/true,
+                                                            /*inline_producers=*/true, kLaneTile});
+  ASSERT_EQ(planned.domain.size(), program.domains.size());
+  ASSERT_EQ(planned.group.size(), program.domains.size());
+  for (std::size_t d = 0; d < program.domains.size(); ++d) {
+    const optimise::Treatment expected = [&] {
+      switch (planned.domain[d].choice) {
+        case ir::Materialise::FuseIntoReduction: return optimise::Treatment::FusedIntoReduction;
+        case ir::Materialise::InlineIntoConsumer: return optimise::Treatment::Inlined;
+        default: return optimise::Treatment::Materialized;
+      }
+    }();
+    EXPECT_EQ(plan.domains[d].treatment, expected) << "domain " << d;
+    if (expected == optimise::Treatment::FusedIntoReduction) {
+      EXPECT_EQ(plan.domains[d].kept_rows, planned.domain[d].keep_rows.size()) << "domain " << d;
+    }
+    EXPECT_EQ(plan.domains[d].pairings, planned.group[d].pairings) << "domain " << d;
+  }
+
+  // And the shape that made the old assertion wrong, keyed on structure rather than on the two
+  // domain ids: the book's two largest domains are the ones the planner folds away.
+  std::vector<std::size_t> by_rows(program.domains.size());
+  for (std::size_t d = 0; d < by_rows.size(); ++d) by_rows[d] = d;
+  std::sort(by_rows.begin(), by_rows.end(),
+            [&](std::size_t a, std::size_t b) { return program.domains[a].rows > program.domains[b].rows; });
+  ASSERT_GE(by_rows.size(), 2u);
+  for (int i = 0; i < 2; ++i) {
+    const std::size_t d = by_rows[static_cast<std::size_t>(i)];
+    EXPECT_EQ(plan.domains[d].treatment, optimise::Treatment::FusedIntoReduction)
+        << "domain " << d << " (" << program.domains[d].rows << " rows) is one of the book's two largest and the planner folds it";
+    EXPECT_GT(plan.domains[d].kept_rows, 0u) << "domain " << d << ": the planner keeps some rows; kept_rows must not be the old hard-coded 0";
   }
 }
 

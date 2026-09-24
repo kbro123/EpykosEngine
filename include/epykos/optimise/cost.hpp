@@ -5,9 +5,11 @@
 // M4 package that turns the interpreter's hard-coded planner into a Rule framework) and CM run in
 // parallel (docs/RESUME.md §3: "Order: {R0, CM} -> ...") and neither may depend on the other's
 // deliverable. The same annotation type is therefore also what EG (M4's equality-saturation
-// search) will cost a *candidate* rewritten program against, before any interpreter is built for
-// it: `infer_plan` reproduces the planner's own documented rules from IR structure alone (HARD
-// RULE 9: rules are keyed on IR structure, never a magic number for one fixture).
+// search) costs a *candidate* rewritten program against, before any interpreter is built for it.
+// `infer_plan` fills it by CALLING `rewrite::planner::default_plan` — the interpreter's own
+// decision, not a reproduction of it (D63, completing D48 point 6; before D63 it re-derived the
+// materialisation half from its own predicates and disagreed with the planner about the single
+// largest decision the interpreter makes).
 //
 // What is priced (the package's own list):
 //   - per domain: rows x lanes x (sum of per-op costs), DESIGN.md §7's tile-and-dispatch model;
@@ -21,7 +23,22 @@
 //   - a gather cost per indirect read (Program::gathers; the scan carry is a gather like any
 //     other, DESIGN.md §7, so it is priced the same way, no special case);
 //   - a per-kernel dispatch cost (DESIGN.md §7: "dispatch per op per tile, not per element" —
-//     charged once per (step, tile), not per row);
+//     charged once per (KERNEL CALL, tile), not per row and not per IR step: a run of steps the
+//     plan fuses into one kernel (DomainPlan::pairings, below) is ONE dispatch, D63;
+//   - the store and reload of every INTERMEDIATE step value that is not fused away: the
+//     interpreter writes each non-final step of a group to a per-step tile scratch and reads it
+//     back from there (src/exec/interpreter.cpp's `step_buffer`), and that is exactly the traffic
+//     a fused pair / chain tail removes ("two steps in one kernel, the middle value never
+//     stored"). Its OWN coefficient, `intermediate_ns`, per touch per row per lane, rather than
+//     the `byte_ns` ladder the domain's own value-buffer traffic uses: they are physically
+//     different things (a buffer streamed once through a tile-sized window, versus a step
+//     boundary that costs a store, a reload and the register the fused kernel would have kept the
+//     value in), and sharing one coefficient forces the fit to choose between them. A caveat
+//     worth stating next to the term: on fingerprint d448afd70180 the fit puts `intermediate_ns`
+//     at 0, because the measured effect it exists to explain is small there — three alternating
+//     repetitions of the M1 book at B=1, tile 256, put `exec::Options::fuse_pairs` off at 1.021x
+//     of on, and Stage A at 0.993x-0.998x, i.e. nothing. The term is in the model because the
+//     model should have it; on THIS machine the measurement says it is worth ~0 (D63);
 //   - a reduction epilogue cost per fold step of a whole-domain Sum / Affine (its members, not
 //     its rows: DESIGN.md §6 R5, R7's "segment-sum epilogue");
 //   - the Jacobian block's cost by AD mode (PROBLEM.md §7): forward (n_inputs passes of the
@@ -37,14 +54,12 @@
 //   - cache effects ACROSS domains sharing L1/L2 at once (two small domains each individually
 //     inside L1 can still evict each other): the byte-tier classification here is per domain,
 //     not of the working set of everything live at that point in the plan.
-//   - fused *pairs* and chain tails (exec::Interpreter's fuse_pairs, "two steps in one kernel,
-//     the middle value never stored"): priced here as two ordinary per-op costs plus two kernel
-//     dispatches, which double-counts the dispatch overhead R0's real planner would collapse to
-//     one. A rewrite that changes the fusion of adjacent steps is undercosted as "more expensive
-//     than it will be", never the other way — a safe bias for extraction, not a free one.
-//   - the interpreter's fused-into-reduction "kept rows" (rows also read elsewhere) and the
-//     inliner's exact re-fetch count are approximated from IR structure (DomainFacts::gather_refs,
-//     DomainPlan::kept_rows), not from a live plan; see infer_plan's own comment.
+//   - a scan group's fixed-arity `Sum(a, b, c)` step, which exec::Interpreter builds as TWO Add
+//     kernels through a temporary (src/exec/interpreter.cpp's `is_fixed_sum` branch): still
+//     priced here as one step and one dispatch. D63 left this one alone deliberately.
+//   - the inliner's exact re-fetch count is approximated from IR structure
+//     (DomainFacts::gather_refs), not from a live plan. `kept_rows` no longer is: D63's
+//     infer_plan reads the planner's real `keep_rows`.
 //
 // Exactness class: none (CLAUDE.md's E0/E1 classes are for rewrites that change what a tape
 // computes; this is estimation-only tooling that changes nothing about any recorded program, so
@@ -97,6 +112,15 @@ struct DomainPlan {
   // FusedIntoReduction / Inlined only: the domain(s) this one is folded into. Exactly one for
   // Inlined (the planner requires a single consumer); one or more for FusedIntoReduction.
   std::vector<ir::domain_id> consumers;
+  // D63: which consecutive steps of this domain's group run as ONE kernel call — exec::
+  // Interpreter's fused pairs and chain tails, in the very type the interpreter itself reads
+  // (`ir::PlanAnnotations::group[d].pairings`, ir/annotate.hpp), so a plan that came from a
+  // rewrite::Rule translates across verbatim (plan_bridge.hpp) rather than being re-guessed.
+  // Empty: every step of the group is its own kernel call, exactly as with
+  // `exec::Options::fuse_pairs = false`. Each StepPairing covers `first`, `second` (when >= 0)
+  // and then `tail` in order; every covered step but the LAST one is *internal* — its value
+  // stays in registers, so it costs no scratch store, no reload and no dispatch of its own.
+  std::vector<ir::StepPairing> pairings;
 };
 
 struct Plan {
@@ -123,21 +147,38 @@ struct DomainFacts {
 
 std::vector<DomainFacts> analyze(const ir::Program& program);
 
-// Reproduces the planner's documented rules (DESIGN.md §6 R5/R6, §7; exec/interpreter.cpp's
-// `row_fusion_pays`, `inline_max_refs_per_row` and the "whole-domain Sum/Affine producers inline
-// too, when every row has the same member count" clause of `decide_inline`, restated here as
-// pure IR-structure predicates, HARD RULE 9) to build a first Plan for `program` at the given
-// tile / lane_tile. This is an approximation of the real interpreter's decision in three stated
-// ways: (1) it does not know a domain's `kept_rows` (rows fused into a reduction, or a uniform
-// whole-domain producer inlined into a consumer, that are ALSO read elsewhere) without a second
-// pass it does not perform, so it always returns kept_rows = 0 (every row folded away) — a
-// caller validating against a real Interpreter should overwrite `kept_rows` per domain from
-// DomainFacts::output_rows/gather_readers/segment_readers directly (see cost_test.cpp); (2) it
-// does not model fused pairs / chain tails at all (a per-op cost, not a per-kernel one, see
-// cost.hpp's header comment); (3) it does not split a self-reading class by dependency level —
-// scan-candidate domains that the signature pass could not lay out as a scan (Domain::scan_class
-// but not recurrent) are costed as ordinary Materialized domains, which is what they are.
+// The plan `exec::Interpreter` would build for `program` at this tile / lane_tile if it were
+// handed it with no `ir::PlanAnnotations` attached, translated into this header's vocabulary.
+//
+// It IS that decision, not a reproduction of it (D63, completing D48 point 6): the body calls
+// `rewrite::planner::default_plan` — the same five rules `exec::Interpreter::Impl::build_plan`
+// runs — and maps `ir::Materialise` onto `Treatment`, `DomainPlan::keep_rows` onto `kept_rows`
+// and `GroupPlan::pairings` onto `DomainPlan::pairings`. HARD RULE 9 is satisfied by
+// construction: there is one copy of each rule in the repository and it lives in
+// rewrite/planner.cpp.
+//
+// Until D63 this function re-derived materialisation from its own structural predicates, and on
+// the M1 book those predicates answered "every domain Materialized" while the real planner folds
+// domains 3 and 5 (16,103 and 15,703 rows) into the reduction that reads them — a fold measured
+// at 1.618x of the whole book's runtime on fingerprint d448afd70180. D48 point 2 had already had
+// to correct one of those predicates against measurement once; this removes the second copy
+// rather than correcting it again.
+//
+// What is still approximate, stated: (1) a scan group's fixed-arity three-operand `Sum` is one
+// kernel call here and two in the real interpreter (see this header's own list above); (2) a
+// self-reading class the signature pass could not lay out as a scan (`Domain::scan_class` but
+// not recurrent) is costed as an ordinary Materialized domain, which is what it is.
 Plan infer_plan(const ir::Program& program, int tile, int lane_tile);
+
+// The steps of domain `d`'s group whose value never leaves a register because `pairings` fuses
+// them into the following step (every step a StepPairing covers except that run's last one).
+// Indexed by step; `false` everywhere when `pairings` is empty. Shared by the cost formulas and
+// by their gate test, so "which steps are fused away" has one definition.
+std::vector<std::uint8_t> internal_steps(const ir::Group& group, const std::vector<ir::StepPairing>& pairings);
+
+// Kernel calls the interpreter makes per tile of domain `d` under `plan`: one per step of the
+// group, less one for every step `plan.of(d).pairings` fuses into its successor.
+std::size_t kernel_calls(const ir::Program& program, const Plan& plan, ir::domain_id d);
 
 // ---- coefficients -------------------------------------------------------------------------
 
@@ -152,6 +193,15 @@ struct CostCoefficients {
   double gather_ns = 0.0;                    // ns per indirect read (per row * lane), on top of the op cost
   double dispatch_ns = 0.0;                  // ns per kernel dispatch (one call over one tile / block / wave)
   double reduction_epilogue_ns = 0.0;        // ns per fold step (per member * lane) of a Sum / Affine segment
+  // D63: ns per touch (one store OR one reload of one double) of the per-step tile scratch, per
+  // row per lane. This is what a fused pair / chain tail removes. It is identifiable ONLY from a
+  // grid that varies step pairing (tools/costmodel/calibrate.py's fuse_pairs=False points): with
+  // pairing held constant, every per-row-per-lane term in this model is collinear with the per-op
+  // rates. No cache tier: the scratch is a preallocated tile x lane_tile buffer the interpreter
+  // reuses for every tile of every domain, so it is a throughput cost, not a latency ladder —
+  // stated as a limitation at lane_tile 64, where tile x L x 8 leaves L1 and this single rate
+  // will understate it.
+  double intermediate_ns = 0.0;
   std::size_t l1_bytes = 32 * 1024;
   std::size_t l2_bytes = 1024 * 1024;
   std::size_t l3_bytes = 8 * 1024 * 1024;
@@ -159,8 +209,9 @@ struct CostCoefficients {
   // Documented fallback (labelled an estimate, CLAUDE.md "estimates are labelled"): every op 1 ns
   // per row per lane at every lane width (no vectorisation benefit assumed); byte costs a rough
   // memory-latency ladder at ~3 GHz (0.3 / 1 / 3 / 12 ns per byte for L1 / L2 / L3 / DRAM); 2 ns
-  // per gather; 20 ns per kernel dispatch; 1 ns per reduction fold step. These are plausible
-  // orders of magnitude, not a substitute for the calibration tool's fit (tools/costmodel/).
+  // per gather; 20 ns per kernel dispatch; 1 ns per reduction fold step; 0.3 ns per per-step
+  // scratch touch (one L1 store or reload of one double, ~1 cycle at ~3 GHz — D63). These are
+  // plausible orders of magnitude, not a substitute for the calibration tool's fit (tools/costmodel/).
   static CostCoefficients defaults();
 };
 
@@ -191,9 +242,10 @@ struct DomainCost {
   double write_ns = 0.0;      // bytes this domain writes, once, at its own region's cache tier (Materialized only)
   double read_ns = 0.0;       // bytes read back by every OTHER domain that consumes it (Materialized only)
   double gather_ns = 0.0;     // indirect reads this domain's own steps perform
-  double dispatch_ns = 0.0;   // kernel-dispatch overhead (tiles/blocks/waves x steps)
+  double dispatch_ns = 0.0;   // kernel-dispatch overhead (tiles/blocks/waves x KERNEL CALLS, D63)
+  double intermediate_ns = 0.0;  // D63: store + reload of every step value the plan does NOT fuse away
 
-  double total() const noexcept { return op_ns + write_ns + read_ns + gather_ns + dispatch_ns; }
+  double total() const noexcept { return op_ns + write_ns + read_ns + gather_ns + dispatch_ns + intermediate_ns; }
 };
 
 // One domain's OWN predicted cost at lane width `L` (1 <= L <= 64, the interpreter's chunk

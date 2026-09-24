@@ -193,6 +193,16 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   |---|---|---|
   | `eg.memo_ignores_site` | `EGraph::saturate`'s application memo: a (program node, rule) pair is retired after its FIRST matched site, so every later site of a multi-site rule on that node is never applied | `EGraphSaturationMemo.MemoReachesExactlyTheSameProgramsAndPlansAsNoMemo` (memo on vs memo off must reach the same program contents and the same per-program plan classes) |
   | `eg.refire_blocks_self_chain` | `EGraph::saturate`'s `RefirePolicy`: the re-firing restriction also refuses a rule its OWN output, so a structural rewrite can never chain onto itself (it would drop D54's `r5.group_formation`-applied-twice candidate) | `EGraphSaturationRefire.NoFreshCrossRuleStillLetsARuleChainOntoItsOwnOutput` |
+- **Step pairing has a price** (M4/CM fix, D63): the cost model's own blind spot, in the two places it lived. Before
+  D63 `optimise::Plan` priced per-domain MATERIALISATION only, so a candidate that differed from another ONLY in
+  `ir::PlanAnnotations::group` (exec::Interpreter's fused pairs and chain tails) cost EXACTLY the same, and
+  extraction's ascending-id tie-break decided between them. Both mutants restore that state; both are caught by the
+  same gate, and by nothing else.
+
+  | mutant | defect (one line) | exercised by |
+  |---|---|---|
+  | `cost.pairing_unpriced` | `optimise::estimate_domain`: dispatch counted per IR step instead of per kernel call, and the per-step scratch store/reload charged at zero -- a fused pair costs exactly what its unfused twin costs | `CostStepPairingVerify.PairingIsStrictlyCheaperThanTheIdenticalUnpairedPlan` and `.ExtractionPrefersThePairedCandidateOverEveryUnpairedOne` |
+  | `plan_bridge.discards_group` | `optimise::plan_from_annotations`: `ir::PlanAnnotations::group` is dropped on the way to `optimise::Plan`, so a rewrite that changes only step pairing never reaches the price at all | `CostStepPairingVerify.PlanBridgeTranslatesGroupAndModelsWhatTheInterpreterWouldRun` and `.ExtractionPrefersThePairedCandidateOverEveryUnpairedOne` |
 - **Near-miss shapes** (`include/epykos/fixtures/nearmiss_shapes.hpp`, the gate fixture the mutation harness showed
   was missing, D32): 42 templated shapes over six positive inputs, each an op tree that differs from a neighbour in
   exactly one respect a signature may overlook — a constant on the left or the right of `−` and `/`, a constant in

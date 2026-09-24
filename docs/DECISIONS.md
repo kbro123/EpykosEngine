@@ -2209,6 +2209,16 @@ for EG-core); every candidate it enumerates is still extracted and verified at i
 class, and `tests/optimise/egraph_full_rules_stage_a_test.cpp`'s two record-point checks (including D57's check
 against the TRUE unrewritten tape) pass unchanged. No `-ffast-math`. No SwapEngine file opened.
 
+**CI on the landed commit (`c13c95a`, run
+[36053695426](https://github.com/kbro123/EpykosEngine/actions/runs/36053695426), 2026-09-24): `ci_green` = true,
+all four jobs.** macos-latest/release, ubuntu-latest/release and ubuntu-latest/reference all success, and
+ubuntu-latest/mutation reports "46 mutant(s), 55 gate test(s) ... every mutant caught" on GCC 13 — which settles
+the one thing this package's own pre-rebase sweep could not: the MERGED registry, D61's
+`catalogue.signature_ignores_commutativity` included, is green on the landed tree, and both of this package's own
+mutants are caught there by `optimise_egraph_saturation_memo_verify_test` and by nothing else, exactly as on Apple
+clang. Credit where it belongs: D61's fix, landed immediately before this package, is what turned ubuntu green;
+this entry's change kept it green rather than turning it so.
+
 ## D64 — Correction to D60: D59's rule fire-counts were right all along; "0/3" meant `M1 book / Stage A`, not `fired / candidates` (2026-09-24)
 
 (D63 is deliberately left free: a concurrent package was told to take it before this entry was written. Numbering

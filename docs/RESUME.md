@@ -590,3 +590,31 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   the new ones are caught via a crash rather than a clean assertion failure -- `r1.ignores_last_row` and
   `r2.wrong_run_boundary` abort inside the mutation build rather than failing gracefully, which the harness
   treats as caught per its own stated rule but which a follow-up could still tighten to a clean failure).
+2026-09-24  M4/EG integration  D53: registers R1-R7 + `fma_contraction` + the five planner rules together in one
+  e-graph for the first time, and adds `rewrite::ADModePerBlockRule` + its required consumer
+  `adjoint::block_jacobian` (three new mutants: `eg.ad_mode_ignores_cost`, `eg.ad_mode_affine_without_check`,
+  `eg.block_jacobian_wrong_coefficient_index`; `docs/WORKLOADS.md` §M2) and `rewrite::cross_stage_sharing_guard`
+  wired onto a new, additive `optimise::ExtractOptions::reject` (default `nullptr`: no existing caller's result
+  changes). Four PROBLEM.md §7 experiments (`bench/results/d448afd70180/m4_experiments.json`): (1) REDISCOVERY
+  ties the M1 greedy default at the cost model's own estimate (ratio 1.0) but MISSES the 1.02x measured
+  wall-clock target (1.081x-1.104x measured), traced to the ALREADY-existing `plan_bridge.hpp` gap that
+  `plan.group`/`plan.emitted` are unpriced (D48 point 6's own follow-up), combined with extraction's
+  deterministic tie-break; (2) CROSS-STAGE found one real, record-point-verified win a fixed pipeline cannot
+  express (`r5.group_formation` applied twice, 0.977x) on a small (60-trade) Stage A fixture, but ALSO found
+  that the full rule set does not converge past a few rounds on a Stage-A-shaped program (measured 1.87 GB and
+  still climbing by round 4, killed rather than let it continue) -- this package's most significant finding,
+  left open; the full 2,000-trade tape was not attempted given that trajectory, and the sharing guard was not
+  wired onto Stage A's own real output groups in the time available; (3) AD MODE reproduces Stage A's own
+  already-measured Forward/Reverse choice correctly (fed the real numbers from
+  `bench/results/d448afd70180/stage_a_stage_a.json`, cited not re-derived) under both the M1-calibrated and a
+  freshly measured Stage-A-specific adjoint multiplier (21.33x vs 8.0x), with two now-documented, opposite-
+  cancelling cost-model gaps (reverse misses B=64 batching/chord sharing; forward's `one_pass_ns` proxy
+  understates a wide `Dual<70>` pass by ~13x); (4) E1 EXTRACTION is informational, same root cause as (1). One
+  corrected false alarm reported rather than hidden (full account: D53 point 5): this package's own first
+  CROSS-STAGE attempt read a ball-perturbation NaN as a real `r5.group_formation` bug before tracing it to the
+  known implicit-node-tape trap (`tests/rewrite/record_point_check.hpp`) and fixing the TEST, not the rule. Not
+  reached: sharing a scenario lane's factored Jacobian by select mask, and the IFT product-order choice
+  (materialise `F_z^{-T} z̄` once vs re-solve per output) -- both real `solver::`-level changes judged too risky
+  to land without the time to verify them as thoroughly as the rest of this package. `ctest --preset release`
+  and `--preset reference` green; `scripts/mutation_test.sh` green, every registered mutant caught (exact counts
+  in this package's own landing report). No SwapEngine file opened.

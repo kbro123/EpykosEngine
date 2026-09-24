@@ -379,6 +379,46 @@ package's scope, `RESUME.md` §3's EG row): the AD-mode-per-Jacobian-block rule,
 rules, and reconciling the plan tier's per-node keying onto program-tier CLASSES (flagged, not
 silently assumed, in `egraph.hpp`'s own header comment).
 
+**As built (M4/EG integration, D53):** two new rule families and one extraction-time guard, on top
+of the now-real R1-R7/fma (R-a/R-b/R-c) registered alongside R0's planner rules.
+`rewrite::ADModePerBlockRule` (`include/epykos/rewrite/ad_mode_rule.hpp`) fills the
+`jacobian.mode` slot D47 left empty: given a caller-named `JacobianBlockSpec` (output domains +
+input/output counts — HARD RULE 9, no problem-specific magic inside the rule itself), it prices
+Forward / Reverse / ClosedFormAffine by `optimise::estimate_jacobian_ns` (ClosedFormAffine
+eligible only when every domain is a `rewrite::is_linmap_domain`, R7's own fact) and picks the
+cheapest. Its REQUIRED consumer (R7's own header and D50 point 5: a rule proposing this slot
+"cannot be checked by CLAUDE.md's own gates" without one) is `adjoint::block_jacobian`
+(`include/epykos/adjoint/block_jacobian.hpp`): Reverse via the real `adjoint::Adjoint`, one lane
+per output; Forward via one-sided finite differences of `exec::Interpreter` (a stated stand-in —
+no generic IR-level tangent evaluator exists, RESUME.md's own M3/G5 simplification — priced with
+the cost model's own "n_inputs passes" shape, gated at FD tolerance, never bitwise);
+ClosedFormAffine by reading a linmap's constant Affine coefficients directly (exact, no
+evaluation), scoped to members that are themselves Program Inputs and throwing, not
+mis-differentiating silently, otherwise. `rewrite::cross_stage_sharing_guard`
+(`include/epykos/rewrite/cross_stage_sharing.hpp`) turns `ir::assert_all_shared` into the new
+`optimise::ExtractOptions::reject` predicate (additive, default `nullptr`, no change to any
+existing caller): a candidate program failing it is rejected outright, at every one of its plan
+candidates, the same treatment an exactness overrun already got — PROBLEM.md §7's "a rewrite that
+would split [the shared DF domain] is rejected", literally. The IFT product-order question
+(materialise `F_z^{-T} z̄` once vs re-solve per output) and sharing a scenario lane's factored
+Jacobian by its select mask were NOT reached (see this decision's own experiment notes below);
+flagged as open, not silently dropped.
+
+Experiments (`bench/results/d448afd70180/m4_experiments.json`; full notes in this decision's own
+entry): (1) REDISCOVERY meets the cost-model's own "never worse than the default" bar (ratio
+1.0, tied) but NOT the 1.02x measured-wall-clock target (measured 1.081x-1.104x), traced to
+`plan_bridge.hpp`'s own pre-existing, documented gap (`plan.group` unpriced) combined with
+extraction's tie-break; (2) CROSS-STAGE found one real, verified win the fixed single-pass
+pipeline cannot express (`r5.group_formation` applied twice, 0.977x) on a SMALL Stage A fixture,
+but also found that saturating the FULL rule set past a few rounds grows unboundedly on Stage-A-
+shaped programs (measured: 1.87 GB and still climbing by round 4 on a 60-trade fixture, killed) —
+this package's most significant finding, left for whoever adds a redundancy/subsumption check
+next; (3) AD MODE reproduces Stage A's own already-measured Forward/Reverse choice correctly under
+both the M1-calibrated and Stage-A-measured adjoint multiplier, with two now-documented cost-model
+gaps (reverse's linear-in-outputs formula misses batching/chord sharing; forward's formula
+understates a wide `Dual<N>` pass); (4) E1 EXTRACTION is informational only, same root cause as
+(1).
+
 ---
 
 ## 8. Value-dependent behaviour

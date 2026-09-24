@@ -1415,3 +1415,113 @@ the fire-count as an explicit number in its landing report, zero included; a pac
 fire on the real fixture and cannot state that number has not met its gate. This applies from M4/R-b, R-c, EG, C1
 onward and to the M4 gate/review packages reading this table. R1–R3's own already-correct, already-disclosed
 zero-fire finding stands as recorded in D52 and is not reopened by this entry.
+
+## D53 — M4/EG integration: AD-mode-per-block rule + its required consumer, a cross-stage-sharing extraction guard, the four PROBLEM.md §7 experiments, and one significant scaling finding (2026-09-24)
+
+Registers R1-R7, `fma_contraction` and the five planner rules together in one e-graph (D47-D52 landed each
+separately; this package is the first to run them all at once) and adds the two rule families PROBLEM.md §7
+names as M4/EG's own scope beyond EG-core (D49): AD mode per Jacobian block, and cross-stage sharing.
+`include/epykos/rewrite/ad_mode_rule.hpp`/`.cpp`, `include/epykos/adjoint/block_jacobian.hpp`/`.cpp`,
+`include/epykos/rewrite/cross_stage_sharing.hpp`/`.cpp`, an additive extension of
+`include/epykos/optimise/extract.hpp` (`ExtractOptions::reject`, `ExtractResult::candidates_rejected_guard`,
+default `nullptr` / `0`: no existing caller's result changes), and four experiment files under
+`tests/optimise/` and `bench/optimise/` (`docs/DESIGN.md` §7's own "As built (M4/EG integration, D53)"
+paragraph has the full technical description; this entry adds the findings and their evidence).
+
+1. **`jacobian.mode` needed a REAL consumer before a rule populating it meant anything, exactly as R7's own
+   header and D50 point 5 said.** `rewrite::ADModePerBlockRule::propose` prices Forward / Reverse /
+   ClosedFormAffine by `optimise::estimate_jacobian_ns` and writes the cheapest into `jacobian.mode[name]` —
+   but nothing checked that decision until `adjoint::block_jacobian` existed to actually COMPUTE a Jacobian
+   the named way. Two new mutants prove the point: `eg.ad_mode_ignores_cost` (always Reverse) is caught by a
+   synthetic block where forward must win on cost; `eg.ad_mode_affine_without_check` (skips the
+   `is_linmap_domain` eligibility check) is caught not by the RULE's own test but by `block_jacobian`'s own
+   INDEPENDENT re-check of the same predicate — the consumer never trusts the rule's eligibility flag, so a
+   rule that wrongly claims a nonlinear block is affine-derived produces a THROW, not a silently wrong
+   answer, the moment anything tries to actually use the decision (`eg.block_jacobian_wrong_coefficient_index`
+   guards the closed-form path's own arithmetic separately).
+2. **ClosedFormAffine is deliberately narrower than R7's own general linmap case.** A linmap's members can be
+   Program Inputs directly (the common case this package handles exactly, no evaluation needed at all: a
+   linmap's weights ARE its Jacobian) or another domain's computed values (would need THAT domain's own
+   Jacobian chained in first). `block_jacobian` throws `std::invalid_argument` on the second case rather than
+   silently truncating the chain — a stated scope limit, not a bug budget spent elsewhere.
+3. **Cross-stage sharing is a REJECT, not a rule**, because rules only ever ADD e-graph candidates (D47's own
+   "produce the alternative without discarding the original") — nothing else in the framework can say no to
+   one once proposed. `rewrite::cross_stage_sharing_guard(groups, op)` wraps `ir::sharing`/`assert_all_shared`
+   (M3/G4's own gate machinery, unchanged) as the new `ExtractOptions::reject` predicate; a synthetic
+   split-vs-shared pair (`tests/optimise/extract_cross_stage_sharing_test.cpp`) proves it changes extraction's
+   actual OUTCOME (the split candidate, though a real e-graph candidate and cheaper-or-not on its own terms,
+   is never extractable once the guard is set) rather than merely existing unused. `output_groups` are ordinal
+   lists, fixed once against the ROOT program and reused unchanged against every rewritten candidate — R1-R7's
+   own contract (structural rewrites renumber domains and values but never reorder or drop an output ordinal)
+   is what makes that safe, stated explicitly in the header rather than assumed.
+4. **Four experiments, `bench/results/d448afd70180/m4_experiments.json`:**
+   - **(1) REDISCOVERY** (M1 book, full rule set, extract at E0 vs the M1 greedy default): ties the default at
+     the COST MODEL's own estimate (ratio 1.0 — extraction can never do worse than a point already in its own
+     search space) but MISSES the 1.02x measured-wall-clock target: 1.104x at B=1, 1.081x at B=64
+     (`bench/results/d448afd70180/optimise_egraph_full_rules_m1.json`). Root cause, traced and reported rather
+     than left as a mystery: the extracted plan's `PlanAnnotations::group` is EMPTY (0 step-pairings) against
+     the default's 5, because `optimise::plan_bridge.hpp`'s own header (pre-existing, D48 point 6) already
+     documents that `group`/`emitted` "have no effect on the price this file produces" — so a cost-tied
+     candidate lacking fused-pairs/chain-tails is indistinguishable from the fully-fused one at extraction
+     time, and the deterministic ascending-id tie-break happens to keep the shorter (unfused) history. This is
+     a real gap in the ALREADY-LANDED cost model, not a defect this package introduced; closing it (pricing
+     `group`/`emitted`, D48 point 6's own follow-up list) is left for whoever picks it up next.
+   - **(2) CROSS-STAGE** (a small, 60-trade Stage A fixture — the full 2,000-trade tape was not attempted, see
+     below): found ONE real, verified win the fixed single-pass pipeline cannot express —
+     `r5.group_formation` applied twice in sequence (once onto its own prior output) plus
+     `planner.reduction_fusion`, 0.977x the M1-shaped default's own estimated cost, bit-identical to the
+     unannotated program at the tape's exact record point (a perturbation ball is the WRONG check on an
+     implicit-node tape's quotes, `tests/rewrite/record_point_check.hpp`'s own established reason — this
+     package's own first attempt used a ball, saw a "ref nan" differential failure, and correctly traced it to
+     that, not to a real defect in `r5.group_formation`, before landing the record-point version). SIGNIFICANT
+     NEGATIVE FINDING: saturating this SAME 60-trade fixture to the bound `egraph_full_rules_m1_test.cpp` uses
+     for the M1 book (24 iterations, 2000 program nodes) does not converge — round 2 alone (five structural
+     rules firing at once: `r1`, `r2`, `r5`, `r6`, `r7`, vs zero-to-one on the M1 book, D49-D52's own numbers)
+     already produces 39 distinct program nodes in 4.4s; by round 4, measured directly, the process held 1.87
+     GB resident and was still climbing, with no sign of a fixpoint (killed rather than let it continue). Root
+     cause as far as this package traced it without adding a fix of its own: `EGraph::saturate` matches every
+     rule against every node discovered so far, every round (`egraph.hpp`'s own documented BFS shape) — a
+     design that is fine when structural rules rarely fire or fire once, but has no redundancy/subsumption
+     check (D12: no external e-graph library) to stop the candidate set growing combinatorially once several
+     fire at once and can re-match each other's own output. The full 517,036-node Stage A tape was NOT
+     attempted given this trajectory — extrapolating from the 60-trade fixture's own growth, it would very
+     plausibly exhaust memory before converging. This package's own `rewrite::cross_stage_sharing_guard` was
+     NOT wired onto Stage A's real residual/book output-ordinal groups (deriving those exactly needs the O1/O2
+     layout the G5/G6 gate tests' own helpers compute, not extracted into reusable form in the time available)
+     and `ADModePerBlockRule` was not run against Stage A's live `ImplicitRegistry` — see (3).
+   - **(3) AD MODE**: fed `optimise::estimate_jacobian_ns` the REAL numbers already committed for this
+     fingerprint (`bench/results/d448afd70180/stage_a_stage_a.json`, commit `cc23459`, M3/G6's own baseline)
+     rather than re-recording Stage A. Book-only (n_outputs=1): the rule picks Reverse under both the
+     M1-calibrated default multiplier (8.0) and Stage A's OWN measured one (32.6ms / 1.53ms = 21.33x — a
+     materially different ratio from the M1 book's, reported rather than silently reused across fixtures, D9).
+     Full ladder (n_outputs=2,043 = 2,000 trades + book + 42 aggregates): the rule picks Forward under both,
+     matching RESUME.md's own already-reported 6.2-6.3x fact. Two cost-model gaps found and stated, both
+     biasing the SAME direction (making forward look closer to reverse than reality, never the other way):
+     reverse's `one_pass_ns × adjoint_multiplier × n_outputs` is linear and cannot see Stage A's real B=64
+     batching / chord-policy Jacobian sharing (overstates reverse's true cost at scale by ~7.6x); forward's
+     `one_pass_ns × n_inputs`, fed a PLAIN double interpreter's `one_pass_ns`, understates the real `Dual<70>`
+     forward ladder (one wide pass, itself O(70) per op, plus the Newton solve) by ~12.8x.
+   - **(4) E1 EXTRACTION** (M1 sub-book, `exp_poly`, informational vs `bench/hand`'s v0): extraction at E1
+     (making `fma_contraction` / `R4bSharedReciprocal` eligible) reaches the SAME plan as (1)'s E0 result on
+     this fixture; passes `verify::Tolerance::e1()`. Measured 1.188x / 1.615x against the already-committed
+     hand-v0 numbers (`bench/results/d448afd70180/hand_m1_hand.json`) — the same root cause as (1).
+5. **Report honestly (CLAUDE.md, HARD RULE 10): this package's own first attempt at experiment (2) reported a
+   FALSE positive defect.** Comparing the extracted Stage A candidate with `rewrite::verify_annotations`'s
+   default ball-based options produced "differential E0: ... ref nan vs -0.0207 ... FAIL", which briefly read
+   as a real correctness bug in doubly-applied `r5.group_formation`. It was not: perturbing an implicit-node
+   tape's quotes without re-solving the calibration (exactly the failure mode `tests/rewrite/
+   record_point_check.hpp` was written to avoid, D51/D52's own precedent) walks the book off its calibrated
+   point and into `log`/`sqrt`'s undefined region regardless of which rewrite is being checked. Switching to
+   `compare_at_record_point` (no ball, the tape's own record-point `input_values`) made both tests pass. Kept
+   here as the record of a wrong intermediate conclusion corrected before landing, not smoothed away.
+
+Not reached, stated rather than silently dropped (RESUME.md §3's own EG-row items): sharing a scenario lane's
+factored calibration Jacobian across lanes whose select masks agree, and choosing the IFT product order
+(materialise `F_z^{-T} z̄` once vs re-solve per output) by cost. Both are real solver::-level changes
+(`ImplicitProgram`'s per-lane loop, `solver::Factors`) this package judged too risky to land without the time
+to verify them as thoroughly as the rest of this entry — landing a subtly wrong optimisation into
+correctness-critical, already-gated numerical code is a worse outcome than not landing it at all.
+
+Verification (fingerprint d448afd70180): `ctest --preset release` and `--preset reference` both green (see this
+package's own landing report for the exact count); `scripts/mutation_test.sh` green, every registered mutant
+caught including the three new ones. No SwapEngine file opened.

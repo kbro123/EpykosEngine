@@ -268,6 +268,23 @@ The adjoint runs a scan's forward one row per tile in row order and its reverse 
 carry's edge slot (carry, r + 1) is one of row r's readers, so the reverse scan is the ordinary pull. Bits are
 independent of B, tile and lane tile as for every other domain (the scan fixtures' E0 gates).
 
+**As built (M4/R0, D47):** the tiled interpreter's own planning — which domain materialises, folds into a
+reduction or inlines into a consumer's tiles; which consecutive steps run as one fused-pair kernel and which
+further steps chain on as a tail; which output rows a reduction block emits directly — is no longer decided inside
+`exec::Interpreter`'s constructor. Five pure functions of the domain IR (`rewrite::planner::reduction_fusion_plan`,
+`fused_pairs_plan`, `chain_tails_plan`, `inline_producers_plan`, `emit_outputs_plan`, `include/epykos/rewrite/
+planner.hpp`) compute exactly what `decide_fusion` / `decide_inline` / the fused-pair loop computed before this
+package, wrapped as `rewrite::Rule` objects (`planner.reduction_fusion` etc., `planner_rules.hpp`) that write an
+`ir::PlanAnnotations` (`ir/annotate.hpp`) rather than deciding for one Interpreter alone; `exec::Interpreter` reads
+that plan (a caller's `program.plan`, or its own default pass over `Options` — PROBLEM.md §7's "Options flags keep
+working by selecting the greedy pass") instead. The default plan is bit-identical and time-identical to the one
+before this package (`tests/rewrite/planner_rules_m1_e0_test.cpp`; the M1 gates re-run unchanged). `rewrite::Rule`
+(`include/epykos/rewrite/rule.hpp`) is the interface DESIGN.md §6's own R1-R7 will implement: a matcher over the
+IR plus the annotations decided so far, and a constructor of the rewritten form (a Program, for a structural
+rewrite; a `PlanAnnotations` delta, for a planning decision), usable both as a greedy pass (`rewrite/greedy.hpp`)
+and, unbuilt, as an e-graph (M4/EG): "produce the alternative without discarding the original" is the contract's
+own words, not this package's implementation of one.
+
 ---
 
 ## 8. Value-dependent behaviour

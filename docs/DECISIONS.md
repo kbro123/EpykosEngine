@@ -899,3 +899,77 @@ path outside `build/<preset>/` — which disappeared building into the standard 
 directories D13 names); `scripts/mutation_test.sh` on GCC 13 in Docker, all registered mutants caught against the
 40-test gate set (D33's regex), matching `RESUME.md`'s existing M3 mutation count. No engine, maths or kernel code
 changed; no gate weakened; no new dependency; no `-ffast-math`.
+
+## D47 — M4/R0: the Rule interface (match/propose over Program + PlanAnnotations), Program's plan
+annotations excluded from its identity, the M1 planner re-expressed as rules (2026-09-24)
+Implements `PROBLEM.md` §7 / `RESUME.md` §3's R0 package. A `rewrite::Rule` (`include/epykos/rewrite/rule.hpp`) is
+a name, an exactness class (D8), `match(program, plan) -> vector<MatchSite>` and
+`propose(program, plan, site) -> Proposal`, where `Proposal` holds EITHER a rewritten `ir::Program` (a structural
+rewrite: R1-R7) OR a `PlanAnnotations` delta to be merged, never mutating its inputs. This one interface serves
+both a GREEDY pass (`rewrite::apply_greedy` / `run_pipeline`, `include/epykos/rewrite/greedy.hpp`: fold the
+Proposal onto a live program/plan and move on — "discard the original, keep the rewrite") and an e-graph driver
+(M4/EG, unbuilt: keep the original and the Proposal as siblings of one e-class — "produce the alternative without
+discarding the original", this package's own brief); `rewrite/rule.hpp` documents the contract for both, EG
+implements neither itself (D12: no external e-graph library, EG writes its own on top of this interface).
+
+`ir::Program` gains a `plan` field (`ir::PlanAnnotations`, `include/epykos/ir/annotate.hpp`): per-domain
+materialisation choice (materialise / fuse-into-reduction / inline-into-consumer, with the fused domain's kept
+rows or the inlined domain's consumer), fused-pair / chain-tail step groupings, emitted-output flags, and a
+per-Jacobian-block AD-mode slot (forward / reverse / closed-form-affine; unpopulated and unread by anything in
+this package — M4/EG's cost-model rule is the first consumer). `PlanAnnotations::operator==` is unconditionally
+`true` and neither `ir::serialize` nor `ir::deserialize` touch `plan`: it is EXCLUDED from a Program's identity
+by design, for three reasons recorded in `annotate.hpp`'s own header comment — round-trip identity (D10) is a
+property of the recording, not of a plan for one execution of it; a materialisation choice is Options-dependent
+(`row_fusion_pays(lane_tile)`, unmoved from before this package); and `exec::Interpreter` / `adjoint::Adjoint`
+take `const ir::Program&` without owning it, so two Interpreters over the SAME Program at different lane tiles
+(the M1 bench's B=1 / B=64 points) must never see each other's decisions. `Rule::match` / `propose` therefore
+take the running `PlanAnnotations` as an explicit parameter rather than reading `program.plan`, so a multi-rule
+pipeline never has to copy a Stage-A-sized (517,036-node) Program between rules purely to let each one see the
+last one's annotations.
+
+The M1 planner's five decisions (`Interpreter::Impl::decide_fusion`, `decide_inline`, and the shape tests inside
+`build_pair_step` / `add_tail_step`, all `src/exec/interpreter.cpp` before this commit) are now pure functions in
+`include/epykos/rewrite/planner.hpp` / `src/rewrite/planner.cpp` — `is_whole_segment`, `row_fusion_pays`,
+`reduction_fusion_plan`, `emit_outputs_plan`, `inline_producers_plan`, `match_pair`, `match_tail`,
+`fused_pairs_plan`, `chain_tails_plan` — wrapped one-to-one as `rewrite::planner::{ReductionFusionRule,
+FusedPairsRule, ChainTailsRule, InlineProducersRule, EmitOutputsRule}` (`planner_rules.hpp`/`.cpp`), named
+`planner.reduction_fusion` / `planner.fused_pairs` / `planner.chain_tails` / `planner.inline_producers` /
+`planner.emit_outputs`, run in that fixed dependency order by `DefaultPlanner` (a rule's Options flag off ->
+an `OffRule` in its slot, an identity no-op, reproducing `if (opt.fuse_reductions) ...`'s old skip exactly).
+`exec::Interpreter`'s constructor now calls `build_plan()` once (uses `program.plan` verbatim if the caller set
+it, otherwise `rewrite::planner::default_plan(program, options-derived)` into its OWN copy, never written back to
+`*p`) and `decide_fusion` / `decide_inline` / the per-step loop of `build_group` become thin readers of that
+plan; `build_pair_step` / `add_tail_step` (renamed `apply_tail`) keep only the kernel-selection half (resolving
+`ir::Slot`s to `exec::detail::Operand`s and looking up `KernelTable` entries), calling `match_pair` / `match_tail`
+for the shape a confirmed annotation names, so there is exactly one implementation of every shape test shared by
+the rule objects and the interpreter — no way for them to disagree. `adjoint::Adjoint` is unchanged: it has no
+materialisation decision to extract (D31 — every row value is already kept, none of the interpreter's fusions
+apply in reverse), so nothing in R0 touches it beyond the shared `PlanAnnotations` schema its Jacobian-block slot
+lives in for a later package.
+
+`ReductionFusionParams::emit_min_bytes` exists on the FUSION rule, not only the emit rule, because
+`decide_fusion`'s own keep-row computation was never independent of the emit byte-size gate: an output row that
+cannot be emitted (its domain's region under `emit_min_bytes` at the interpreter's own lane tile) must be kept
+materialised, or a fused-but-unemitted row is written nowhere — a real, deliberately-introduced-then-caught
+regression during this package's own development (`tests/exec/interp_e0_test.cpp`'s
+`HandBuiltProgramSumFallbackConstAndAffine` and `MiniBookWithSelectMatchesReplay` both failed with output stuck
+at bit pattern 0 the first time the two rules were split without threading `lane_tile` through both); fixed by
+giving `reduction_fusion_plan` the same `lane_tile` / `emit_min_bytes` inputs `emit_outputs_plan` already had.
+Left as a coupling, not two independent thresholds, because that is what the M1 planner actually computed and
+`PROBLEM.md` §7 requires the default plan to be bit-identical to it.
+
+Also shipped: a per-rule verifier (`include/epykos/rewrite/verifier.hpp`/`.cpp`) — `compare_programs` /
+`verify_annotations` build two `exec::Interpreter`s and two `adjoint::Adjoint`s (before/after) and reuse
+`verify::differential` (the M2 harness) for the forward comparison plus a seeded-`out_bar` sweep over a sample of
+outputs for the reverse one; `verify_rule` runs a `Rule`'s own `match`/`propose` and reports the first failing
+site. `rewrite::stub_rule::IdentityStubRule<Tag>` backs eight always-empty-`match` placeholders, one file each
+(`r1_fold_uniform_columns.hpp` .. `r7_block_linmap.hpp`, R4 split into R4a/R4b per `DESIGN.md` §6's own table),
+for R-a/R-b/R-c to fill in independently.
+
+Verification (fingerprint d448afd70180): `ctest --preset release` and `--preset reference` both green (see
+`RESUME.md` §5's R0 landing entry for the exact count, unchanged from M3's 80 plus this package's own new
+`rewrite_*` executables); `scripts/mutation_test.sh` green, 20/20 mutants caught against the same 40-gate set —
+this package registers no new mutant of its own (its rules are verified by `rewrite::verify_rule` against the
+M1 book and by the existing M1/M3 gates re-running bit-identically; a mutant of the planner rules is left to
+whichever M4 package next changes their behaviour on purpose, since a mutant of an identity refactor has nothing
+to catch it that the M1 gates do not already catch by construction). No SwapEngine file opened.

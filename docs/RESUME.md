@@ -43,7 +43,17 @@ include/epykos/                          public headers, namespace epykos, macro
   ir/         domain IR (plain data, serialisable), signature pass, expander (round-trip), reference evaluator
   exec/       tiled interpreter, tile/batch layout, thread pool (M5)
   verify/     differential tester (M2/Q1, D30): state ball (E0 TU), E0 bitwise / E1 ulps-or-relative with caller scales, batched compiled side, report
-  adjoint/    M2      rewrite/  M3      catalogue/  M3      mc/  M5
+  adjoint/    M2      catalogue/  M3      mc/  M5
+  rewrite/    M4/R0 (D47): rule.hpp (the Rule interface: match/propose, MatchSite, Proposal -- greedy or e-graph
+              drivers share it), greedy.hpp (apply_greedy, run_pipeline, merge_annotations), verifier.hpp
+              (before/after on Interpreter and Adjoint at the record point and an M2 ball, reusing verify/
+              differential.hpp), planner.hpp / planner_rules.hpp (the M1 planner's decide_fusion / decide_inline /
+              build_pair_step / add_tail_step / emit, as pure functions and rule objects: planner.reduction_fusion,
+              planner.fused_pairs, planner.chain_tails, planner.inline_producers, planner.emit_outputs;
+              DefaultPlanner reproduces exec::Options' old behaviour bit for bit), r1..r7 (identity stubs, one
+              file each, for R-a/R-b/R-c); ir/annotate.hpp: Program::plan (materialisation choice, fused-pair /
+              tail groupings, emitted outputs, per-Jacobian-block AD mode), excluded from Program's identity and
+              never serialised
   solver/     M3/G4 (D40): implicit (the implicit node as a block of solved inputs / residual outputs + the record-time solve), residual (the sliced residual sub-program with its interpreter and adjoint; factorised Jacobians; the per-lane Gauss–Newton / LM solve), implicit_program (forward per lane + the IFT adjoint over the one tape), curve_set (named curves, instruments as Scalar residuals, dependency discovery, sequential / joint blocks), tangent (the forward-mode rule on Dual); ir/sharing.hpp (the cross-stage sharing gate); tape/slice.hpp (backward slice of a tape)
   mutation/   the mutant selector and registry: epykos::mutant("<pass>.<defect>"), compiled in by the mutation preset only (D32)
 src/                                     non-template implementation; src/fixtures/ = the seeded book generator (E0 TU, test-only)
@@ -366,3 +376,40 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   80/80 `ctest` release and reference; Apple clang 21, 80/80 both under the standard preset build dirs;
   `scripts/mutation_test.sh` on GCC 13: all registered mutants caught against the 40-gate set. No engine or maths
   code touched.  (this commit)
+
+2026-09-24  M4/R0 rule framework  landed (D47): the Rule interface (`include/epykos/rewrite/rule.hpp` — name,
+  exactness class, `match(program, plan)`, `propose(program, plan, site)`, `Proposal` holding a rewritten Program
+  or a `PlanAnnotations` delta, never mutating its inputs — usable as a greedy pass, `rewrite/greedy.hpp`
+  `apply_greedy` / `run_pipeline` / `merge_annotations`, or, unbuilt, an e-graph that keeps the original and the
+  proposal side by side, M4/EG); `ir::Program` gains a `plan` field (`ir::PlanAnnotations`, `include/epykos/ir/
+  annotate.hpp`: per-domain materialise / fuse-into-reduction / inline-into-consumer, fused-pair / chain-tail step
+  groupings, emitted-output flags, an unpopulated per-Jacobian-block AD-mode slot for M4/EG), excluded from
+  `Program::operator==` and never serialised (round-trip identity is a property of the recording, not of one plan
+  for one execution of it). `decide_fusion`, `decide_inline` and the shape tests of `build_pair_step` /
+  `add_tail_step` (`src/exec/interpreter.cpp` before this package) move to `rewrite/planner.hpp` as pure functions
+  — `reduction_fusion_plan`, `emit_outputs_plan`, `inline_producers_plan`, `match_pair`, `match_tail`,
+  `fused_pairs_plan`, `chain_tails_plan` — wrapped as five `rewrite::Rule` objects (`planner_rules.hpp`:
+  `planner.reduction_fusion`, `planner.fused_pairs`, `planner.chain_tails`, `planner.inline_producers`,
+  `planner.emit_outputs`) that `DefaultPlanner` runs in that fixed order, one `OffRule` swapped in per
+  `exec::Options` flag left off; `exec::Interpreter`'s constructor now calls `build_plan()` (a caller's
+  `program.plan` verbatim, else its own copy of `rewrite::planner::default_plan(program, options)`, never written
+  back) and reads it instead of deciding — `build_pair_step` / `apply_tail` (renamed from `add_tail_step`) keep
+  only kernel selection, calling the same `match_pair` / `match_tail` the rule objects call, so the two can never
+  disagree. `adjoint::Adjoint` untouched (no materialisation decision to extract, D31). A per-rule verifier
+  (`rewrite/verifier.hpp`: `compare_programs` / `verify_annotations` / `verify_rule`) reuses the M2 differential
+  harness for the forward comparison and adds a seeded-`out_bar` sweep for the reverse one. R1-R7 land as
+  `IdentityStubRule<Tag>` placeholders, one file each, for R-a/R-b/R-c. `ReductionFusionParams` carries
+  `emit_min_bytes` alongside `EmitOutputsParams`' own copy because the two decisions were never independent in
+  the original code (an unemitted output row of a fused domain must be kept, or it is written nowhere) —
+  discovered as a real regression during development (`tests/exec/interp_e0_test.cpp`'s
+  `HandBuiltProgramSumFallbackConstAndAffine` / `MiniBookWithSelectMatchesReplay` both failed, output stuck at bit
+  pattern 0, the first time the rules were split without threading `lane_tile` through both) and fixed before
+  landing; `tests/rewrite/verifier_test.cpp`'s `CatchesADeliberatelyWrongReductionFusionRule` now reproduces the
+  same defect on purpose as the package's own "verifier catches a wrong rule" gate. Apple clang 21, d448afd70180:
+  `ctest --preset release` 84/84 (80 + `rewrite_planner_shapes_test`, `rewrite_rule_framework_test`,
+  `rewrite_verifier_test`, `rewrite_planner_rules_m1_e0_test`), `ctest --preset reference` 84/84,
+  `scripts/mutation_test.sh` 20/20 mutants caught against the 41-gate set (the new `rewrite_planner_rules_m1_e0_test`
+  additionally catches `cse.merge_nonequal`, `fold_sum.wrong_order` and `interpreter.tile_boundary`). Zero build
+  warnings on a from-scratch configure + build of both presets. Not done in R0 (by design, `RESUME.md` §3 M4
+  table): the cost model (M4/CM), R1-R7's real bodies (R-a/R-b/R-c), the e-graph (M4/EG) and the catalogue (M4/C1).
+  No SwapEngine file opened.  (branch `m4/r0-rules`)

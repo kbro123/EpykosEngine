@@ -2278,9 +2278,31 @@ perf-gate ratios, the 66/66-domain catalogue coverage and the e-graph search res
 rules' real behaviour, never from the table. R5's and R6's merge and materialisation decisions are part of what
 those numbers already measured. No code changes, no test changes, no re-run of any gate.
 
-**Still true, and unaffected by any of this:** of the seven rules plus `fma_contraction`, only R5, R6 and R7 fire
-on a real fixture at all. R1, R2, R3, R4a, R4b and `fma_contraction` are 0/0 — zero on the M1 book and zero on
-Stage A — each for its own independently measured reason (D51 point 5, D52). R2's zero is the safety gate of D52
-point 4 standing in front of a live `adjoint::` crash, and R1's zero is downstream of R2's, since D52 point 1 is
-explicit that R1 exists to fold the columns a freshly-split R2 bucket domain makes uniform. That remains M4's
-second structural finding after the cost model's unpriced `plan.group`, and it is under investigation separately.
+**AMENDED the same day, in place, by the author of this entry** — the paragraph below originally read that R1,
+R2, R3, R4a, R4b and `fma_contraction` "are 0/0 — zero on the M1 book and zero on Stage A", which is the exact
+undeclared-shorthand error this entry exists to condemn. "Stage A" there meant the DEFAULT full tape only, and
+read as a universal it is false. Corrected below against a fresh run rather than silently, because an entry about
+ambiguous fire-count notation may not itself ship an ambiguous fire-count.
+
+**The rules that fire, by fixture, measured on `5c25044` (release, Apple clang 21, d448afd70180):**
+
+  * **M1 book (10 domains):** R7 only. R1, R2, R3, R4a, R4b, R5, R6 and `fma_contraction` all 0 sites (D51, D52,
+    and today's `DoesNotFireOnTheM1Book` / `[ r6 ] M1 book: 0 site(s) checked`).
+  * **Stage A default, the full 2,000-trade / 517,036-node / 67-domain tape:** R5 3 sites, R6 3 sites, R7 5 blocks.
+    R1, R2, R3, R4a, R4b and `fma_contraction` 0 sites (D51 point 5, D52; restated by D62's own honest caveat,
+    "on the full tape `r1.fold_uniform_columns` and `r2.bucket_rows` match NOTHING at all").
+  * **Bounded Stage A book (57 domains), inside the e-graph:** R1 AND R2 both fire.
+    `optimise_egraph_full_rules_stage_a_test` stdout, run today: "structural rules that matched something:
+    `r2.bucket_rows r5.group_formation r6.materialise_boundaries r7.block_linmap` / `r1.fold_uniform_columns
+    r5.group_formation r6.materialise_boundaries` / `r1.fold_uniform_columns r5.group_formation
+    r6.materialise_boundaries`" over its 3 iterations — R2 in round 1, then R1 in rounds 2 and 3. This is D52
+    point 1's predicted R2-then-R1 mechanism (R1 matches nothing on an unrewritten tape; R2's bucketing gives it
+    something to fold) firing for real, exactly as D62 point 3 claims. 2/2 tests pass.
+
+So R1 and R2 are **live, not dead**: D52's safety gate (every bucket ≥ 2 rows) suppresses the singleton-heavy
+splits that crash `adjoint::`, not every split, and the smaller book has bucketing opportunities the full tape
+does not. The earlier framing of "one unchased crash suppressing two rules" was too strong and is withdrawn. What
+survives: R2 and R1 have no sites on either REFERENCE fixture, the crash of D52 point 4 is still live and still
+unowned, and the R2-then-R1 chain that does fire on the bounded book still extracts at **0.999716x fitted** —
+noise — in the same test run. Rules firing and the search finding a win are different claims, and only the second
+one is M4's gate. That points back at the cost model's unpriced `plan.group`, not at the rule set's reach.

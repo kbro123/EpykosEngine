@@ -503,3 +503,46 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   edited in place to stop asserting R6/R7 are still stubs), `scripts/mutation_test.sh` 24/24 mutants caught against
   the 43-gate set. Zero build warnings on a from-scratch configure + build of both presets. No SwapEngine file
   opened.  (branch `m4/r-c-rules-6-7`)
+2026-09-24  M4/R-b rules 4-5  D51; rebased onto D50/M4/R-c (which landed R6/R7 while this package was in flight;
+  the only shared-file overlap was `tests/rewrite/rule_framework_test.cpp`, merged into one "R1-R3 are the only
+  remaining stubs" test plus each package's own "these are real rules now" test — no code conflict, R6/R7 and
+  R4a/R4b/R5/fma-contraction touch disjoint files). `include/epykos/rewrite/{r4a_push_unary_through_gathers,r4b_shared_reciprocal,
+  r5_group_formation,fma_contraction,ir_edit}.hpp`, `src/rewrite/` same names, `tests/rewrite/` one test per rule.
+  A shared structural-surgery primitive (`rewrite::detail::insert_domain_after` / `merge_producer_into_consumer`,
+  `ir_edit.hpp`) does the value-space renumbering `ir::Program`'s contiguous layout always needs when a domain is
+  inserted or removed, so R4a/R4b/R5 do not each reimplement it — tested on its own, on hand-built programs,
+  before any rule was built on it (two real bugs caught there and in R5's own Stage A gate: a domain-id remap
+  landing on the consumer's PRE-shift id instead of its shifted final one, and a scan's `carry_gather` — a
+  position into the shared `gathers` vector like any `Slot{Gather,*}` — not renumbered around a dropped gather
+  entry; both fixed, both left in the code's own comments). R4a (push a unary op through a gather into a new
+  shared domain, then `gather(new) * 1.0` in place — the exact IEEE identity, E0) and R4b (same relocation for
+  `recip`, `a/b -> a*recip(b)`, E1, D26 4 ulps) both require a homogeneous source gather and a measured
+  profitability signal before firing. R5 (E0) merges a single-reader elementwise producer into its one consumer
+  when the consumer feeds a Segment (every Segment exists only to serve a Sum/Affine, so this already means "a
+  segment-sum epilogue," DESIGN.md §6) — one pairwise merge per application, a caller's own fixpoint loop is what
+  collapses a longer chain. Fma-contraction (E1, not one of R1-R7 — PROBLEM.md §7's own second M4/R-b rewrite)
+  folds a `Mul` read by exactly one later fixed-arity 2-member `Sum` step into one `Fma` step, purely local to a
+  group. **Measured on the Stage A tape and the M1 book, honestly reported per the package's own brief ("a rule
+  that never fires is a finding to report, not to hide"): only R5 fires** — 3 producer/consumer pairs on Stage A
+  (67 -> 64 domains, 423,235 -> 406,661 recorded values, the largest pair 15,358 rows), 0 on the M1 book (already
+  fused by hand). R4a, R4b and fma-contraction each find 0 profitable sites on BOTH fixtures, each for a
+  different, independently measured and documented reason (D51.5): Stage A's own record-time discount-factor
+  memo already gives R4a's two candidate sites zero redundancy; every `Div`-by-gather site on Stage A reads a
+  heterogeneous (per-curve) gather, which R4b's homogeneous-source requirement correctly declines; and the
+  compounding scan's own "1.0 + r·τ" step records as one `Op::Affine` node (τ a compile-time constant,
+  `affine_collapse` already folds it) rather than a separate `Mul` + `Sum`, so fma-contraction's target shape
+  does not exist in either fixture as currently recorded. All four rules are still exercised end to end on
+  hand-built programs that DO carry their exact target shape, bit-identical (R4a, R5, fma unfused-vs-fused
+  agreement) or within the declared tolerance (R4b, fma), and reach a fixpoint. A `StageATape::record_quotes()`
+  pitfall found during this package's own test development is worth naming for the next one: it returns only the
+  70 calibration quotes, a SUBSET of the tape's 148 recorded free inputs (the other 78 are realised fixings);
+  `program.input_values` is the correct full state vector for `exec::Interpreter::run` / `adjoint::Adjoint::run`,
+  which read exactly `program.inputs.size()` entries and allocate nothing to check the length — the wrong one
+  produced a delayed heap-corruption SIGABRT well after the last out-of-bounds adjoint write, not an obvious
+  failure at the call site. Fingerprint d448afd70180: `ctest --preset release` 96/96, `ctest --preset reference`
+  96/96 (D50's own 91 plus this package's 5 new executables plus 2 shared ones — `rewrite_rule_framework_test`,
+  `mutation_registry_test` — edited in place); `scripts/mutation_test.sh` green, all 32 registered mutants caught
+  (D50's own 24 plus this package's own 8: `r4a.wrong_literal`, `r4a.wrong_row_map`, `r4b.wrong_op`,
+  `r4b.wrong_row_map`, `r5.wrong_step_index`, `r5.drop_last_step`, `fma.wrong_operand`, `fma.drop_remap`). Zero
+  build warnings on a from-scratch configure + build of both presets. No SwapEngine file opened.
+  (branch `m4/r-b-rules-4-5`)

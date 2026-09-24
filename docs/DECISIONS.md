@@ -1222,3 +1222,114 @@ both green, 91/91 (D49's 89 plus this package's two new `rewrite_r6_materialise_
 asserting R6/R7 are still stubs is not a new executable); `scripts/mutation_test.sh` green, 24/24 mutants caught
 against a 43-gate set (20 unchanged from before this package plus the four named in point 4; EG-core registers no
 mutant of its own, D49's own point 5). No SwapEngine file opened.
+
+## D51 — M4/R-b: R4a/R4b/R5 and an fma-contraction rule; a shared structural-surgery primitive; three of the four rules do not fire on the current fixtures, measured and explained rather than hidden (2026-09-24)
+Implements `PROBLEM.md` §7 / `RESUME.md`'s M4/R-b package (`DESIGN.md` §6's R4a/R4b/R5, plus the
+package's own second rewrite named directly in `PROBLEM.md` §7's text, fma-contraction) against
+M4/R0's `rewrite::Rule` interface (D47).
+
+1. **A shared structural-surgery primitive** (`include/epykos/rewrite/ir_edit.hpp`,
+   `rewrite::detail`), because R4a, R4b and R5 all need the SAME bookkeeping `ir::Program`'s
+   contiguous value space demands whenever a domain is inserted or removed (every value id, every
+   gather/segment table's `.domain` field and every `Domain::reads` entry at or after the change
+   point shifts) and none should reimplement it independently: `insert_domain_after` (a pure
+   insertion -- R4a's relocated unary op, R4b's shared reciprocal -- appends new gather/segment
+   tables and shifts everything after the insertion point) and `merge_producer_into_consumer` (R5
+   -- splices a single-reader producer's whole step sequence onto the front of its one reader's
+   group, drops the now-orphaned gather that used to cross the domain boundary, and removes the
+   producer). Tested on its own, on hand-built programs, before any rule was built on it
+   (`tests/rewrite/ir_edit_test.cpp`). Two real bugs caught during this package's own development,
+   both instructive enough to leave in the file's own comments: `merge_producer_into_consumer`'s
+   domain remap first mapped the removed producer's tables onto the CONSUMER's PRE-shift id
+   instead of its own already-shifted final one (`bad_alloc` from a downstream size computed off
+   the wrong domain, caught by `ir_edit_test.cpp` before any rule existed); and the same function
+   forgot that a scan's `Scan::carry_gather` is a position into the shared `gathers` vector like
+   any `Slot{Gather,*}` and must be renumbered around the one dropped entry exactly the same way --
+   found by `r5_group_formation_e0_test.cpp`'s Stage A gate (a scan positioned after a merged pair
+   silently read the wrong table entry; `ir::validate` caught it immediately, "the carry does not
+   read the previous row of its chain"). Landed after D50/M4/R-c (which reworked the same shared
+   `tests/rewrite/rule_framework_test.cpp` for R6/R7's own transition off `IdentityStubRule`):
+   rebased onto it, merging both packages' edits into one "R1-R3 are the only remaining stubs" test
+   plus each package's own "these are real rules now" test, no code conflict (D50 touches R6/R7's
+   own files, disjoint from this package's).
+2. **R4a** (`push_unary_through_gathers`, E0) and **R4b** (`shared_reciprocal`, E1) both relocate a
+   step's operand across a gather boundary into a new, shared domain and rewrite every matching
+   site in place as `gather(new_domain) * 1.0` (R4a: the exact IEEE identity, so pushing `Exp` /
+   `Log` / `Sqrt` / `Neg` out of the reading domain and back through the gather to `S` stays
+   bit-identical without ever having to eliminate the reading domain) or `a * gather(S_recip)`
+   (R4b: `a/b -> a*recip(b)`, a real rounding-order change, D26 4-ulp tolerance). Both require the
+   gather to be homogeneous (every row from one source domain -- a gather mixing several source
+   domains, program.hpp's own allowance, is not this rewrite's target: there is no single smaller
+   domain to relocate onto) and, to avoid introducing a no-op multiply where it buys nothing,
+   require a measured profitability signal (R4a: the gather reuses at least one source row; R4b:
+   that OR at least one other site shares the same source, the reciprocal genuinely shared).
+3. **R5** (`group_formation`, E0) merges a single-reader elementwise producer into its one
+   consumer when the consumer itself feeds a Segment (program.hpp: every Segment exists only to
+   serve a `Sum`/`Affine` step, so "consumer is read by any segment" already means "consumer feeds
+   a segment-sum epilogue", DESIGN.md §6's own phrase) -- one pairwise merge per application;
+   re-matching after each one (a caller's own fixpoint loop, `rewrite::apply_greedy` run
+   repeatedly) is what makes a chain of more than two domains collapse, not a single match() call.
+4. **An fma-contraction rule** (`include/epykos/rewrite/fma_contraction.hpp`, not one of R1-R7 --
+   `PROBLEM.md` §7's own second M4/R-b rewrite, "an fma-contraction rule (E1) for a*b+c chains
+   where the recorded order permits one rounding change"), purely local to one group: a `Mul` step
+   read by exactly one later, fixed-arity, 2-member `Sum` step (fold_sum's own shape for a
+   recorded 2-term `+`, DESIGN.md §5.2/§5.6 -- `Op::Add` itself never survives into the domain IR,
+   fold_sum turns every `Add` into a `Sum`) in the SAME group folds into one `Op::Fma` step,
+   removing the `Mul` and renumbering the group's own Step-slot indices; no domain, gather or
+   segment table is touched.
+5. **Measured on the Stage A tape (fingerprint d448afd70180) and the M1 book, per rule, per this
+   package's own instruction ("a rule that never fires is a finding to report, not to hide"):**
+   only R5 fires on either fixture. R5: 3 producer/consumer pairs on Stage A (67 -> 64 domains,
+   423,235 -> 406,661 recorded values, the largest pair 15,358 rows), 0 on the M1 book (its
+   domains are already fused by hand, DESIGN.md §1). R4a: 0 on both. The two candidate sites that
+   exist on Stage A (a `Neg` and the interpolated-DF `Exp` of DESIGN.md §5's own worked example)
+   are BOTH already exactly as small as their source domain lets them be -- `stage_a.hpp`'s own
+   record-time discount-factor memo ("a discount factor is recorded once per distinct time rather
+   than once per coupon that reads it") already does, at record time, what this rule would do
+   structurally, for exactly these sites; the `Neg` reads a domain LARGER than its own (148 raw
+   inputs vs 70 quote rows), where relocating would make things worse and the profitability guard
+   correctly declines. R4b: 0 on both -- every `Div`-by-gather site on Stage A (3 of them) reads
+   from a gather whose rows come from MORE than one source domain (a per-slot "whichever curve
+   applies" lookup), which the homogeneous-source requirement correctly excludes; there is no
+   `Div`-by-a-single-gathered-domain shape recorded anywhere in either fixture. Fma-contraction: 0
+   on both -- measured directly (zero fixed-arity 2-member `Sum` steps anywhere in the Stage A tape
+   have a `Mul` as either member): the natural target, the compounding scan's own "1.0 + r·τ" step
+   DESIGN.md §5.6 names, records as one `Op::Affine` node instead, because `τ` (a day-count
+   fraction) is a compile-time constant and `affine_collapse` (DESIGN.md §5.2) already turns
+   "constant + constant·variable" into one node before the signature pass runs; there is no
+   separate `Mul` step left for this rule to find. All four rules are exercised on hand-built
+   programs that DO carry their exact target shape (`tests/rewrite/*_test.cpp`, one per rule) to
+   prove the mechanism itself is correct, bit-identical or within tolerance against the unfused
+   program, and reaches a fixpoint (`match()` empty after one application).
+6. **Mutant naming: single-dot, not `rewrite::Rule`'s own doc-comment suggestion.** `rule.hpp`'s
+   file header suggests a mutant name of the form `"rewrite." + name() + ".<defect>"`; since a
+   rule's own `name()` is already `"<pass>.<rule>"` (one dot), that would be three dots, and
+   `tests/mutation/registry_test.cpp`'s own well-formedness check (`^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$`,
+   D32) accepts exactly one. This package's 8 mutants (`r4a.wrong_literal`, `r4a.wrong_row_map`,
+   `r4b.wrong_op`, `r4b.wrong_row_map`, `r5.wrong_step_index`, `r5.drop_last_step`,
+   `fma.wrong_operand`, `fma.drop_remap`; `include/epykos/mutation/mutation.hpp`,
+   `docs/WORKLOADS.md` §M2) use the enforced single-dot form instead -- the actual regex, not the
+   header comment's prose, governs. Each is caught by that rule's own `rewrite::verify_rule` gate
+   (a `tests/rewrite/*_e0_test.cpp` or `*_verify_test.cpp`, matched by `scripts/mutation_test.sh`'s
+   gate regex through the `verify`/`_e0_test$` alternatives), on the hand-built program that
+   exercises the rule's real target shape (R4a/R4b/fma) or the Stage A tape directly (R5, the one
+   rule that fires there).
+7. **A `StageATape::record_quotes()` pitfall, found and fixed in this package's own test
+   development, worth naming so the next package does not repeat it:** it returns only the 70
+   calibration quotes, a SUBSET of the tape's 148 recorded free inputs (the other 78 are realised
+   fixings recorded alongside them); `exec::Interpreter::run` / `adjoint::Adjoint::run` read
+   exactly `program.inputs.size()` entries from the `state` pointer and allocate nothing to check
+   the length. Passing `record_quotes()`'s 70-entry vector where 148 were needed reads/writes past
+   the end of that shorter buffer -- silently for a forward run (undefined, not necessarily wrong-
+   looking, values past the end), and as a delayed heap-corruption `SIGABRT` well after the last
+   out-of-bounds adjoint write, in this package's own `r5_group_formation_e0_test.cpp` during
+   development. `program.input_values` (or `tape.tape.input_values()`) is the correct full state
+   vector, `Program::inputs` order, for exactly this use.
+
+No SwapEngine file opened. Verification (fingerprint d448afd70180): `ctest --preset release` and
+`--preset reference` both green, 96/96 (D50's own 91 plus this package's own 5 new executables --
+`rewrite_ir_edit_test`, `rewrite_fma_contraction_verify_test`, `rewrite_r4a_push_unary_e0_test`,
+`rewrite_r4b_shared_reciprocal_verify_test`, `rewrite_r5_group_formation_e0_test` -- plus two shared
+ones edited in place rather than added, `rewrite_rule_framework_test` and `mutation_registry_test`);
+`scripts/mutation_test.sh` green, all 32 registered mutants caught (D50's own 24 plus this
+package's own 8; see `docs/RESUME.md` §5's landing entry for the exact run).

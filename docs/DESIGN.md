@@ -252,6 +252,18 @@ tape). Not landed: R7's own DESIGN.md text also names exposing a linmap's Jacobi
 for the IFT — scoped out because `ir::PlanAnnotations::JacobianBlockPlan::mode` has no consumer yet (D47), so
 nothing could gate a rule that populated it (D49 point 5).
 
+**As built (M4/R-b, D51):** R4a (`include/epykos/rewrite/r4a_push_unary_through_gathers.hpp`), R4b
+(`r4b_shared_reciprocal.hpp`), R5 (`r5_group_formation.hpp`) and a fourth rewrite this table does
+not name — `fma_contraction.hpp`, `PROBLEM.md` §7's own text, `a*b+c` chains folded into one
+`Op::Fma` — are implemented against M4/R0's `rewrite::Rule` interface, sharing one structural-
+surgery primitive for the value-space renumbering a domain insertion or removal always needs
+(`include/epykos/rewrite/ir_edit.hpp`). Measured on the Stage A tape and the M1 book (D51): only R5
+fires on either (3 producer/consumer pairs on Stage A, 423,235 → 406,661 recorded values); R4a,
+R4b and fma-contraction each find zero profitable sites on both fixtures, for three different,
+independently measured and documented reasons (D51 point 5) — none of the three targets is wrong,
+each fixture simply already avoids the specific redundancy that rewrite removes, by a different
+mechanism (a record-time memo, heterogeneous per-curve gathers, and `affine_collapse` respectively).
+
 ---
 
 ## 7. Execution tiers

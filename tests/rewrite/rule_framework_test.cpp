@@ -37,6 +37,25 @@ ir::Program tiny_program() {
   return p;
 }
 
+// A tiny three-domain Program with exactly R6's own target shape: domain 1 is read once, by one
+// non-reduction consumer (domain 2) -- unlike tiny_program()'s domain 0, domain 1 here is NOT an
+// Input (R6MaterialiseBoundaries excludes those: rewrite/r6_materialise_boundaries.cpp).
+ir::Program program_with_an_inlinable_producer() {
+  ir::Program p;
+  p.domains.push_back(ir::Domain{"input", 1, 0, 0, false, {}, false, -1});
+  p.groups.push_back(ir::Group{0, {ir::Step{epykos::Op::Input, ir::Slot{ir::SlotKind::Input, -1}, {}, {}, {}}}});
+  p.inputs = {0};
+  p.input_values = {1.0};
+  p.gathers.push_back(ir::Gather{1, {0}});  // P's gather: row 0 reads Input's row 0
+  p.domains.push_back(ir::Domain{"neg(@0)", 1, 1, 0, false, {0}, false, -1});
+  p.groups.push_back(ir::Group{1, {ir::Step{epykos::Op::Neg, ir::Slot{ir::SlotKind::Gather, 0}, {}, {}, {}}}});
+  p.gathers.push_back(ir::Gather{2, {1}});  // consumer's gather: reads P's row 0
+  p.domains.push_back(ir::Domain{"neg(@0)", 1, 2, 0, false, {1}, false, -1});
+  p.groups.push_back(ir::Group{2, {ir::Step{epykos::Op::Neg, ir::Slot{ir::SlotKind::Gather, 1}, {}, {}, {}}}});
+  p.outputs = {2};
+  return p;
+}
+
 // A rule that always matches the whole program and marks every domain FuseIntoReduction with no
 // kept rows -- deliberately wrong for `tiny_program()` (domain 1's row IS an output and is not a
 // whole-domain member, so it would never be written anywhere): used to exercise the framework's
@@ -197,9 +216,13 @@ TEST(RuleFramework, PlanAnnotationsEqualityIgnoresContentByDesign) {
   EXPECT_TRUE(plan == ir::PlanAnnotations{});
 }
 
-// The identity stubs never fire (R-a/R-b/R-c fill them in with a real match/propose): match()
-// returns no sites on a program that would exercise every real rule's target shape were it real.
-TEST(RuleFramework, R1ThroughR7StubsNeverMatchAndReportTheirDeclaredExactness) {
+// R1-R5 are still identity stubs (R-a/R-b's job): match() returns no sites on a program that
+// would exercise every real rule's target shape were it real. R6 / R7 (M4/R-c) are real rules as
+// of this package -- tiny_program() is exactly R6's own target shape (domain 0's two rows are
+// each read once, by one consumer, that is not a reduction), so it is checked separately below,
+// not folded into "never matches" (rewrite/r6_materialise_boundaries.hpp, rewrite/r7_block_
+// linmap.hpp; the identity-stub file remains rewrite/stub_rule.hpp for R1-R5's own tests to use).
+TEST(RuleFramework, R1ThroughR5StubsNeverMatchAndReportTheirDeclaredExactness) {
   const ir::Program program = tiny_program();
   const ir::PlanAnnotations plan;
   const rewrite::R1FoldUniformColumns r1;
@@ -208,16 +231,35 @@ TEST(RuleFramework, R1ThroughR7StubsNeverMatchAndReportTheirDeclaredExactness) {
   const rewrite::R4aPushUnaryThroughGathers r4a;
   const rewrite::R4bSharedReciprocal r4b;
   const rewrite::R5GroupFormation r5;
-  const rewrite::R6MaterialiseBoundaries r6;
-  const rewrite::R7BlockLinmap r7;
-  const rewrite::Rule* stubs[] = {&r1, &r2, &r3, &r4a, &r4b, &r5, &r6, &r7};
+  const rewrite::Rule* stubs[] = {&r1, &r2, &r3, &r4a, &r4b, &r5};
   for (const rewrite::Rule* stub : stubs) {
     EXPECT_TRUE(stub->match(program, plan).empty()) << stub->name();
   }
   EXPECT_EQ(r1.name(), "r1.fold_uniform_columns");
-  EXPECT_EQ(r7.name(), "r7.block_linmap");
   EXPECT_EQ(r1.exactness_class(), rewrite::Exactness::E0);
   EXPECT_EQ(r4b.exactness_class(), rewrite::Exactness::E1);  // the one E1 rewrite in DESIGN.md §6
+}
+
+// R6 / R7's own declared names / exactness, plus the shape of their (real, non-stub) behaviour:
+// R6 fires on program_with_an_inlinable_producer() (domain 1 is read exactly once, by one
+// non-reduction consumer); neither fires on tiny_program() (its domain 0 is an Input -- not "an
+// intermediate" R6 will touch -- and its domain 1 is an Add, not an Affine, so R7 has no linmap
+// to find). Their differential / mutation gates are tests/rewrite/r6_materialise_boundaries_e0_test.cpp
+// and r7_block_linmap_e0_test.cpp.
+TEST(RuleFramework, R6AndR7AreRealRulesNotStubs) {
+  const ir::Program tiny = tiny_program();
+  const ir::Program inlinable = program_with_an_inlinable_producer();
+  const ir::PlanAnnotations plan;
+  const rewrite::R6MaterialiseBoundaries r6;
+  const rewrite::R7BlockLinmap r7;
+  EXPECT_EQ(r6.name(), "r6.materialise_boundaries");
+  EXPECT_EQ(r7.name(), "r7.block_linmap");
+  EXPECT_EQ(r6.exactness_class(), rewrite::Exactness::E0);
+  EXPECT_EQ(r7.exactness_class(), rewrite::Exactness::E0);
+  EXPECT_TRUE(r6.match(tiny, plan).empty());
+  EXPECT_FALSE(r6.match(inlinable, plan).empty());
+  EXPECT_TRUE(r7.match(tiny, plan).empty());
+  EXPECT_TRUE(r7.match(inlinable, plan).empty());
 }
 
 TEST(RuleFramework, AStubsProposeIsIdentityIfEverCalledDirectly) {

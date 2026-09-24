@@ -59,6 +59,10 @@ const std::vector<std::string> documented = {
     "expander.scan_carry_from_init",
     "interpreter.scan_drop_last_wave",
     "adjoint.scan_forward_order",
+    "r6.ignore_reduction_boundary",
+    "r6.ignore_fanout_boundary",
+    "r7.no_offset_rebase",
+    "r7.wrong_block_value_base",
 };
 
 std::vector<std::string> registry_names() {

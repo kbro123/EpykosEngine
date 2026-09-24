@@ -1149,3 +1149,76 @@ exactness classes are for rewrites that change what a tape computes; extraction 
 R0's own rules already produced and R0's own verifier already covers, per rule.hpp's exactness contract, so a
 mutant of the SEARCH has nothing new to catch that a mutant of a real rule does not already exercise). No
 SwapEngine file opened.
+
+## D50 — M4/R-c: R6 as a lane-tile-independent, stricter subset of planner.inline_producers; R7 as a real domain split, not an annotation (2026-09-24)
+Implements `PROBLEM.md` §7 / `RESUME.md` §3's R-c package: R6 (`include/epykos/rewrite/r6_materialise_boundaries.hpp`/
+`.cpp`) and R7 (`r7_block_linmap.hpp`/`.cpp`), both E0, both filling in the `IdentityStubRule` D47 left for this
+package. Four choices, one scoped-out finding:
+1. **R6 does not, and structurally cannot, override `planner.reduction_fusion` / `planner.inline_producers`'s own
+   decision for a domain those rules already touched.** `rewrite::merge_annotations` (D47) copies `src.domain[d]`
+   onto the running plan only when it is not the default-constructed `DomainPlan{}` — and `Materialise::Materialize`
+   IS that default, so a rule proposing "definitely materialise this domain" is indistinguishable, at merge time,
+   from "this rule has nothing to say about this domain." R6 therefore never tries to force Materialize (the
+   annotation vocabulary has no way to say it that survives a merge); instead its own OWN candidates are exactly
+   `planner.inline_producers`'s InlineIntoConsumer shape, decided by the SAME structural facts
+   (`planner::analyze_inline`, reused directly rather than re-derived) but WITHOUT `row_fusion_pays(lane_tile)`'s
+   gate and with a strict (default 1.0, not 1.25) per-row reference cap — the "would always be safe to inline, no
+   lane_tile to weigh it against" subset PROBLEM.md §7 asks a catalogue-facing rule for. Two extra exclusions
+   `planner.inline_producers` does not need (it only ever runs from an `exec::Interpreter`/`adjoint::Adjoint`
+   context that already has other guards): a domain whose OWN group is a whole-domain Sum/Affine reduction never
+   inlines itself into a consumer (R0's rule allows this under extra conditions this package does not replicate:
+   see the code comment for why), and an Input domain never does either (not "an intermediate": D8's "materialise
+   only at domain boundaries" reading of `DESIGN.md` §6's own table). Both were found by this package's own
+   differential gate failing on the M1 book and on a hand-built two-domain program during development, not by
+   inspection — recorded so a future reader does not have to rediscover them by the same route.
+2. **R7 is a genuine structural rewrite (`Proposal::program`), not an annotation**, because a linmap's block
+   structure has no slot in `ir::PlanAnnotations` to live in (unlike R6's decision, which fits the SAME vocabulary
+   R0 already shipped). Splitting domain `d` into `k` blocks preserves every value id exactly (DESIGN.md §6 "per-
+   row order unchanged": block 0 keeps `d`'s own `value_base`; block `i` starts where block `i-1`'s rows end) so
+   NO gather or segment anywhere else in the program needs remapping — only bookkeeping that names a domain by
+   its position (`Group::domain`, `Column`/`Gather`/`Segment`/`Scan::domain`, `Domain::reads`) needs fixing up,
+   done by a blanket positional reset for the first and a from-scratch recomputation (mirroring
+   `src/ir/signature.cpp`'s own derivation) for the second, rather than tracking an id-remap by hand through the
+   whole program — correct regardless of how many of the new blocks a downstream reader's gathers turn out to
+   span, which a hand-rolled remap of a single `reads` entry would not be. The block boundary itself is column-
+   span-only (HARD RULE 9): a run of rows is one block while each new row's referenced span stays inside the
+   running block's `[lo, hi)`; a row whose entire span lies beyond it starts a new one. `apply_greedy` applies at
+   most one structural site per call (D47 / `greedy.hpp`'s own doc), so splitting every block of one linmap
+   domain is the caller's loop, not a single `propose()` call — exercised by
+   `tests/rewrite/r7_block_linmap_e0_test.cpp`'s fixed-point test.
+3. **Both rules are keyed on IR structure alone** (HARD RULE 9): R6's fan-out/refs-per-row threshold and R7's
+   `min_block_rows` are rule parameters with library defaults, never a curve count or a trade count; neither file
+   mentions Stage A or the M1 book outside a comment.
+4. **Measured, not assumed** (a hard rule of this package's brief: "a rule that never fires is a finding to report,
+   not to hide", generalised here to "an untested guess about where a rule fires is a finding to fix, not to
+   leave in a comment"): R6 finds ZERO candidates on the M1 book (every intermediate is itself a reduction, a
+   reduction's direct member, or read far more than once per row by its one consumer — DF's `forwards` domain,
+   reused ~6.5x per row by the float coupons sharing one curve's forward grid) and 3 domains (16,574 rows) into 3
+   distinct consumers on the full Stage A tape (2,000 trades). R7 fires on BOTH: the M1 book's one-curve linmap
+   domain still splits in two (a single outlier row — D22's "t = 0" — plus the other 2,560 advancing rows), and
+   the Stage A tape's one linmap domain (four curves sharing the single Input domain, `ir/program.hpp`) splits
+   into 5 (measured on the full tape: rows `[7456, 7668, 48, 3, 1742]`). Both rules' verifier gates
+   (`rewrite::verify_rule` against the real rule on both fixtures) and mutation gates
+   (`r6.ignore_reduction_boundary`, `r6.ignore_fanout_boundary`, `r7.no_offset_rebase`,
+   `r7.wrong_block_value_base`; `docs/WORKLOADS.md` §M2) pass; `r6.ignore_fanout_boundary` needed a hand-built
+   near-miss program (the same convention as the M2 adjoint mutants' near-miss shapes) because neither real
+   fixture happens to contain a single-use-per-row producer read by more than one distinct consumer — every
+   producer read by several consumers in both is ALSO read more than once per row by at least one of them, so it
+   already fails a different check first.
+5. **Scoped out, deliberately** (a finding, not an oversight — see `r7_block_linmap.hpp`'s own header): DESIGN.md
+   §6's R7 entry also names exposing a linmap's Jacobian as a closed form (`AdMode::ClosedFormAffine`,
+   `ir::PlanAnnotations::JacobianBlockPlan`) for the calibration IFT to pick up. D47 is explicit that this slot
+   has NO CONSUMER YET (nothing in `exec::`, `adjoint::` or `solver::` reads `jacobian.mode`), so a rule
+   populating it cannot be checked by CLAUDE.md's own gates (a differential/round-trip/adjoint comparison is
+   blind to an annotation nothing consumes) and a mutant of that logic could not be caught by them either —
+   exactly what "every rewrite ships with its differential test AND its mutation test" exists to keep out of the
+   tree. `is_linmap_domain` (every R7 block is one) is the fact left for whichever package adds a consumer of
+   `jacobian.mode` to gate it with — D49's own EG-core landed in parallel with this package and does not touch it
+   either (its own point 1: the AD-mode-per-Jacobian-block rule is explicitly a later package's scope).
+
+Verification (fingerprint d448afd70180, rebased onto D49/EG-core): `ctest --preset release` and `--preset reference`
+both green, 91/91 (D49's 89 plus this package's two new `rewrite_r6_materialise_boundaries_e0_test` /
+`rewrite_r7_block_linmap_e0_test` executables; the one `rewrite_rule_framework_test` this package edited to stop
+asserting R6/R7 are still stubs is not a new executable); `scripts/mutation_test.sh` green, 24/24 mutants caught
+against a 43-gate set (20 unchanged from before this package plus the four named in point 4; EG-core registers no
+mutant of its own, D49's own point 5). No SwapEngine file opened.

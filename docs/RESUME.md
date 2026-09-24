@@ -470,3 +470,36 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   tooling that changes nothing about what a tape computes). Known, flagged gap for R1-R7's first real structural
   rewrite to close: a plan tier is keyed by the program NODE that created it, not that node's program-tier CLASS.
   No SwapEngine file opened.  (branch `m4/eg-core`)
+2026-09-24  M4/R-c rules 6-7  landed (D50): R6 (`include/epykos/rewrite/r6_materialise_boundaries.hpp`/`.cpp`) and
+  R7 (`r7_block_linmap.hpp`/`.cpp`) fill in two of R0's `IdentityStubRule` placeholders, both E0. R6 is
+  `planner.inline_producers`' own InlineIntoConsumer test (`planner::analyze_inline`, reused directly) minus its
+  `row_fusion_pays(lane_tile)` gate and with a strict 1.0 (not 1.25) per-row reference cap — `merge_annotations`
+  (D47) has no way to make a rule's "definitely materialise" survive a merge (`Materialise::Materialize` IS the
+  un-annotated default), so R6's candidates are exactly the domains nothing else has decided otherwise yet; also
+  excludes a domain that is itself a whole-segment reduction (R0's own rule allows this under extra conditions
+  not replicated here) and any Input domain (not "an intermediate"), both found by the differential gate failing
+  during development, not by inspection. R7 is a genuine domain split (`Proposal::program`, not an annotation:
+  there is no PlanAnnotations slot for "this domain is really several") of a linmap (one Affine step over a
+  Segment) into column-span blocks, preserving every value id exactly so no gather/segment elsewhere needs
+  remapping — only positional bookkeeping (`Group::domain`, the owned tables' `.domain`, `Domain::reads`) is
+  fixed up, the last by recomputing from the actual value ids (mirrors `signature.cpp`'s own derivation) rather
+  than tracking an id-remap by hand. Measured, not assumed (the M1 book was expected to give R6/R7 nothing —
+  wrong on both counts, found by running the rules rather than trusting the guess): R6 finds 0 candidates on the
+  M1 book (every intermediate is a reduction, a reduction's member, or read ~6.5x per row by its one consumer)
+  and 3 domains (16,574 rows) into 3 consumers on the Stage A tape (2,000 trades); R7 splits the M1 book's own
+  one-curve linmap domain into 2 (a single outlier row, D22's "t = 0", isolated from the other 2,560) and the
+  Stage A tape's shared-Input-domain linmap domain into 5 (`[7456, 7668, 48, 3, 1742]` rows on the full tape).
+  Four new mutants (`r6.ignore_reduction_boundary`, `r6.ignore_fanout_boundary`, `r7.no_offset_rebase`,
+  `r7.wrong_block_value_base`); `r6.ignore_fanout_boundary` needed a hand-built near-miss program (the same
+  convention as the M2 adjoint mutants' near-miss shapes) because neither real fixture has a single-use-per-row
+  producer read by more than one distinct consumer — every such producer in both is also read more than once per
+  row by at least one consumer, so it fails a different check first. Not landed (a finding, not an oversight):
+  R7's own DESIGN.md text also names exposing a linmap's Jacobian as `AdMode::ClosedFormAffine` for the IFT —
+  `ir::PlanAnnotations::JacobianBlockPlan::mode` has no consumer yet (D47; D49/EG-core landed in parallel and does
+  not add one either, its own point 1), so nothing could gate a rule that populated it; `is_linmap_domain` is the
+  fact left for whichever package adds that consumer. Rebased onto D49/EG-core; Apple clang 21, d448afd70180:
+  `ctest --preset release` 91/91, `ctest --preset reference` 91/91 (D49's 89 + the two new
+  `rewrite_r6_materialise_boundaries_e0_test` / `rewrite_r7_block_linmap_e0_test` gates; `rewrite_rule_framework_test`
+  edited in place to stop asserting R6/R7 are still stubs), `scripts/mutation_test.sh` 24/24 mutants caught against
+  the 43-gate set. Zero build warnings on a from-scratch configure + build of both presets. No SwapEngine file
+  opened.  (branch `m4/r-c-rules-6-7`)

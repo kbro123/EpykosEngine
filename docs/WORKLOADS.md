@@ -123,6 +123,18 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   | `expander.scan_carry_from_init` | `expand`: every step of a chain reads the chain's initial value instead of the previous step (the scan unrolled without its recurrence) | the round-trip identity on both scan fixtures |
   | `interpreter.scan_drop_last_wave` | `Interpreter::run`: the last wave of every scan (the last step of its longest chains) is not evaluated | the E0 interpreter gate on both scan fixtures |
   | `adjoint.scan_forward_order` | `Adjoint::run`: the reverse scan visits the rows forwards, so the carried adjoint arrives after it was pulled | the adjoint vs forward mode / FD gate on both scan fixtures |
+
+  R6 / R7's mutants (M4/R-c, landed once the Stage A tape existed — the "R1-R7 land in M3" line
+  above was written before D35's milestone re-plan moved them to M4), caught by each rule's own
+  `rewrite::verify_rule`-based differential gate on the M1 book and the Stage A tape
+  (`tests/rewrite/r6_materialise_boundaries_e0_test.cpp`, `tests/rewrite/r7_block_linmap_e0_test.cpp`):
+
+  | mutant | defect (one line) | exercised by |
+  |---|---|---|
+  | `r6.ignore_reduction_boundary` | `R6MaterialiseBoundaries`: a producer feeding a Sum/Affine segment (or an output) is inlined into its gather-consumer anyway | the M1 book and Stage A tape (every DF-like domain feeds a segment_sum or an Affine somewhere) |
+  | `r6.ignore_fanout_boundary` | `R6MaterialiseBoundaries`: only the first reader gather's consumer domain is checked, so a producer read by several distinct consumers is still inlined into just one | the M1 book and Stage A tape |
+  | `r7.no_offset_rebase` | `R7BlockLinmap::split_linmap_domain`: a block's sliced segment keeps the original whole-domain absolute offsets instead of rebasing them to its own `members`/`coefs` arrays | the Stage A tape's multi-curve linmap domain (>= 2 blocks; not exercisable on the M1 book, which has one curve and so one block) |
+  | `r7.wrong_block_value_base` | `R7BlockLinmap::split_linmap_domain`: the running `value_base` accumulator advances by a block's segment length instead of its row count | the Stage A tape's multi-curve linmap domain |
 - **Near-miss shapes** (`include/epykos/fixtures/nearmiss_shapes.hpp`, the gate fixture the mutation harness showed
   was missing, D32): 42 templated shapes over six positive inputs, each an op tree that differs from a neighbour in
   exactly one respect a signature may overlook — a constant on the left or the right of `−` and `/`, a constant in

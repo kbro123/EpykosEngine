@@ -236,6 +236,22 @@ that is a difference of terms, such as a swap PV, the tolerance is relative to t
 Flip classification (from measured degenerate-tie flips): a `select`/guard flip is significant only if the **arm gap**
 exceeds a threshold, never on the bit alone.
 
+**As built (M4/R-c, D49; `include/epykos/rewrite/r6_materialise_boundaries.hpp`, `r7_block_linmap.hpp`):** R6 is
+`planner.inline_producers`' own InlineIntoConsumer test (`rewrite/planner.hpp`, D47), reused directly, minus its
+`row_fusion_pays(lane_tile)` gate and with a stricter (1.0, not 1.25) per-row reference cap — the annotation
+vocabulary `merge_annotations` gives a rule has no way to say "materialise, overriding a fuse/inline decision
+already made" (Materialize is the un-annotated default, indistinguishable from "this rule has nothing to say"),
+so R6's own candidates are exactly the cases where nothing else has decided otherwise yet. Measured: 0 candidates
+on the M1 book (every intermediate is a reduction, a reduction's member, or read far more than once per row), 3
+domains (16,574 rows) into 3 consumers on the Stage A tape. R7 is a real domain split (`Proposal::program`, not an
+annotation — there is no annotation slot for "this domain is really several"), preserving every value id exactly
+so no gather or segment elsewhere in the program needs remapping; column-span blocks only, `min_block_rows` a
+rule parameter. Measured: the M1 book's one-curve linmap domain still splits in two (D22's "t = 0" row, isolated);
+the Stage A tape's shared-Input-domain linmap domain splits into 5 (rows `[7456, 7668, 48, 3, 1742]` on the full
+tape). Not landed: R7's own DESIGN.md text also names exposing a linmap's Jacobian as `AdMode::ClosedFormAffine`
+for the IFT — scoped out because `ir::PlanAnnotations::JacobianBlockPlan::mode` has no consumer yet (D47), so
+nothing could gate a rule that populated it (D49 point 5).
+
 ---
 
 ## 7. Execution tiers

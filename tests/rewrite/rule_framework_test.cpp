@@ -14,6 +14,7 @@
 #include "epykos/rewrite/r6_materialise_boundaries.hpp"
 #include "epykos/rewrite/r7_block_linmap.hpp"
 #include "epykos/rewrite/rule.hpp"
+#include "epykos/rewrite/stub_rule.hpp"
 
 namespace ir = epykos::ir;
 namespace rewrite = epykos::rewrite;
@@ -216,23 +217,24 @@ TEST(RuleFramework, PlanAnnotationsEqualityIgnoresContentByDesign) {
   EXPECT_TRUE(plan == ir::PlanAnnotations{});
 }
 
-// R1-R3 are the only identity stubs left (R-a's job): match() returns no sites on a program that
-// would exercise every real rule's target shape were it real. R4a/R4b/R5 (M4/R-b) and R6/R7
-// (M4/R-c) are all real rules as of this package -- tiny_program() is exactly R6's own target
-// shape (domain 0's two rows are each read once, by one consumer, that is not a reduction), so R6
-// and R7 are checked separately below (rewrite/r6_materialise_boundaries.hpp, rewrite/r7_block_
-// linmap.hpp), and R4a/R4b/R5 separately again just after this test (rewrite/
-// r4a_push_unary_through_gathers.hpp etc.) -- neither pair is folded into "never matches" here;
-// the identity-stub file remains rewrite/stub_rule.hpp for R1-R3's own tests to use.
-TEST(RuleFramework, R1R2R3StubsNeverMatchAndReportTheirDeclaredExactness) {
+// All seven of DESIGN.md §6's rewrites are real now: R1-R3 (M4/R-a), R4a/R4b/R5 (M4/R-b), R6/R7
+// (M4/R-c) -- rewrite/stub_rule.hpp's IdentityStubRule has no remaining user among them. None of
+// R1, R2 or R3 matches `tiny_program()`: R1/R2 need a column of their own to fold or bucket on
+// (this program has none), R3's target is a length-1 Sum (its one non-Input domain is
+// `Add(@0,@1)`) -- checked here; R4a/R4b/R5 are checked the same way just below
+// (rewrite/r4a_push_unary_through_gathers.hpp etc.); R6 DOES match `tiny_program()` (domain 0's
+// two rows are each read once, by one non-reduction consumer -- exactly R6's own target), so it
+// and R7 are checked separately again further down (rewrite/r6_materialise_boundaries.hpp,
+// r7_block_linmap.hpp) rather than folded into "never matches" here.
+TEST(RuleFramework, R1R2R3DoNotMatchTheFrameworksTinyAddProgram) {
   const ir::Program program = tiny_program();
   const ir::PlanAnnotations plan;
   const rewrite::R1FoldUniformColumns r1;
   const rewrite::R2BucketRows r2;
   const rewrite::R3ElideTrivialMaps r3;
-  const rewrite::Rule* stubs[] = {&r1, &r2, &r3};
-  for (const rewrite::Rule* stub : stubs) {
-    EXPECT_TRUE(stub->match(program, plan).empty()) << stub->name();
+  const rewrite::Rule* rules[] = {&r1, &r2, &r3};
+  for (const rewrite::Rule* rule : rules) {
+    EXPECT_TRUE(rule->match(program, plan).empty()) << rule->name();
   }
   EXPECT_EQ(r1.name(), "r1.fold_uniform_columns");
   EXPECT_EQ(r1.exactness_class(), rewrite::Exactness::E0);
@@ -277,10 +279,28 @@ TEST(RuleFramework, R6AndR7AreRealRulesNotStubs) {
   EXPECT_TRUE(r7.match(inlinable, plan).empty());
 }
 
+
+// All seven of DESIGN.md §6's rewrites are real now (R1-R3 M4/R-a, R4a/R4b/R5 M4/R-b, R6/R7
+// M4/R-c): rewrite::IdentityStubRule<Tag> (stub_rule.hpp) has no rule file left using it, so this
+// checks the TEMPLATE ITSELF against a throwaway Tag rather than a rule that has since been
+// filled in. rule.hpp's own contract (point 2) says `propose` at a site `match` would not have
+// returned is a CALLER error, not a condition `propose` is asked to handle -- a STUB's own
+// identity-if-ever-called-directly guarantee (`IdentityStubRule::propose` returns the input
+// Program unchanged regardless of the site) is what this pins.
+namespace {
+struct TestStubTag {
+  static const char* rule_name() { return "test.stub_tag"; }
+  static constexpr rewrite::Exactness exactness() { return rewrite::Exactness::E0; }
+};
+}  // namespace
+
 TEST(RuleFramework, AStubsProposeIsIdentityIfEverCalledDirectly) {
   const ir::Program program = tiny_program();
-  const rewrite::R3ElideTrivialMaps r3;
-  rewrite::Proposal p = r3.propose(program, ir::PlanAnnotations{}, rewrite::MatchSite::whole_program());
+  const rewrite::IdentityStubRule<TestStubTag> stub;
+  EXPECT_TRUE(stub.match(program, ir::PlanAnnotations{}).empty());
+  EXPECT_EQ(stub.name(), "test.stub_tag");
+  EXPECT_EQ(stub.exactness_class(), rewrite::Exactness::E0);
+  rewrite::Proposal p = stub.propose(program, ir::PlanAnnotations{}, rewrite::MatchSite::whole_program());
   ASSERT_TRUE(p.is_structural());
   EXPECT_TRUE(*p.program == program);
 }

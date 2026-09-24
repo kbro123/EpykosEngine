@@ -47,7 +47,15 @@ now passes (1.0164x at B=1, 0.9985x at B=64, where D59 recorded 1.0277x/1.0427x)
 extracted candidate is the default plan's own execution, not something better than it. D63 also measured, for the first time,
 what the interpreter's three planning decisions are worth: reduction fusion 1.618x (M1) / 1.066x (Stage A),
 inlining 1.124x / 1.000x, step pairing 1.021x / 1.014x — so on Stage A the whole plan-level search has at most
-~6.6% available to it. M5
+~6.6% available to it. **D52's open `adjoint::` crash is closed
+too (D65, 2026-09-24), and it was never an adjoint defect**: R-a's own Stage A test handed `adjoint::Adjoint::run`
+a 70-entry `state_bar` buffer for a tape with 148 Inputs, so every call wrote 78 doubles past its end. The harness
+now derives state and buffer lengths from the Program, a guard-region gate pins the write-bounds clause, and R2's
+gate is replaced by two structural floors (consolidate something; be a per-kind partition) — R2 now fires on 0 of
+the M1 book's 10 domains and 3 of the full Stage A tape's 67, and R1, given that R2 pass, on 0 of the M1 book's 10
+and 16 of the 80 domains Stage A becomes. The e-graph search is provably untouched by it -- R2's site count is 0 then 0 on the M1 book and 1 then 1 on the
+bounded book, so the extraction moves only for D63's reasons -- which is the same conclusion again: rules firing
+and the search finding a win are different claims. M5
 onward awaits the owner's decision on this failed exit gate. Nothing merges to `main` without the owner.
 
 ## Rules

@@ -2686,3 +2686,207 @@ confirmed, not merely plausible, and it is now the only remaining named cause of
 inside the model's own 64.6% error on decision-relevant domains, with no wall-clock bench behind it. This entry
 adds no code and no gate — it is a measurement that closes off one hypothesis (that the rule set's reach was a
 co-cause) and leaves exactly one standing.
+## D65 — The `adjoint::` crash of D52 point 4 is a test-harness buffer-sizing defect, not an adjoint defect; R2's gate replaced by two structural floors; R2 and R1 now fire on the full Stage A tape (2026-09-24)
+
+(Appended after D66. D63 is held by a concurrent cost-model package; D64 and D66 landed on this branch while
+this package was in flight, so this entry takes the reserved D65 and sits out of numeric order at the end of the
+file, per the append-only convention. It supersedes D52 point 4 and closes the crash D59 and D64 both carry as
+open.)
+
+**The finding.** D52 point 4 reported that splitting a 177-row Stage A domain into 168 buckets (159 of them
+singletons) "crashes building the split program's `adjoint::Adjoint` — a heap-corruption-shaped abort some distance
+past the actual fault, inside `src/adjoint/`, code this package does not own", and closed R2's whole
+singleton-bucket shape off structurally rather than ship a rule that can crash. D59 carried it forward as "a live,
+reproducible `adjoint::` crash on a real (non-gated) R2 bucket-split shape, `src/adjoint/`, not owned by any M4
+package, still open".
+
+**There is no defect in `src/adjoint/`.** The crash is a caller-side buffer-sizing defect in R-a's own Stage A
+test, and the reproduction is exact.
+
+  * The Stage A tape has **148 Inputs**: the 70 calibration quotes AND the 78 realised fixings recorded alongside
+    them. `fixtures::StageATape::record_quotes()` returns only the quote subset — **70** doubles
+    (`src/fixtures/stage_a_e0.cpp`: it selects `quote_inputs` out of `tape.input_values()`).
+  * `tests/rewrite/r2_bucket_rows_e0_test.cpp` passed that 70-entry vector to
+    `tests/rewrite/record_point_check.hpp`'s `compare_at_record_point` as `state`, `n_inputs` AND (by n_inputs)
+    the size of the `state_bar` buffers.
+  * `adjoint::Adjoint::run` takes raw pointers with no lengths, by design (`adjoint.hpp`: "Zero allocations in
+    `run()`"). Its reverse pass opens by zeroing `state_bar[k·B + b]` for **every** k in `[0, p.inputs.size())` —
+    `src/adjoint/adjoint_e0.cpp`, `Lanes<L>::reverse`, the loop over `p.inputs.size()` before any arithmetic. With
+    148 ordinals over a 70-double buffer that is a **78-double (624-byte) heap write overflow on every call**,
+    which aborts later, far from the write. `exec::Interpreter::run` over-READS the same buffer by the same amount
+    (`k_input`, `src/exec/kernels_impl.hpp`), which is harmless by comparison and is what AddressSanitizer reports
+    first.
+
+**Evidence, in the order it was obtained.**
+
+  1. Reproduced at `c13c95a` with the gate relaxed to D52's own proposed `ranges.size() >= rows`:
+     `rewrite_r2_bucket_rows_e0_test --gtest_filter=*StageA*` exits **134** (SIGABRT) with no diagnostic message,
+     immediately after printing "23 of 67 domain(s)".
+  2. A site-by-site probe showed `ir::validate`, `exec::Interpreter`'s constructor AND `adjoint::Adjoint`'s
+     constructor all succeed on **all 23** split programs — so the crash is not "building the adjoint" at all. It
+     is in `compare_at_record_point`, at site 0, which is exactly the 177-row → 168-bucket domain D52 named
+     (domain 3, `exp(mul(@0,$0))`).
+  3. An AddressSanitizer build (Release + `-fsanitize=address -g`) reports `container-overflow`, READ of size 8, in
+     `exec::detail::k_input` reached from `interp_before.run(...)` — on the **unmodified `before` program**, before
+     any R2 rewrite is involved.
+  4. Resizing the state vector to `program.inputs.size()` makes the whole thing pass: **all 23 sites**, zero
+     sanitizer reports, every site bit-identical forward and adjoint at the record point.
+  5. The same defect had already been found, diagnosed correctly and fixed caller-side by M4/R-b and R-c, in their
+     own tests, without anyone connecting it to D52's open crash.
+     `tests/rewrite/r5_group_formation_e0_test.cpp`'s own comment says it verbatim: "passing the 70-entry subset
+     here silently read/wrote past the end of that shorter buffer (a real bug this test's own development caught,
+     as a SIGABRT from heap-corruption well after the last out-of-bounds write, in the reverse-mode loop below)".
+     `r4a_push_unary_e0_test.cpp` and `fma_contraction_verify_test.cpp` carry the same warning. Only R-a's three
+     tests (R1, R2, R3) still used `record_quotes()`, and only R2's ever executed the overflow, because with the
+     gate in place all three had zero Stage A sites and never entered the loop.
+
+**D52's scan-domain hypothesis is refuted.** The five Stage A scan domains have nothing to do with it; R2 never
+touches a scan domain (`eligible_domain` excludes them) and the split programs' plans build correctly. What
+actually distinguishes the M1 book is that its own state vector `book.z0` has exactly as many entries as its
+program has Inputs, so the identical harness call is correctly sized there — which is why "the SAME broad shape
+works elsewhere". D52 point 3's `Program::gathers`/`segments` array-order concern is also not implicated: with the
+buffers correctly sized, every site is bit-identical in the adjoint as well as the forward, so `expand_owned`'s
+in-place expansion was and remains correct.
+
+**The fix, where the defect is.** `tests/rewrite/record_point_check.hpp`'s `compare_at_record_point` no longer
+takes `state` / `n_inputs` / `n_outputs` from its caller. It derives all three from the Program
+(`before.input_values`, `before.inputs.size()`, `before.outputs.size()`) and refuses a before/after pair that
+disagrees on either count. That makes the whole class of error unreachable rather than documenting it a fourth
+time. R1's and R3's Stage A tests were switched from `record_quotes()` to `program.input_values` for the same
+reason (both were latent: zero sites today). No file under `src/adjoint/` is changed by this entry, because
+nothing in it is wrong.
+
+**The gate that guards it.** `tests/adjoint/state_bar_bounds_e0_test.cpp` (new) pins the clause the caller broke:
+`Adjoint::run` writes `state_bar[k·B + b]` for every input ordinal and nothing beyond it. A 64-double sentinel
+guard region after the buffer is compared bit-for-bit, at B = 1 and B = 4, so a regression is caught in an ordinary
+build with no sanitiser and no allocator luck.
+
+**R2's gate: replaced, not merely relaxed.** D52's "every bucket must have at least 2 rows" is gone. Two structural
+floors take its place (`src/rewrite/r2_bucket_rows.cpp`, `run_buckets`), neither of them a constant:
+
+  1. the split must **consolidate something** — as many buckets as rows is one one-row domain per row, more IR for
+     the same maths (mutant `r2.accepts_full_singleton_split`);
+  2. the split must be a **per-kind partition** — every distinct signature in exactly ONE contiguous run, which is
+     literally DESIGN.md §6's "the per-kind BATCHES a hand-written kernel would form", and since runs ≥ kinds
+     always, `ranges.size() == kinds` is the whole test (mutant `r2.accepts_fragmented_split`).
+
+Singleton buckets are now allowed, which is the change D52's crash was blocking: two of the three Stage A sites R2
+finds are singleton-heavy (domain 41 is 13 rows into 12 buckets), the exact shape that used to be walled off.
+
+**Why floor (2) exists, measured rather than asserted.** D52's proposed `ranges.size() >= rows` is sufficient for
+CORRECTNESS — every site it admits was verified bit-exact, forward and adjoint — but on these fixtures what it
+admits is fragmentation, not batching. Rows / contiguous runs / distinct kinds, measured on `c13c95a`:
+
+  | fixture | domain | rows | runs | kinds |
+  |---|---|---|---|---|
+  | M1 book | 3 `mul($0,@0)` | 16,103 | 9,152 | 2,169 |
+  | M1 book | 4 `div(sub(div(@0,@1),#0),$0)` | 2,432 | 1,243 | **2** |
+  | M1 book | 5 `mul(mul($0,@0),@1)` | 15,703 | 8,752 | 1,953 |
+  | M1 book | 7 `mul($0,sub(@0,@1))@L1` | 969 | 454 | **2** |
+  | M1 book | 8 `mul($0,sub(@0,@1))@L0` | 31 | 18 | **2** |
+  | Stage A | 6 `div(sub(div(@0,@1),#0),$0)` | 17,083 | 7,805 | **22** |
+  | Stage A | 5 `exp(mul(neg(@0),$0))` | 16,917 | 16,911 | 7,745 |
+
+The kinds are real and few; the recording order interleaves them. With floor (2) off, R2 fires on 5 of the M1
+book's 10 domains, a full R2 pass turns the M1 book's 10 domains into **19,624**, R1 then matches **19,619** of
+them, and `optimise::EGraph` — which materialises one whole-Program alternative per rule SITE (D49) — hits its
+2,000-program-node bound in **2 rounds on 10,111 structural site-matches after 700 s**, failing BOTH assertions of
+`optimise_egraph_full_rules_m1_test`, i.e. two of the four tests behind `PROBLEM.md` §7 gate clause 1 that D59
+recorded as holding. That is measured, not projected. Floor (2) is the rule declining to propose what DESIGN.md §6
+never asked it to form. What it deliberately does NOT do is decide whether a genuine per-kind split PAYS — that is
+the cost model's job (D47, D48) — so it admits a thin one (Stage A domain 41: 13 rows, 12 kinds, 12 runs) rather
+than invent a rows-per-bucket threshold HARD RULE 9 forbids.
+
+**What the D52 gate was actually costing — the three gates side by side, measured on all three fixtures** (release
+preset, Apple clang 21, fingerprint `d448afd70180`; R2 sites, i.e. domains the rule would split):
+
+  | fixture | domains | D52 gate (no singleton run) | pure relaxation (`ranges.size() >= rows`) | shipped per-kind floor |
+  |---|---|---|---|---|
+  | M1 book | 10 | 0 | 5 | 0 |
+  | bounded Stage A book (60 trades) | 57 | 1 | 13 | 1 |
+  | full Stage A tape (2,000 trades) | 67 | 0 | 23 | **3** |
+
+The shipped gate loses nothing the D52 gate had and gains three sites on the reference tape. The hole the D52 gate
+was covering, on its own terms, is 5 / 12 / 23 additional sites — every one of them E0-correct, and almost all of
+them fragmentations rather than the per-kind batches R2 exists to form.
+
+**Fire-counts, measured fresh on this branch, release preset, Apple clang 21, fingerprint `d448afd70180`. Long
+form per D64: each number names its fixture inline.**
+
+  * **R2 before (D52's baseline):** 0 sites on the M1 book's 10 domains; 0 sites on the full Stage A tape's 67
+    domains.
+  * **R2 after:** **0 sites on the M1 book's 10 domains**; **3 sites on the full Stage A tape's 67 domains**
+    (domains 30, 41 and 46 — `[ r2 ] Stage A: 3 of 67 domain(s) split into contiguous-run buckets`). Every one
+    verified bit-identical, interpreter and adjoint, at the record point.
+  * **R2 with floor (2) off**, for the record and not shipped: 5 sites on the M1 book's 10 domains; 23 sites on the
+    full Stage A tape's 67 domains. All 28 verified bit-identical, interpreter and adjoint.
+  * **R1 before:** 0 sites on the M1 book's 10 domains; 0 sites on the full Stage A tape's 67 domains — unchanged,
+    and still for D52 point 1's reason (the signature pass already folds every uniform column).
+  * **R1 after a full R2 pass:** **0 sites on the M1 book's 10 domains** (R2 finds no per-kind split there at all,
+    so there is nothing to fold); **16 sites on the 80 domains the full Stage A tape becomes** after its 3 splits.
+    That is D52 point 1's predicted R2-then-R1 pairing, observable end to end on a REFERENCE fixture for the first
+    time (D64's amendment already recorded it firing on the bounded 57-domain book inside the e-graph).
+  * **R1 after a full R2 pass with floor (2) off**, for the record: 19,619 of the M1 book's 19,624 post-split
+    domains; 64,688 of the full Stage A tape's 64,732.
+  * **R1 on the bounded Stage A book (57 domains)**: 0 sites before, **2 of the 58 domains** the book becomes after
+    its 1 shipped R2 split.
+  * **R3** is untouched by this entry: still 0 sites on the M1 book's 10 domains and 0 on the full Stage A tape's
+    67, for D52 point 5's unrelated reason.
+
+**Does the M4 search find anything new? No — and that is the claim that matters.** The rules firing and the search
+finding a win are different things (D64's own closing point). Re-run on this branch:
+
+  * `optimise_egraph_full_rules_m1_test`: 2 program nodes, 5 iterations, 1 structural site-match, extraction ratio
+    **1.0**, both before and after rebasing onto D63 — bit-for-bit the same search as before this change, and
+    necessarily so: R2's site count on the M1 book is 0 under the D52 gate and 0 under the shipped floors.
+  * `optimise_egraph_full_rules_stage_a_test` (the bounded 57-domain book): 35 program nodes, 3 iterations,
+    `bound_hit=false`, and the same matched-rule sequence D64 recorded on the unmodified tree
+    (`r2.bucket_rows` in round 1, then `r1.fold_uniform_columns` in rounds 2 and 3) — which is the direct
+    before/after evidence that this change leaves the search alone, and is what it must be, since R2's site count
+    on this fixture is 1 under the D52 gate and 1 under the shipped floors (table above). Measured before D63
+    landed: the same extraction (`r5.group_formation` twice then `planner.reduction_fusion`, node 10, 55 domains)
+    at the same **0.999716× fitted** ratio with and without this change. Re-measured after rebasing onto D63's
+    cost-model fix, which lands in the same window and reprices everything: node 26, 54 domains,
+    `r5.group_formation` three times, **0.99655× fitted / 0.977364× synthetic**. That movement is D63's, not this
+    package's. `cross_stage_wins` stays 0 either way.
+  * The same bounded book under the PURE RELAXATION (measured by selecting mutant
+    `r2.accepts_fragmented_split`, which is exactly "floor 2 off"): saturation goes from 35 program nodes /
+    `bound_hit=false` / 5.9 s to **500 program nodes, `bound_hit=true` on `max_plan_nodes`, 94.8 s**, with
+    `r2.bucket_rows` now re-firing in all three rounds and `r4b.shared_reciprocal` joining it. Extraction over that
+    graph did not complete at all: killed at **31 minutes** and ~500 MiB resident, against 6.4 s for the shipped
+    gate. So on the
+    bounded book the relaxation does not move the 0.999716× score, it makes the score uncomputable in any
+    reasonable time — the same wall the M1 book hits at its 2,000-program-node bound, reached from the other side.
+
+So unlocking R2 on the full Stage A tape changed **what the rule set reaches** and changed **nothing about what the
+search selects**. **D67 confirms this independently and more sharply than this entry could**, by measuring this
+package and D63 TOGETHER on the full extraction ladder — the ladder is byte-identical to D63's own, R2 opens its 3
+sites at round 1 and R1 picks up 2 more at round 2 off the back of them (the same R2-then-R1 mechanism this entry
+measures as 3 sites and 16 sites under a greedy full pass; the e-graph's counts are lower because it applies one
+site per round rather than all three at once), and neither rule appears anywhere in the extracted history at any
+size. The bottleneck is the cost model, and D63 §5 now names the specific reason R1-R7 cannot move it: every
+data-movement coefficient in the fitted model is zero or nearly zero, and R1-R7 are all data-movement rewrites.
+
+**Still open, and now quantified.** R2's real limitation was never its safety gate — it is the contiguous-run
+restriction D52 point 2 landed deliberately ("R2 buckets by MAXIMAL CONTIGUOUS RUNS of matching signature, never a
+sort"). The table above prices that decision: the M1 book's domain 4 is 2,432 rows over **two** kinds in 1,243
+runs, and Stage A's domain 6 is 17,083 rows over **22** kinds in 7,805 runs. A sorting R2 would turn those into 2
+and 22 real per-kind batches — precisely DESIGN.md §6's own example of fixed versus floating coupons sharing one
+signature class. It needs program-wide value-id renumbering (every gather and segment that reads one of the
+domain's rows), which is why R-a did not land it, and it is the single highest-value follow-up for this rule. This
+entry does not attempt it.
+
+**Also fixed in passing.** `tests/optimise/egraph_full_rules_stage_a_test.cpp` moves to the new
+`compare_at_record_point` signature; it was already passing the correct `program.input_values`, so no behaviour
+changes there.
+
+**Mutants.** Two new, both registered in `include/epykos/mutation/mutation.hpp`, `tests/mutation/registry_test.cpp`
+and `docs/WORKLOADS.md` §M2: `r2.accepts_full_singleton_split` (drops floor 1) and `r2.accepts_fragmented_split`
+(drops floor 2). Neither split changes any computed value, so no differential check can see them — the match count
+is the only witness, and each has its own synthetic domain in `tests/rewrite/r2_bucket_rows_e0_test.cpp` (an
+all-distinct column; an interleaved `{1,1,2,2,1,1}` column).
+
+**Verification** (fingerprint `d448afd70180`, Apple clang 21, `-O3 -march=x86-64-v3 -fno-math-errno`): see
+`docs/RESUME.md` §5's entry for the suite counts, the mutation-gate result and the CI run ids. No SwapEngine file
+opened. No file under `src/adjoint/`, `include/epykos/optimise/cost.hpp`, `src/optimise/cost.cpp` or
+`include/epykos/optimise/plan_bridge.hpp` touched.

@@ -1531,7 +1531,7 @@ Verification (fingerprint d448afd70180): `ctest --preset release` and `--preset 
 package's own landing report for the exact count); `scripts/mutation_test.sh` green, every registered mutant
 caught including the three new ones. No SwapEngine file opened.
 
-## D53 — M4/C1: the catalogue is a value-independent Signature per domain Group, one hand-portable C++ kernel per
+## D55 — M4/C1: the catalogue is a value-independent Signature per domain Group, one hand-portable C++ kernel per
 distinct shape, dispatched from inside `exec::Interpreter`'s plain per-tile path and unconditionally from
 `adjoint::Adjoint`'s forward pass (2026-09-24)
 Implements DESIGN.md §7 tier 1 / PROBLEM.md §7's catalogue: `include/epykos/catalogue/` (engine API) --

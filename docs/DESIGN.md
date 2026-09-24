@@ -419,7 +419,7 @@ gaps (reverse's linear-in-outputs formula misses batching/chord sharing; forward
 understates a wide `Dual<N>` pass); (4) E1 EXTRACTION is informational only, same root cause as
 (1).
 
-**As built (M4/C1, D53):** §7 tier 1's catalogue is `include/epykos/catalogue/` (`Signature`: the
+**As built (M4/C1, D55):** §7 tier 1's catalogue is `include/epykos/catalogue/` (`Signature`: the
 op at each step plus each operand slot's KIND — Step/Literal/Column/Gather/Segment — and, for a
 Step operand, how many steps back it points; no row count, no table index, no literal/column/
 gather value; `Kernel`, `bind_domain`, `registry.hpp`'s hash-then-full-equality lookup) plus
@@ -434,7 +434,7 @@ inlining a producer, not itself inlined, not a scan — its own three optimisati
 / catalogue work (M4)"), dispatches unconditionally for every catalogue-eligible domain, scan
 included. Measured coverage and its one real limit (a per-netting-set fixed-arity Sum's exact
 arity depends on the trade-to-netting-set draw, so a Stage A instance other than the two reference
-workloads reaches ~87-93%, not 100%, of candidate domains) are in D53 and `docs/RESUME.md` §5.
+workloads reaches ~87-93%, not 100%, of candidate domains) are in D55 and `docs/RESUME.md` §5.
 
 ---
 

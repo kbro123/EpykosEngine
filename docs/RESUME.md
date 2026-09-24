@@ -619,7 +619,7 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   and `--preset reference` green; `scripts/mutation_test.sh` green, every registered mutant caught (exact counts
   in this package's own landing report). No SwapEngine file opened.
 
-2026-09-24  M4/C1 catalogue  landed (D53): `include/epykos/catalogue/` (`Signature`: the op at each step plus
+2026-09-24  M4/C1 catalogue  landed (D55): `include/epykos/catalogue/` (`Signature`: the op at each step plus
   each operand slot's kind -- Step/Literal/Column/Gather/Segment, and, for a Step operand, how many steps back it
   points; excludes row counts, table indices and every literal/column/gather value; `kernel.hpp`'s ABI and
   `bind_domain`; `registry.hpp`'s hash-then-full-equality lookup), `tools/catalogue/` (the generator:
@@ -636,7 +636,7 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   `tools/costmodel/fit_main.cpp` already parse is untouched). Two mutants (`catalogue.binding_wrong_operand_order`,
   `catalogue.signature_ignores_konst`; `docs/WORKLOADS.md` §M2), caught by the catalogue's own new on/off
   differential + full-coverage gates (`tests/exec/interpreter_catalogue_e0_test.cpp`, `tests/adjoint/
-  adjoint_catalogue_e0_test.cpp`). Findings reported per CLAUDE.md, not hidden (full account: D53):
+  adjoint_catalogue_e0_test.cpp`). Findings reported per CLAUDE.md, not hidden (full account: D55):
   - **A first version of the Interpreter hook produced numbers tens of millions off** on the M1 book's own DF/exp
     domain before this package's own new differential test caught it, pre-landing: a domain that itself INLINES
     a producer (`inline_refs[d]` non-empty) reads that producer's rows from a per-tile temporary the interpreter

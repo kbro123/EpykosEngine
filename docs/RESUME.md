@@ -655,7 +655,12 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
     the new catalogue-eligibility check (which must fall back to the generic tiled path whenever this mutant is
     selected, or a domain it bypasses would silently stop exercising the trim it corrupts) --
     `tests/mutation/registry_test.cpp`'s one-site-per-mutant check would otherwise fail.
-  `ctest --preset release` (101/101) and `--preset reference` (101/101) pass; `scripts/mutation_test.sh` — 40/40
-  mutants caught, 0 survivors (the 2 above plus the 38 from M2-M4/R-a..R-c, against the same 52-test gate set,
-  which now includes this package's own two new files); `scripts/catalogue_regen.sh --check` a no-op against the
-  committed `src/catalogue/generated/`.
+  Rebased onto `origin/integrate/m1-m5` after M4/EG integration (D54) landed in parallel (conflicts in
+  `docs/DECISIONS.md`/`DESIGN.md`/`RESUME.md`/`WORKLOADS.md`, `include/epykos/mutation/mutation.hpp` and
+  `tests/mutation/registry_test.cpp` -- all simple appends, both sides kept; this package's decision renumbered
+  D53 -> D55, D53 having landed for a different, unrelated process rule in the interim); full re-verification
+  post-rebase, not merely re-run: `ctest --preset release` (107/107) and `--preset reference` (107/107) pass;
+  `scripts/mutation_test.sh` -- 43/43 mutants caught, 0 survivors (this package's own 2, the 38 from M2-M4/
+  R-a..R-c, and the 3 `eg.*` ones M4/EG integration added while this package was in flight, against the
+  now-53-test gate set); `scripts/catalogue_regen.sh --check` a no-op against the committed
+  `src/catalogue/generated/`. Pushed to `integrate/m1-m5` and `m4/c1-catalogue`.

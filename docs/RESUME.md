@@ -809,8 +809,11 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   1.006x, untouched by any M4 rule. M1 strict pairing (informational): 1.460x (B=1) / 2.739x
   (B=64) against bench/hand v0, reproducing D56's own as-shipped finding that M4/C1's catalogue
   still silently disables `exp_poly` on every catalogue-eligible domain (`task_f7b9c87d`, still
-  unfixed, still out of this package's own file scope). CI verification and this package's own
-  landing outcome (rebase, push, `ci_green`, run id/URL) are in this package's own final report;
-  this package's diff against `origin/integrate/m1-m5` touches only `docs/` and `bench/results/`
-  paths -- no engine, maths, rewrite, adjoint, catalogue or optimise source file. No SwapEngine
-  file opened.
+  unfixed, still out of this package's own file scope). Landing: fetch + rebase onto
+  origin/integrate/m1-m5 was a genuine no-op; pushed a49ad34 fast-forward to integrate/m1-m5 and
+  force-pushed m4/m4-gate-2. CI (run 36015344410, push, matches this commit): `ci_green` =
+  **false** -- macos-latest/release succeeded, but ubuntu-latest/release and /reference both
+  failed with the SAME 2 pre-existing catalogue-coverage tests D56 already found
+  (`task_919ea449`, GCC-only, unfixed since), and ubuntu-latest/mutation failed for the same root
+  cause; this package's diff against its parent commit touches only `docs/` and `bench/results/`
+  paths, confirmed again on this run's own log. No SwapEngine file opened.

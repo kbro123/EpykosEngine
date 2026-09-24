@@ -1843,9 +1843,16 @@ out of this package's own file scope), so the historical ~1.19x/1.62x `exp_poly`
 pairing with the catalogue at its production default.
 
 **CI (D46's own discipline: never trust Apple-clang-only):** `gh run list --branch integrate/m1-m5` polled for
-the run matching this package's own landed commit, `gh run view` to completion on both `ubuntu-latest` and
-`macos-latest`. Result and run id/URL are in this package's own final report (`docs/RESUME.md` §5's landing entry
-for this package carries the same figure) rather than duplicated a third time here.
+the run matching this package's own landed commit (`a49ad34`), `gh run view 36015344410` to completion on both
+`ubuntu-latest` and `macos-latest`. Result: **`ci_green` = false**. `macos-latest / release`: success.
+`ubuntu-latest / release` and `ubuntu-latest / reference`: failure, 98% tests passed (2/107 failed) — the SAME two
+tests D56 already named, `AdjointCatalogueE0.DefaultStageAIsFullyCatalogued` and `InterpreterCatalogueE0.{
+DefaultStageAIsFullyCatalogued, DifferentStageAInstanceHitsTheSameCatalogueAndIsMostlyCovered}` — confirmed by this
+run's own log, not merely assumed still true. `ubuntu-latest / mutation`: failure, for the same root cause (the
+baseline gate check fails on GCC before any mutant is tried). This is `task_919ea449`, pre-existing on
+`origin/integrate/m1-m5` before this package's own commit (unfixed by any package since D56) and outside this
+package's own file scope (this commit's `git diff --stat` against its parent lists only `docs/` and
+`bench/results/` paths — verified again here, not merely asserted). Run: <https://github.com/kbro123/EpykosEngine/actions/runs/36015344410>.
 
 No SwapEngine file opened. This package's own diff against `origin/integrate/m1-m5` before its commit touches only
 `docs/` and `bench/results/` paths — no engine, maths, rewrite, adjoint, catalogue or optimise source file.

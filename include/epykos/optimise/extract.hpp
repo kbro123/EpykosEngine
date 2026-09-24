@@ -26,6 +26,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -42,13 +43,26 @@ struct ExtractOptions {
   int B = 1;
   int tile = 256;
   int lane_tile = 8;
+  // M4/EG "integration" (D53; PROBLEM.md §5 / §7's cross-stage sharing gate): a PROGRAM-level
+  // invariant a candidate must hold to be extractable at all -- true REJECTS the program node
+  // (every one of its plan candidates is skipped, the same treatment an exactness overrun gets,
+  // never a silent drop). nullptr (the default): no program is ever rejected, so a caller that
+  // never sets this sees exactly the behaviour this file had before D53 -- this option cannot
+  // change any existing caller's result. rewrite::cross_stage_sharing_guard (rewrite/
+  // cross_stage_sharing.hpp) builds the one this package actually uses (PROBLEM.md §5: "the
+  // residual's DF domain and the book's DF domain merged under every rewrite"); it is a plain
+  // predicate here, not a Rule, because rules only ever ADD e-graph candidates (rule.hpp point
+  // 2) -- something has to be able to say no to one once every rule has finished proposing.
+  std::function<bool(const ir::Program&)> reject;
 };
 
 struct ExtractResult {
-  bool found = false;  // false: every candidate exceeded max_exactness (an empty e-graph cannot
-                       // happen — the root's own history is always empty, hence always E0 — so
-                       // `found` is only ever false when the caller passes an EGraph this file did
-                       // not build, e.g. a unit test's hand-rolled one with no E0 candidate at all)
+  bool found = false;  // false: every candidate exceeded max_exactness or failed `reject` (an
+                       // empty e-graph cannot happen — the root's own history is always empty,
+                       // hence always E0 and, ordinarily, not rejected — so `found` is only ever
+                       // false when the caller passes an EGraph this file did not build, e.g. a
+                       // unit test's hand-rolled one with no eligible candidate at all, or a
+                       // `reject` that also rejects the root)
   int program_id = -1;
   int plan_id = -1;
   ir::Program program;
@@ -57,6 +71,7 @@ struct ExtractResult {
   std::vector<std::string> history;         // program history followed by plan history
   std::size_t candidates_considered = 0;
   std::size_t candidates_rejected_exactness = 0;
+  std::size_t candidates_rejected_guard = 0;  // rejected by `options.reject`, D53
 };
 
 ExtractResult extract(const EGraph& graph, const CostModel& model, const ExtractOptions& options = {});

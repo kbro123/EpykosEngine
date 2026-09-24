@@ -10,12 +10,15 @@
 #include <iomanip>
 #include <map>
 #include <numeric>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "epykos/mutation/mutation.hpp"
+#include "epykos/rewrite/planner.hpp"
+#include "epykos/rewrite/planner_rules.hpp"
 #include "epykos/tape/op.hpp"
 #include "plan.hpp"
 
@@ -152,39 +155,16 @@ std::string human_bytes(std::size_t bytes) {
 }
 
 // A group that runs as a whole-domain Sum / Affine pass: exactly one step, a Sum or Affine over
-// a segment.
-bool is_whole_segment(const ir::Group& g) {
-  if (g.steps.size() != 1) return false;
-  const ir::Step& s = g.steps.front();
-  return (s.op == Op::Sum || s.op == Op::Affine) && s.a.kind == ir::SlotKind::Segment;
-}
-
-// Fused producers are evaluated more than once when a row is a member of several rows; past
-// this many member references per row the domain is materialised instead. Rows read by a
-// gather, an output or a per-row Sum / Affine are kept (materialised on their own); past this
-// fraction of kept rows the domain is materialised as a whole.
-constexpr double fuse_max_refs_per_row = 2.0;
-constexpr double fuse_max_kept_fraction = 0.5;
-
-// An inlined producer is evaluated once per gather reference; past this many references per
-// row it is materialised instead.
-constexpr double inline_max_refs_per_row = 1.25;
-
-// Output rows of a fused producer are emitted from the reduction blocks (rather than kept and
-// copied from the value buffer) only when the region they would otherwise occupy, rows × lanes
-// × 8 bytes, is at least this large: below it the region stays cache-resident and the member
-// buffer path's extra kernel calls (one per producer run) cost more than the write it avoids;
-// above it the write goes to lines evicted since the previous run (measured: 969 swap PVs at
-// 32 lanes, 248 KB, 49 us as a pass + 31 us to copy vs 17 us less in all emitted; at 1 lane,
-// 7.7 KB, emitting cost 0.9 us more).
-constexpr std::size_t emit_min_bytes = std::size_t{64} << 10;
-
-// Chain tails and inlined producers do per-row work (a tail's dispatch and libm loop, a
-// producer's per-row fold and copy) that amortises over the row's lanes at 16 lanes and more,
-// and over the 16-row block at 1 lane; at 4 and 8 lanes the separate vectorised passes are
-// cheaper (measured on the M1 book: B = 64 at 4 lanes 2024 -> 2259 us and at 8 lanes
-// 1726 -> 1796 us with them, 16 lanes 1656 -> 1594 and 32 lanes 1640 -> 1571 us).
-constexpr bool row_fusion_pays(int lanes) noexcept { return lanes == 1 || lanes >= 16; }
+// a segment. M4/R0: the decision logic that used to live in this TU (decide_fusion, decide_
+// inline, and the shape tests of build_pair_step / add_tail_step below) moved to
+// rewrite/planner.hpp / planner_rules.hpp as pure functions and rewrite::Rule objects — the
+// single source of truth planner.reduction_fusion, planner.fused_pairs, planner.chain_tails,
+// planner.inline_producers and planner.emit_outputs use too (rewrite/planner_rules.hpp:
+// DefaultPlanner). This TU keeps only what still needs exec::Interpreter::Impl's own runtime
+// state: resolving an ir::Slot to a live Operand and looking up a kernel function pointer for a
+// confirmed shape. `is_whole_segment` keeps its old name and call sites (decide_fusion, decide_
+// inline and build_group all still call it unqualified) but now forwards to the shared function.
+bool is_whole_segment(const ir::Group& g) { return rewrite::planner::is_whole_segment(g); }
 
 }  // namespace
 
@@ -196,6 +176,13 @@ struct Interpreter::Impl {
   std::size_t tile_elems = 0;  // tile · Lt doubles per scratch buffer
   std::size_t table_bytes = 0;
   std::size_t fused_values = 0;  // rows of fused domains
+
+  // M4/R0: the plan this Interpreter runs from — `p->plan` verbatim when the caller populated it
+  // (ir/annotate.hpp point 3), otherwise this Impl's OWN copy of the default greedy pass over
+  // `opt` (rewrite::planner::default_plan), computed once in build_plan() and never written back
+  // to `*p` (two Interpreters over the same Program, e.g. the M1 bench's B=1 / B=64 points, must
+  // not see each other's decisions).
+  ir::PlanAnnotations plan_;
 
   mutable std::vector<double> values;   // num_values · Lt
   mutable std::vector<double> scratch;  // (max_steps + 3 temporaries + accumulator + member) · tile_elems
@@ -216,14 +203,22 @@ struct Interpreter::Impl {
   double* inline_temp(int t) const { return step_buffer(max_steps + 5 + t); }
 
   Operand resolve(const ir::Slot& s) const;
+  void build_plan();
   void decide_fusion();
   void decide_inline();
   void build_group(std::size_t d, GroupPlan& g);
   void build_segment(std::int32_t consumer, const ir::Segment& seg, bool affine, const ir::Slot& konst, std::int32_t rows,
                      SegPlan& sp);
   void build_step(const ir::Step& st, std::size_t k, std::size_t n_steps, GroupPlan& g, StepPlan& sp);
-  bool build_pair_step(const ir::Group& grp, const std::vector<int>& uses, std::size_t k, StepPlan& sp);
-  bool add_tail_step(const ir::Step& st, std::size_t prev, StepPlan& sp);
+  // Builds the kernel-call StepPlan for a fused pair whose SHAPE `rewrite::planner::match_pair`
+  // has already confirmed at step `k` (the annotation-driven caller in build_group re-derives it
+  // from the same pure function — see that loop's comment); false: no tabled kernel for this
+  // shape (a completeness check that should never actually fire, plan.hpp's KernelTable::pair
+  // covers exactly what match_pair matches).
+  bool build_pair_step(const rewrite::planner::PairShape& shape, std::size_t k, StepPlan& sp);
+  // Appends tail step `st` (confirmed by `rewrite::planner::match_tail` at the annotation-driven
+  // caller) to `sp`.
+  void apply_tail(const ir::Step& st, StepPlan& sp);
 };
 
 Operand Interpreter::Impl::resolve(const ir::Slot& s) const {
@@ -255,17 +250,29 @@ Operand Interpreter::Impl::resolve(const ir::Slot& s) const {
   return o;
 }
 
-// Which domains are evaluated inside the reductions that read them rather than materialised: an
-// elementwise group (not itself a whole-domain reduction), non-recurrent, with rows, read as
-// members of whole-domain Sum / Affine groups with at most fuse_max_refs_per_row member
-// references per row, and with at most fuse_max_kept_fraction of its rows read any other way
-// (gather, per-row Sum / Affine, or an output that is not such a member) — those rows are kept:
-// evaluated separately and written to the value buffer. An output row that is a member is not
-// kept when the domain's region is at least emit_min_bytes: the reduction block that computes
-// it writes it to `out` (emitted). On the M1 book at 32 lanes the swap PVs (969 + 31 rows, all
-// outputs, members of the book sum) are emitted from the book sum's blocks and never occupy
-// the value buffer; at 1 lane they are a pass and a copy as before. A structure-only decision;
-// the arithmetic is the same either way.
+// M4/R0: the plan this Interpreter runs from (ir::PlanAnnotations, include/epykos/ir/annotate.hpp)
+// — a caller's `p->plan` verbatim when it is not empty, otherwise the default greedy pass over
+// `opt` (rewrite::planner::DefaultPlanner / default_plan), which reproduces exactly what
+// decide_fusion() / decide_inline() / the fused-pair loop below computed before this package
+// (PROBLEM.md §7: "Options flags keep working by selecting the greedy pass"). Never written back
+// to `*p`.
+void Interpreter::Impl::build_plan() {
+  if (!p->plan.empty()) {
+    plan_ = p->plan;
+    return;
+  }
+  rewrite::planner::DefaultPlanOptions dopt;
+  dopt.fuse_reductions = opt.fuse_reductions;
+  dopt.fuse_pairs = opt.fuse_pairs;
+  dopt.inline_producers = opt.inline_producers;
+  dopt.lane_tile = Lt;
+  plan_ = rewrite::planner::default_plan(*p, dopt);
+}
+
+// Which domains are evaluated inside the reductions that read them rather than materialised, and
+// which output rows those reductions emit directly: read from `plan_` (planner.reduction_fusion /
+// planner.emit_outputs, rewrite/planner.hpp — the M1 planner's decide_fusion before M4/R0) rather
+// than decided here. A structure-only decision; the arithmetic is the same either way.
 void Interpreter::Impl::decide_fusion() {
   const ir::Program& prog = *p;
   const std::size_t nd = prog.domains.size();
@@ -273,48 +280,13 @@ void Interpreter::Impl::decide_fusion() {
   fused.assign(nd, 0);
   keep_rows.assign(nd, {});
   emitted.assign(nv, 0);
-  std::vector<char> is_output(nv, 0);
-  for (ir::value_id v : prog.outputs) is_output[static_cast<std::size_t>(v)] = 1;
-  if (opt.fuse_reductions) {
-    std::vector<char> marked(nv, 0);         // value read by a gather or a per-row Sum / Affine
-    std::vector<char> whole_member(nv, 0);   // value is a member of a whole-domain reduction
-    std::vector<std::size_t> member_refs(nd, 0);
-    auto dom_of = [&](ir::value_id v) { return static_cast<std::size_t>(prog.domain_of(v)); };
-    for (const ir::Gather& g : prog.gathers) {
-      for (ir::value_id v : g.index) marked[static_cast<std::size_t>(v)] = 1;
-    }
-    for (const ir::Segment& seg : prog.segments) {
-      const bool whole = is_whole_segment(prog.groups[static_cast<std::size_t>(seg.domain)]);
-      for (ir::value_id v : seg.members) {
-        if (whole) {
-          ++member_refs[dom_of(v)];
-          whole_member[static_cast<std::size_t>(v)] = 1;
-        } else {
-          marked[static_cast<std::size_t>(v)] = 1;
-        }
-      }
-    }
-    for (std::size_t d = 0; d < nd; ++d) {
-      const ir::Domain& dom = prog.domains[d];
-      if (dom.recurrent || dom.rows < 1 || member_refs[d] == 0) continue;
-      if (is_whole_segment(prog.groups[d])) continue;
-      if (static_cast<double>(member_refs[d]) > fuse_max_refs_per_row * static_cast<double>(dom.rows)) continue;
-      const bool emit_ok = static_cast<std::size_t>(dom.rows) * static_cast<std::size_t>(Lt) * sizeof(double) >= emit_min_bytes;
-      std::vector<std::int32_t> keep;
-      for (std::int32_t r = 0; r < dom.rows; ++r) {
-        const std::size_t v = static_cast<std::size_t>(dom.value_base + r);
-        if (marked[v] || (is_output[v] && !(emit_ok && whole_member[v]))) keep.push_back(r);
-      }
-      if (static_cast<double>(keep.size()) > fuse_max_kept_fraction * static_cast<double>(dom.rows)) continue;
-      fused[d] = 1;
-      fused_values += static_cast<std::size_t>(dom.rows) - keep.size();
-      for (std::int32_t r = 0; r < dom.rows; ++r) {
-        const std::size_t v = static_cast<std::size_t>(dom.value_base + r);
-        if (is_output[v] && emit_ok && whole_member[v] && !marked[v]) emitted[v] = 1;
-      }
-      keep_rows[d] = std::move(keep);
-    }
+  for (std::size_t d = 0; d < nd && d < plan_.domain.size(); ++d) {
+    if (plan_.domain[d].choice != ir::Materialise::FuseIntoReduction) continue;
+    fused[d] = 1;
+    keep_rows[d] = plan_.domain[d].keep_rows;
+    fused_values += static_cast<std::size_t>(prog.domains[d].rows) - keep_rows[d].size();
   }
+  for (std::size_t v = 0; v < nv && v < plan_.emitted.size(); ++v) emitted[v] = plan_.emitted[v] != 0;
   // The outputs still copied from the value buffer after each chunk.
   for (std::size_t o = 0; o < prog.outputs.size(); ++o) {
     const ir::value_id v = prog.outputs[o];
@@ -326,94 +298,32 @@ void Interpreter::Impl::decide_fusion() {
 }
 
 // Which domains are evaluated per tile of the one elementwise domain that gathers them
-// (plan.hpp: InlinedProducer) rather than materialised: not recurrent, with rows, not fused into
-// reductions, read by nothing but the gathers of one consumer (no output, no segment
-// membership, no gather from any other domain), with at most inline_max_refs_per_row gather
-// references per row (a row is evaluated once per reference); a whole-domain Sum / Affine only
-// when every row has the same number of members, all of them materialised (an interpolation:
-// the per-row fold then vectorises like the bucketed pass; a reduction over fused producers
-// keeps its blocks). The consumer is a materialised elementwise domain (not a whole-domain
-// reduction, not fused, not recurrent, not itself inlined), and a domain that inlines producers
-// is never inlined itself (it would run in the indirect row mode, whose rows its inlined operands
-// cannot address). A gather may hold a few ids of other domains (a time that is a knot reads the
-// input directly): those rows are copied from the value buffer into the temporary, so they must
-// be materialised. Decided in Program order (producers precede consumers). A structure-only
-// decision; the arithmetic is the same.
+// (plan.hpp: InlinedProducer): `plan_.domain[d].choice == InlineIntoConsumer` names the consumer
+// (planner.inline_producers, rewrite/planner.hpp — decide_inline before M4/R0); this function
+// keeps only the execution-plan bookkeeping the annotation itself does not carry (`inline_refs`,
+// `n_inline_temps`) by re-deriving each inlined domain's reader gathers from the Program — cheap
+// (one pass over program.gathers, the same rewrite::planner::analyze_inline the rule itself ran)
+// and exact, since it is the identical shared function. A structure-only decision; the arithmetic
+// is the same.
 void Interpreter::Impl::decide_inline() {
   const ir::Program& prog = *p;
   const std::size_t nd = prog.domains.size();
   inlined_into.assign(nd, -1);
   inline_refs.assign(nd, {});
   n_inline_temps = 0;
-  if (!opt.inline_producers || !row_fusion_pays(Lt)) return;
-  auto dom_of = [&](ir::value_id v) { return static_cast<std::int32_t>(prog.domain_of(v)); };
-  std::vector<char> blocked(nd, 0);   // read other than through a gather
-  for (ir::value_id v : prog.outputs) blocked[static_cast<std::size_t>(dom_of(v))] = 1;
-  for (const ir::Segment& seg : prog.segments) {
-    for (ir::value_id v : seg.members) blocked[static_cast<std::size_t>(dom_of(v))] = 1;
+  bool any = false;
+  for (std::size_t d = 0; d < nd && d < plan_.domain.size(); ++d) {
+    if (plan_.domain[d].choice == ir::Materialise::InlineIntoConsumer) any = true;
   }
-  const std::size_t ng = prog.gathers.size();
-  std::vector<std::int32_t> user(ng, -1);   // the domain whose steps read the gather slot (-2: several)
+  if (!any) return;
+  const rewrite::planner::InlineAnalysis analysis = rewrite::planner::analyze_inline(prog);
   for (std::size_t d = 0; d < nd; ++d) {
-    for (const ir::Step& st : prog.groups[d].steps) {
-      for (const ir::Slot* sl : {&st.a, &st.b, &st.c, &st.konst}) {
-        if (sl->kind != ir::SlotKind::Gather) continue;
-        std::int32_t& u = user[static_cast<std::size_t>(sl->index)];
-        if (u == -1 || u == static_cast<std::int32_t>(d)) u = static_cast<std::int32_t>(d);
-        else u = -2;
-      }
-    }
-  }
-  // Per domain: the gather slots holding some of its ids, and how many ids in all.
-  std::vector<std::vector<std::size_t>> readers(nd);
-  std::vector<std::size_t> refs(nd, 0);
-  for (std::size_t k = 0; k < ng; ++k) {
-    std::vector<char> seen(nd, 0);
-    for (ir::value_id v : prog.gathers[k].index) {
-      const std::size_t t = static_cast<std::size_t>(dom_of(v));
-      ++refs[t];
-      if (!seen[t]) {
-        seen[t] = 1;
-        readers[t].push_back(k);
-      }
-    }
-  }
-  for (std::size_t d = 0; d < nd; ++d) {
-    const ir::Domain& dom = prog.domains[d];
-    if (dom.recurrent || dom.rows < 1 || blocked[d] || fused[d] || readers[d].empty()) continue;
-    if (!inline_refs[d].empty()) continue;   // inlines producers itself: stays a contiguous-row group
-    const ir::Group& grp = prog.groups[d];
-    if (is_whole_segment(grp)) {
-      const ir::Segment& seg = prog.segments[static_cast<std::size_t>(grp.steps.front().a.index)];
-      bool uniform = true, materialised = true;
-      const std::int32_t len0 = seg.offsets.size() > 1 ? seg.offsets[1] - seg.offsets[0] : 0;
-      for (std::size_t r = 0; r + 1 < seg.offsets.size(); ++r) uniform &= (seg.offsets[r + 1] - seg.offsets[r]) == len0;
-      for (ir::value_id v : seg.members) {
-        const std::size_t t = static_cast<std::size_t>(dom_of(v));
-        materialised &= !fused[t] && inlined_into[t] < 0;
-      }
-      if (!uniform || !materialised) continue;
-    }
-    const std::int32_t c = user[readers[d][0]];
-    if (c < 0 || c == static_cast<std::int32_t>(d)) continue;
-    bool ok = true;
-    for (std::size_t k : readers[d]) ok &= user[k] == c;
-    if (!ok) continue;
-    const std::size_t cd = static_cast<std::size_t>(c);
-    if (is_whole_segment(prog.groups[cd]) || fused[cd] || prog.domains[cd].recurrent || inlined_into[cd] >= 0) continue;
-    if (static_cast<double>(refs[d]) > inline_max_refs_per_row * static_cast<double>(dom.rows)) continue;
-    // Foreign ids of those gathers must be materialised rows (the copy reads the value buffer).
-    for (std::size_t k : readers[d]) {
-      for (ir::value_id v : prog.gathers[k].index) {
-        const std::size_t t = static_cast<std::size_t>(dom_of(v));
-        if (t != d && inlined_into[t] >= 0) ok = false;
-      }
-    }
-    if (!ok) continue;
-    inlined_into[d] = c;
-    for (std::size_t k : readers[d]) inline_refs[cd].push_back({k, static_cast<std::int32_t>(d)});
+    if (d >= plan_.domain.size() || plan_.domain[d].choice != ir::Materialise::InlineIntoConsumer) continue;
+    inlined_into[d] = plan_.domain[d].inline_consumer;
+    const std::size_t cd = static_cast<std::size_t>(inlined_into[d]);
+    for (std::size_t k : analysis.readers[d]) inline_refs[cd].push_back({k, static_cast<std::int32_t>(d)});
     n_inline_temps = std::max(n_inline_temps, static_cast<int>(inline_refs[cd].size()));
-    fused_values += static_cast<std::size_t>(dom.rows);
+    fused_values += static_cast<std::size_t>(prog.domains[d].rows);
   }
 }
 
@@ -778,88 +688,54 @@ void Interpreter::Impl::build_step(const ir::Step& st, std::size_t k, std::size_
 // gather (or Neg of step k), and nothing else reads step k. A commutative first op has its
 // operands ordered scalar first; a commutative second op keeps the pair's value on the left —
 // both are bit-identical reorderings of IEEE-commutative operations.
-bool Interpreter::Impl::build_pair_step(const ir::Group& grp, const std::vector<int>& uses, std::size_t k, StepPlan& sp) {
-  const ir::Step& s0 = grp.steps[k];
-  const ir::Step& s1 = grp.steps[k + 1];
-  if (uses[k] != 1) return false;
-  auto is_arith = [](Op op) { return op == Op::Add || op == Op::Sub || op == Op::Mul || op == Op::Div; };
-  auto is_commutative = [](Op op) { return op == Op::Add || op == Op::Mul; };
-  auto pk_of = [](const ir::Slot& sl) {
-    switch (sl.kind) {
-      case ir::SlotKind::Literal:
-      case ir::SlotKind::Column: return PK::S;
-      case ir::SlotKind::Gather: return PK::G;
+// M4/R0: the SHAPE test (is step k, k+1 a chain nobody else reads, in one of the forms
+// KernelTable::pair covers) moved to rewrite::planner::match_pair (single source of truth with
+// planner.fused_pairs, rewrite/planner.hpp) — `shape` is that function's result, already
+// confirmed by the caller (build_group, from `plan_.group[d]`'s annotation, which itself was
+// produced by calling the very same function). This is now purely the BUILD half: resolve the
+// shape's Slots to live Operands and look up the kernel function pointers.
+bool Interpreter::Impl::build_pair_step(const rewrite::planner::PairShape& shape, std::size_t k, StepPlan& sp) {
+  namespace rp = rewrite::planner;
+  auto to_pk = [](rp::OperandKind k) {
+    switch (k) {
+      case rp::OperandKind::Scalar: return PK::S;
+      case rp::OperandKind::Gathered: return PK::G;
       default: return PK::None;
     }
   };
-  // First step.
-  Operand a, b;
-  PK ka, kb;
-  if (s0.op == Op::Neg) {
-    if (pk_of(s0.a) != PK::G) return false;
-    a = resolve(s0.a);
-    ka = PK::G;
-    kb = PK::None;
-  } else if (is_arith(s0.op)) {
-    ka = pk_of(s0.a);
-    kb = pk_of(s0.b);
-    if (ka == PK::None || kb == PK::None || (ka == PK::S && kb == PK::S)) return false;
-    a = resolve(s0.a);
-    b = resolve(s0.b);
-    if (is_commutative(s0.op) && ka == PK::G && kb == PK::S) {
-      std::swap(a, b);
-      std::swap(ka, kb);
-    }
-  } else {
-    return false;
-  }
-  // Second step.
-  const ir::Slot prev{ir::SlotKind::Step, static_cast<std::int32_t>(k)};
-  Operand c;
-  PK kc = PK::None;
-  bool prev_right = false;
-  if (s1.op == Op::Neg) {
-    if (!(s1.a == prev)) return false;
-  } else if (is_arith(s1.op)) {
-    const bool left = s1.a == prev, right = s1.b == prev;
-    if (left == right) return false;  // neither, or both (t op t)
-    const ir::Slot& other = left ? s1.b : s1.a;
-    kc = pk_of(other);
-    if (kc == PK::None) return false;
-    c = resolve(other);
-    prev_right = right && !is_commutative(s1.op);
-  } else {
-    return false;
-  }
-  sp.op = s0.op;
-  sp.op2 = s1.op;
+  const PK ka = to_pk(shape.ka), kb = to_pk(shape.kb), kc = to_pk(shape.kc);
+  const Operand a = shape.ka != rp::OperandKind::None ? resolve(shape.a) : Operand{};
+  const Operand b = shape.kb != rp::OperandKind::None ? resolve(shape.b) : Operand{};
+  const Operand c = shape.kc != rp::OperandKind::None ? resolve(shape.c) : Operand{};
+  sp.op = shape.op1;
+  sp.op2 = shape.op2;
   sp.a = a;
   sp.b = b;
   sp.c = c;
-  sp.prev_right = prev_right;
+  sp.prev_right = shape.prev_right;
   sp.ir_first = static_cast<int>(k);
   sp.ir_last = static_cast<int>(k) + 1;
   for (int v = 0; v < n_lane_variants; ++v) {
-    sp.fn[row_contiguous][v] = pair_kernel(v, s0.op, ka, kb, s1.op, kc, prev_right, false);
-    sp.fn[row_indirect][v] = pair_kernel(v, s0.op, ka, kb, s1.op, kc, prev_right, true);
-    sp.acc_fn[0][v] = pair_acc_kernel(v, s0.op, ka, kb, s1.op, kc, prev_right, false);
-    sp.acc_fn[1][v] = pair_acc_kernel(v, s0.op, ka, kb, s1.op, kc, prev_right, true);
+    sp.fn[row_contiguous][v] = pair_kernel(v, shape.op1, ka, kb, shape.op2, kc, shape.prev_right, false);
+    sp.fn[row_indirect][v] = pair_kernel(v, shape.op1, ka, kb, shape.op2, kc, shape.prev_right, true);
+    sp.acc_fn[0][v] = pair_acc_kernel(v, shape.op1, ka, kb, shape.op2, kc, shape.prev_right, false);
+    sp.acc_fn[1][v] = pair_acc_kernel(v, shape.op1, ka, kb, shape.op2, kc, shape.prev_right, true);
     if (sp.fn[row_contiguous][v] == nullptr || sp.fn[row_indirect][v] == nullptr || sp.acc_fn[0][v] == nullptr ||
         sp.acc_fn[1][v] == nullptr) {
-      return false;  // not a tabled shape
+      return false;  // not a tabled shape (a completeness check that should never fire: see the declaration's comment)
     }
   }
   // Name: the second op around the first, operand kinds as the single-step names print them.
   auto kind_name = [](const Operand& o) { return std::string(to_string(o.kind)); };
   std::ostringstream inner;
-  inner << to_string(s0.op) << "(" << kind_name(a);
+  inner << to_string(shape.op1) << "(" << kind_name(a);
   if (kb != PK::None) inner << "," << kind_name(b);
   inner << ")";
   std::ostringstream name;
-  name << to_string(s1.op) << "(";
+  name << to_string(shape.op2) << "(";
   if (kc == PK::None) {
     name << inner.str();
-  } else if (prev_right) {
+  } else if (shape.prev_right) {
     name << kind_name(c) << "," << inner.str();
   } else {
     name << inner.str() << "," << kind_name(c);
@@ -869,22 +745,17 @@ bool Interpreter::Impl::build_pair_step(const ir::Group& grp, const std::vector<
   return true;
 }
 
-// Step `st` (the one after IR step `prev`, which is the last step the pair `sp` covers and which
-// nothing else reads) appended to the pair's chain tail (plan.hpp: StepPlan::n_tail) when it is
-// Exp or Log of step prev: the kernel applies the call in place on each stored row
-// (kernels_impl.hpp: apply_tails).
-bool Interpreter::Impl::add_tail_step(const ir::Step& st, std::size_t prev, StepPlan& sp) {
-  if (sp.n_tail >= StepPlan::max_tail) return false;
-  if (st.op != Op::Exp && st.op != Op::Log) return false;
-  const ir::Slot p{ir::SlotKind::Step, static_cast<std::int32_t>(prev)};
-  if (!(st.a == p)) return false;
+// Step `st` appended to the pair's chain tail (plan.hpp: StepPlan::n_tail; kernels_impl.hpp:
+// apply_tails). The SHAPE test (Exp / Log of the pair's own value) is
+// rewrite::planner::match_tail, already confirmed by the caller from `plan_.group[d]`'s
+// annotation (planner.chain_tails) — this is the BUILD half only.
+void Interpreter::Impl::apply_tail(const ir::Step& st, StepPlan& sp) {
   sp.tail_op[sp.n_tail++] = st.op;
   if (st.op == Op::Exp && opt.exp == ExpMode::poly) sp.tail_poly = true;
   // Name: the tail around the value in registers, e.g. "mul(neg(gat),col) => exp(vec)".
   std::ostringstream name;
   name << sp.name << " => " << to_string(st.op) << ((st.op == Op::Exp && sp.tail_poly) ? "_poly" : "") << "(vec)";
   sp.name = name.str();
-  return true;
 }
 
 void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
@@ -952,11 +823,21 @@ void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
     return;
   }
   // Kernel calls: a fused pair where two consecutive steps form a chain nobody else reads
-  // (build_pair_step), otherwise one call per step.
+  // (build_pair_step), otherwise one call per step. M4/R0: WHICH steps pair, and which further
+  // steps chain on as a tail, is `plan_.group[d]` (planner.fused_pairs / planner.chain_tails) —
+  // indexed here by the pairing's first step for O(1) lookup as the scan below reaches it.
   std::vector<int> uses(grp.steps.size(), 0);
   for (const ir::Step& st : grp.steps) {
     for (const ir::Slot* sl : {&st.a, &st.b, &st.c, &st.konst}) {
       if (sl->kind == ir::SlotKind::Step) ++uses[static_cast<std::size_t>(sl->index)];
+    }
+  }
+  std::vector<const ir::StepPairing*> pairing_at_first(grp.steps.size(), nullptr);
+  if (d < plan_.group.size()) {
+    for (const ir::StepPairing& pairing : plan_.group[d].pairings) {
+      if (pairing.first >= 0 && pairing.second >= 0) {
+        pairing_at_first[static_cast<std::size_t>(pairing.first)] = &pairing;
+      }
     }
   }
   // Inlined producers: a temporary per inlined gather; the operands that read that gather are
@@ -1068,11 +949,17 @@ void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
       k += 1;
       continue;
     }
-    if (opt.fuse_pairs && k + 1 < grp.steps.size() && build_pair_step(grp, uses, k, sp)) {
-      // The chain continues while the last covered step is read only by the next one and that
-      // step is a tail shape (a unary, or a binary with a literal / column).
-      std::size_t last = k + 1;
-      while (row_fusion_pays(Lt) && last + 1 < grp.steps.size() && uses[last] == 1 && add_tail_step(grp.steps[last + 1], last, sp)) ++last;
+    const ir::StepPairing* pairing = k < pairing_at_first.size() ? pairing_at_first[k] : nullptr;
+    const std::optional<rewrite::planner::PairShape> shape =
+        pairing != nullptr ? rewrite::planner::match_pair(grp, uses, k) : std::nullopt;
+    if (pairing != nullptr && shape.has_value() && build_pair_step(*shape, k, sp)) {
+      // The tail (planner.chain_tails) is already decided: append every step the annotation
+      // names, in order.
+      std::size_t last = static_cast<std::size_t>(pairing->second);
+      for (std::int32_t t : pairing->tail) {
+        apply_tail(grp.steps[static_cast<std::size_t>(t)], sp);
+        last = static_cast<std::size_t>(t);
+      }
       if (sp.n_tail > 0) {
         for (int v = 0; v < n_lane_variants; ++v) sp.acc_fn[0][v] = sp.acc_fn[1][v] = nullptr;  // epilogues apply no tails
       }
@@ -1119,6 +1006,7 @@ Interpreter::Interpreter(const ir::Program& program, Options options) : impl_(st
   im.tile_elems = static_cast<std::size_t>(options.tile) * static_cast<std::size_t>(im.Lt);
   im.values.assign(program.num_values() * static_cast<std::size_t>(im.Lt), 0.0);
   im.groups.resize(program.domains.size());
+  im.build_plan();
   im.decide_fusion();
   im.decide_inline();
   im.scratch.assign(static_cast<std::size_t>(im.max_steps + 5 + im.n_inline_temps) * im.tile_elems, 0.0);

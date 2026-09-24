@@ -2615,3 +2615,74 @@ instead of accepting it, after D60 (a correction that corrected a correct number
 first draft (an undeclared fire-count shorthand, amended the same day). In all three the prose was confident and
 the primary source was one command away. The rule that keeps working: read the signature, run the test, do not
 trust the sentence. See D53, D60, D64.
+
+## D67 — The two owner-directed M4 fixes measured TOGETHER for the first time: unlocking R2 and R1 moves the search by exactly zero, which confirms D63 §5's named constraint empirically (2026-09-25)
+
+(D65 is left free for the R2/adjoint package, which had landed its code as `89d2a45` but not yet its entry when
+this was written.)
+
+Two independent fixes were commissioned against D59's failed M4 exit gate and landed within an hour of each
+other, each measured only on its own tree:
+
+  * **D63** (`d8f9752`, `f9d55dc`, `aa6643d`) gave step pairing a price and made the cost model read the
+    planner's real plan. Measured its Stage A ladder BEFORE the R2 package landed.
+  * **The R2/adjoint package** (`89d2a45`) root-caused D52 point 4's crash to a test-harness buffer overrun and
+    replaced R2's safety gate with two structural floors. Measured its search result BEFORE D63 landed, and
+    reported it unchanged at the pre-D63 figure of 0.999716x.
+
+Neither measured the combination. This entry does, on `aa6643d`, `cmake --preset release`, Apple clang 21,
+fingerprint `d448afd70180`, `tools/egraph_scale/egraph_scale --extract --lane-tile 8 --fingerprint d448afd70180`.
+
+**Result: the ladder is byte-identical to D63's own table, which was measured without the R2 fix present.**
+
+| trades | D62 (neither fix) | D63's table (cost model only) | this run (BOTH fixes) | delta from D63 |
+|---|---|---|---|---|
+| 60 | 0.999707 | 0.996450 | **0.996450** | 0 |
+| 250 | 0.999583 | 0.995837 | **0.995837** | 0 |
+| 500 | 0.999459 | 0.995184 | **0.995184** | 0 |
+| 1,000 | 0.999221 | 0.994132 | **0.994132** | 0 |
+| 2,000 | 0.999055 | 0.994770 | **0.994770** | 0 |
+
+Extracted history, every size: `r5.group_formation` x2-4, `r6.materialise_boundaries`,
+`planner.reduction_fusion`, `planner.fused_pairs`. **Neither `r1.fold_uniform_columns` nor `r2.bucket_rows`
+appears in the extracted history at any size.** The whole improvement over D62 is D63's; the R2 package
+contributed nothing to it.
+
+**This is not "R2 and R1 still do not fire" — they demonstrably do.** Per-rule saturation counts
+(sites/added/memoised) on the FULL 2,000-trade tape, from the same runs:
+
+```
+round 1  r2.bucket_rows=3/3/0  r5.group_formation=3/3/0  r6.materialise_boundaries=3/3/0  r7.block_linmap=1/1/0
+round 2  r1.fold_uniform_columns=2/2/0  r2.bucket_rows=6/6/3  r5=6/6/3  r6=29/29/0
+round 3  r1.fold_uniform_columns=2/2/0  r2.bucket_rows=3/3/9  r5=3/3/9  r6=40/40/0
+```
+
+R2's 3 sites at round 1 are exactly the "3 of the full Stage A tape's 67" its own commit message reports, and R1
+picks up 2 sites at round 2 off the back of them — D52 point 1's predicted R2-then-R1 mechanism, live on the full
+tape. The candidates are built, priced and DISCARDED. So the gate really was covering material (0 -> 3 R2 sites,
+0 -> 2+ R1 sites on the full tape), and that material is worth nothing to extraction.
+
+**Why, and this is the point of the entry.** D63 §5 names the next binding constraint: "every data-movement
+coefficient in the fitted model is zero or nearly zero, so a rewrite that changes only data movement is priced at
+noise by construction — and R1-R7 are all data-movement rewrites" (`gather_ns` = 0, `reduction_epilogue_ns` = 0,
+`intermediate_ns` = 0, `byte_ns[L1]` = 5.7e-3 ns/byte). That was a diagnosis from the fitted coefficients. This is
+the same claim measured from the other end: two data-movement rewrites were switched from unavailable to
+available, on a tape where they open real sites, and the argmin did not move by one part in 10^6. **D63 §5 is
+confirmed, not merely plausible, and it is now the only remaining named cause of M4's failed gate.**
+
+**Two side observations, both worth keeping.**
+
+1. `aa6643d`'s claim that its plan-bridge fix leaves the ladder "byte-identical" was independently re-run here
+   rather than accepted: 0.996450 at 60 trades and 0.994770 at 2,000, identical before and after it. Verified.
+2. The first run of this measurement was made WITHOUT `--fingerprint` and silently fell back to
+   `CostCoefficients::defaults()`, reporting **0.977259x** — the same synthetic, never-fitted number D54/D56
+   reported as a 2.3% win and D57 retracted. It was caught in seconds only because the tool now prints
+   `== cost model: fingerprint '' fitted=NOT FOUND (synthetic defaults)` immediately above the result. That line
+   is D57's own fix doing its job; without it this entry would have repeated the single worst reporting error of
+   the run. Any future tool that can consume a cost model should print which one it loaded, on the same screen as
+   the number it produces.
+
+**Nothing about M4's verdict changes here.** `cross_stage_wins` stays 0; 0.5% remains an order of magnitude
+inside the model's own 64.6% error on decision-relevant domains, with no wall-clock bench behind it. This entry
+adds no code and no gate — it is a measurement that closes off one hypothesis (that the rule set's reach was a
+co-cause) and leaves exactly one standing.

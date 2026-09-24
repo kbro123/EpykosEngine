@@ -2356,7 +2356,25 @@ book is the empty root annotation, priced at 283,853 ns, tying the explicit five
 283,853 ns — but those two are the same execution, not two different ones: `exec::Interpreter::Impl::build_plan`
 expands an empty annotation into exactly `rewrite::planner::default_plan`, and `infer_plan` now prices it as
 exactly that. The gate's own estimate-level reading ("no worse than the search space's own default point") holds
-for the right reason. Measured wall clock: see the verification block.
+for the right reason.
+
+**Measured wall clock, fresh on this commit** (`bench/run.sh build/release/bench/optimise_egraph_full_rules_m1_bench`,
+release, 20 repetitions, 1-minute load 5.9 before / 5.82 after, under the cores/2 = 8.0 threshold, so the run is
+reportable; `bench/results/d448afd70180/optimise_egraph_full_rules_m1.json`), medians:
+
+| | default plan | extracted | ratio | D54's measurement |
+|---|---|---|---|---|
+| B=1 | 69,430.122 ns | 70,568.466 ns | **1.0164x** | 1.104x |
+| B=64 | 1,962,221.321 ns | 1,959,260.210 ns | **0.9985x** | 1.081x |
+
+**Both are inside `PROBLEM.md` §7's 1.02x target, which D59 recorded as missed at 1.0277x/1.0427x.** State plainly
+what that does and does not mean. The two benchmarks now execute the SAME plan — `default_program()` attaches the
+explicit five-rule annotation, `extracted_program()` attaches the empty one, and `Interpreter::Impl::build_plan`
+expands the empty one into the explicit one — so 1.0164x and 0.9985x are the noise floor between two Google
+Benchmark functions over identical work, not a measured difference between two plans. The clause is met by
+identity: the search's cheapest candidate IS the default plan's execution, and no candidate that would run
+one-kernel-per-step ties with it any more. It is NOT met by the search finding something better than the default,
+and nothing here should be read as saying it did.
 
 **Stage A search, `tools/egraph_scale/egraph_scale --extract`, E0, lane_tile 8, B=1, tile 256**, extracted
 estimate over the fully-paired default plan's estimate:

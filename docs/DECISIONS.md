@@ -1880,7 +1880,7 @@ Closes M4 the way D27 closed M1: a milestone-verdict decision, not a supersessio
 
 **Suites** (Apple clang 21, fingerprint `d448afd70180`, re-confirmed at M4-gate-2 and not re-run again by this docs-only package — no test reads `DECISIONS.md`/`RESUME.md`/`CLAUDE.md`/`README.md`/`ROADMAP.md`/`PROBLEM.md`/`DESIGN.md` content at runtime, confirmed by grep before relying on this): `ctest --preset release` 107/107, `--preset reference` 107/107, 0 failed each; `scripts/mutation_test.sh` **43/43** registered mutants caught, 0 survivors, exit 0.
 
-**Rule fire-counts, corrected in D60 after this entry propagated an unverified figure — see D60 for the correct numbers and how the error was caught.** ~~R1 0/0, R2 0/0 (with its safety gate), R3 0/0, R4a 0/0, R4b 0/0, R5 0/3, R6 0/3, R7 2/5, `fma_contraction` 0/0.~~ (struck through, not deleted, per the append-only convention: this is what shipped in the original closing commit and was wrong for R5 and R6.)
+**Rule fire-counts — REINSTATED as originally written; D60's "correction" of them was itself wrong, see D64.** R1 0/0, R2 0/0 (with its safety gate), R3 0/0, R4a 0/0, R4b 0/0, R5 0/3, R6 0/3, R7 2/5, `fma_contraction` 0/0. **Legend, which this entry originally left implicit and which is the whole cause of the D60 episode: each pair is `M1 book / Stage A tape`, sites on that fixture — NOT `fired / candidates`.** So "R5 0/3" reads "zero sites on the M1 book, three on the Stage A tape", which is what D51 measured and what a fresh run re-measures today (D64). The strike-through D60 applied here has been removed because the figures under it are correct; D60 is superseded by D64 and both are retained above and below per the append-only convention.
 
 **Landing.** Git protocol per CLAUDE.md: fresh worktree `.worktrees/m4-close`, branch `m4/m4-close` from `origin/integrate/m1-m5` at `d8700e8`. This entry, plus the RESUME.md §5 additions ("M4/<pkg>" one-liners and the "M4 result" block), the CLAUDE.md and README.md Status paragraphs, the ROADMAP.md M4 "Result" paragraph, DESIGN.md §6's per-rule status column and §7's closing "As built" paragraph, and PROBLEM.md §7's "As built" line, are committed together as `docs(m4): close M4 — verdict fail, D59`. No SwapEngine file opened. No data compiled or reported here beyond what the R0/CM/R-a/R-b/R-c/EG-core/EG-integration/C1/M4-gate/M4-fix/M4-gate-2 packages already measured and committed (D47–D58) — this package's own contribution is the closing verdict and cross-reference, not a fresh measurement.
 
@@ -2208,3 +2208,69 @@ its own and changes none — it adds no rewrite, so there is no arithmetic to cl
 for EG-core); every candidate it enumerates is still extracted and verified at its rule chain's own accumulated
 class, and `tests/optimise/egraph_full_rules_stage_a_test.cpp`'s two record-point checks (including D57's check
 against the TRUE unrewritten tape) pass unchanged. No `-ffast-math`. No SwapEngine file opened.
+
+## D64 — Correction to D60: D59's rule fire-counts were right all along; "0/3" meant `M1 book / Stage A`, not `fired / candidates` (2026-09-24)
+
+(D63 is deliberately left free: a concurrent package was told to take it before this entry was written. Numbering
+skips rather than races, per the append-only convention.)
+
+**D60 is withdrawn as a correction.** Its measurement is sound and its conclusion about D59 is not. D60 re-ran
+`rewrite_r5_group_formation_e0_test` and `rewrite_r6_materialise_boundaries_e0_test`, measured three sites each on
+the full Stage A tape, and concluded that D59's recorded "R5 0/3, R6 0/3" was wrong and should read 3/3. But D59's
+figures already said three on Stage A. The pair is `M1 book / Stage A tape` — sites on each fixture — not
+`fired / candidates`. D59 simply never wrote the legend down.
+
+**Re-measured today, fresh binaries, this checkout at `c13c95a`, Apple clang 21, fingerprint `d448afd70180`,
+`cmake --preset release`:**
+
+  * `R5GroupFormation.DoesNotFireOnTheM1Book` — passes. **M1 book: 0 sites.**
+  * `R5GroupFormation.FiresOnTheStageATapeAndVerifiesE0` — `[ r5 ] 3 producer/consumer pairs merged on the Stage A
+    tape (67 -> 64 domains, 423235 -> 406661 recorded values)`. **Stage A: 3 sites.** 4/4 tests pass.
+  * `R6MaterialiseBoundaries.RealRulePassesTheDifferentialCheckOnM1Book` — `[ r6 ] M1 book: 0 site(s) checked`.
+    **M1 book: 0 sites.**
+  * `R6MaterialiseBoundaries.FiresOnTheFullStageATapeCountsReported` — `[ r6 ] Stage A (full, 67 domains):
+    3 domain(s) would inline (16574 rows) into 3 distinct consumer(s)`. **Stage A: 3 sites.** 4/4 tests pass.
+
+So R5 is 0/3 and R6 is 0/3 under D59's own notation, exactly as D59 recorded. D59's line is reinstated above with
+the legend made explicit, and this entry is the appended supersession that CLAUDE.md's rule requires for that edit.
+
+**Four independent sources agree, and any one of them would have settled it before D60 was written:**
+
+1. D59's own prose, one bullet above the table it struck through: "R5 (0/3), R6 (0/3) and R7 (2/5) **do fire**, on
+   Stage A and (R7 only) the M1 book." D59 never claimed R5 or R6 were dead; it listed them among the rules that fire.
+2. D51 point 4: "R6 finds ZERO candidates on the M1 book ... and 3 domains (16,574 rows) into 3 distinct consumers
+   on the full Stage A tape (2,000 trades)." That is "0/3", written out in words.
+3. The same D51 point, on R7: the M1 book's linmap domain "still splits in two" and Stage A's "splits into 5". That
+   is "2/5" — and R7 is the one rule whose first number is non-zero, precisely because it is the only one that fires
+   on the M1 book. The notation is self-consistent across all three rules.
+4. `tests/rewrite/r5_group_formation_e0_test.cpp`'s own header comment: "The rule is then run on the M1 book
+   (expected: 0 ...)", and the test is literally named `DoesNotFireOnTheM1Book`.
+
+**Root cause, and why it is the same one twice.** D60 was right that a number travelled through D56 -> D57 -> D58
+-> D59 by restatement. It was wrong about which number, and it introduced a second error of exactly the class it
+was written to warn about: it re-derived the measurement correctly and then misread the document it was correcting,
+without checking the prose one line above the figure or the two entries it cites. Its own strongest clue pointed
+the other way and was read backwards — D60 notes it "could not find '0 of 3' recorded anywhere in D50, D51, D54",
+which is true, and the reason is that nobody ever wrote "0 of 3"; D59 wrote "0/3" meaning something else. An
+unfamiliar notation with no legend is not evidence of an error in the number.
+
+**The actual defect was notational, so the fix is notational.** D53 established that a package's gate must state
+whether its deliverable actually fires. That is now tightened: **a fire-count must name its fixture inline and
+never rely on an undeclared pair ordering** — write "M1 book 0 sites, Stage A 3 sites", not "0/3". A bare pair of
+integers next to a rule name is ambiguous between at least `fixture A / fixture B`, `fired / candidates` and
+`before / after`, and this project has now spent two decision entries and three agent-investigations on that
+ambiguity. Both surviving R5/R6 tests already print the long form at runtime (`[ r5 ] 3 producer/consumer pairs
+merged on the Stage A tape`, `[ r6 ] M1 book: 0 site(s) checked`); it is only the prose that compressed it.
+
+**Nothing downstream moves.** D60's own closing sentence — "this entry corrects the documented count, not any
+measured outcome" — is the one part of it that holds, and it holds for this entry too. M4's verdict (D59), the
+perf-gate ratios, the 66/66-domain catalogue coverage and the e-graph search results were all computed from the
+rules' real behaviour, never from the table. R5's and R6's merge and materialisation decisions are part of what
+those numbers already measured. No code changes, no test changes, no re-run of any gate.
+
+**Still true, and unaffected by any of this:** of the seven rules plus `fma_contraction`, only R5, R6 and R7 fire
+on a real fixture at all. R1, R2, R3, R4a, R4b and `fma_contraction` are 0/0 — zero on the M1 book and zero on
+Stage A — each for its own independently measured reason (D51 point 5, D52). R2's zero is the safety gate of D52
+point 4 standing in front of a live `adjoint::` crash, and R1's zero is downstream of R2's, since D52 point 1 is
+explicit that R1 exists to fold the columns a freshly-split R2 bucket domain makes uniform. That remains M4's
+second structural finding after the cost model's unpriced `plan.group`, and it is under investigation separately.

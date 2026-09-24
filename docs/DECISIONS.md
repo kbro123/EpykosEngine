@@ -1745,3 +1745,107 @@ Verification (fingerprint d448afd70180): every new/changed test built and run in
 directly on this run, not re-cited from D54/D56). No SwapEngine file opened; no engine maths, adjoint or IR file
 touched — this package's changes are confined to `include/epykos/rewrite/{fma_contraction,verifier}.hpp`,
 `src/rewrite/verifier.cpp`, five test files under `tests/rewrite/` and `tests/optimise/`, and docs.
+
+## D58 — M4-gate (run 2): independent re-verification on a fresh worktree; every number re-measured, not
+re-cited, except where the source is provably unchanged (2026-09-24)
+
+Package M4-gate-2, same brief as D56's own run 1 (CLAUDE.md HARD RULE 10, "report honestly"; "you do not decide
+the verdict"): fresh worktree (`.worktrees/m4-gate-2`, branch `m4/m4-gate-2` from `origin/integrate/m1-m5` at
+`5d4ae2a`, D57's own tip), fresh bootstrap, fresh `release`/`reference`/`mutation` builds, full re-run. Fingerprint
+unchanged, `d448afd70180`.
+
+**Build + test:** `ctest --preset release` 107/107 (0 failed); `ctest --preset reference` 107/107 (0 failed).
+`scripts/mutation_test.sh` (`EPYKOS_MUTATION_JOBS=8`): baseline 53/53 gates pass, all 43 registered mutants caught
+(0 survivors), exit 0 — the same 43 as D56 (this cycle's own D57 added no new mutant, only a doc/tolerance fix and
+a new verifier function with its own two regression tests, both inside the 53-gate set already). `scripts/
+catalogue_regen.sh --check --no-build`: no-op against the committed `src/catalogue/generated/`.
+
+**Cost model:** `84.4241%` mean absolute relative error over every measured domain / `69.2692%` restricted to
+domains ≥ 1% of their config's time — re-cited from `bench/results/d448afd70180/cost_model_validation.md`, not
+re-run: `git log` confirms `src/optimise/cost.cpp` / `include/epykos/optimise/cost.hpp` unchanged since `e5c20bc`
+(D48), and the fingerprint matches, so a fresh ~15-point `profile`-preset calibration grid (multi-minute
+build+capture, `tools/costmodel/calibrate.py`) would reproduce the identical fit, not verify anything new. Both
+numbers still miss the < 25% target, as already reported.
+
+**EG experiments, re-run fresh (not re-cited) on this worktree's own binaries:**
+- **REDISCOVERY** (M1 book): the cost-model estimate still TIES the default plan exactly (program node 0, 10
+  domains, history `planner.reduction_fusion`, 281395 ns both sides, ratio 1.0 — `optimise_egraph_full_rules_m1_test`)
+  for the same reason as D54/D56 (`plan_bridge.hpp`'s `group`/`emitted` pricing gap, unchanged). Wall-clock
+  (`bench/optimise/egraph_full_rules_m1_bench`, load1 2.98→3.17, well under the 8.0 threshold): `BM_ExtractedFullB1`
+  / `BM_DefaultPlanB1` = 68252.950 / 66414.857 ns = **1.0277x**; `BM_ExtractedFullB64` / `BM_DefaultPlanB64` =
+  1948872.124 / 1869086.294 ns = **1.0427x**. Still misses the 1.02x target (barely, at B=1) — materially closer
+  than D54's own first measurement (1.104x/1.081x) and close to D56's re-measurement on a quiet machine
+  (1.0246x/1.0431x); the small residual gap is consistent with ordinary run-to-run noise on a shared machine, not a
+  regression. `rediscover_ok` = **false** (1.0277 > 1.02), `rediscover_ratio` = 1.0277 (B=1, the headline pairing).
+- **CROSS-STAGE** (small 60-trade Stage A fixture, `optimise_egraph_full_rules_stage_a_test`, bound
+  `{max_iterations=3, max_program_nodes=500}` — the same deliberately small bound D54/D57 fixed after the
+  unbounded-growth finding; not re-attempted at the full bound, for the same documented reason: 1.87 GB and
+  climbing by round 4 on this exact fixture, a machine-time risk this package's own budget does not re-spend
+  re-deriving): extraction finds program node 19 (55 domains), history `r5.group_formation r5.group_formation
+  planner.reduction_fusion` (R5 applied twice in sequence, a shape the fixed single-pass pipeline cannot express)
+  — reproduced EXACTLY, including D57's own correction: priced under the real fitted
+  `bench/results/d448afd70180/cost_model.json` (loaded, confirmed `LOADED` not the synthetic fallback), the ratio
+  against the default plan is **0.999716** — noise, not a win — while the old synthetic-model ratio (`defaults()`,
+  never fitted to any machine) is still 0.977299, the exact number D54/D56 mistakenly reported as "a real 2.3%
+  win" before D57's fix. Both extraction's own record-point check (`result.program` vs its annotated self) AND
+  D57's added check (the extracted program vs the TRUE unrewritten 60-trade tape) pass bit-for-bit. **Per D57,
+  PROBLEM.md §7's cross-stage-win gate item is NOT satisfied by this experiment; `cross_stage_wins` = 0 is the
+  honest count** — the earlier "1" reported by D56 (before this run re-verified with the fitted model) reflected
+  the same synthetic-cost-model mistake D57 already corrected in the test itself, not a new regression found here.
+- **AD MODE** (`tests/rewrite/ad_mode_stage_a_shapes_test.cpp`, 3/3 pass — a pure function of already-committed
+  numbers, no fresh Stage A timing needed): book-only Jacobian block (n_outputs=1) picks **Reverse** under both the
+  8.0x M1-calibrated default multiplier and the Stage-A-measured 21.33x multiplier (32.635 ms adjoint / 1.53 ms
+  one-pass, this run's own baseline numbers below). Full risk ladder (n_outputs=2,043) picks **Forward** under
+  both multipliers, matching the ~6.2–6.3x forward-mode advantage RESUME.md's M3 result already reports (forward
+  estimate 107.109 ms vs the measured 1373.39 ms ladder, ratio 0.078 — reverse's missing B=64/chord-batching term
+  and forward's `one_pass_ns`-from-a-plain-interpreter proxy are the same two documented, opposite-cancelling
+  cost-model gaps as D54, not re-derived, only re-confirmed present).
+- **E1 EXTRACTION**: `optimise_egraph_e1_extract_m1_test` (1/1) passes at E1 tolerance, same plan as REDISCOVERY's
+  E0 result on this fixture (same root cause).
+
+**Extracted programs verified at their class:** true — every one of `optimise_egraph_full_rules_m1_test` (2/2),
+`optimise_egraph_e1_extract_m1_test` (1/1), `optimise_egraph_m1_extract_test` (2/2) and
+`optimise_egraph_full_rules_stage_a_test` (2/2, including D57's `verify_extraction`-style check against the true
+original tape) passes.
+
+**Catalogue (Apple clang, this machine):** `InterpreterCatalogueE0` / `AdjointCatalogueE0` gates green as before —
+M1 book 3/3 groups (Interpreter) / 9/9 groups (Adjoint), both 100%; default Stage A 28/28 groups / 66/66 groups,
+both 100%, 0 mismatches throughout. Coverage BY TIME (a fresh ad hoc `-DEPYKOS_EXEC_PROFILE` probe, `profile`
+preset library only, never a checked-in target — the same convention D55/D56 used, built and run for this record
+only): `exec::Interpreter` M1 book 0.3805, Stage A default **0.0956** (the headline figure, `catalogue_coverage_time`
+below); `adjoint::Adjoint` M1 book 0.9980, Stage A default 0.9989 — all four within a percentage point or two of
+D56's own numbers (0.3888 / 0.1003 / 0.9983 / 0.9993), the residual difference being ordinary run-to-run
+measurement noise on a machine shared with other agents' builds, not a code change (no exec/adjoint/catalogue
+source file differs between this worktree and D56's). This package did not re-verify the known GCC-only coverage
+shortfall (task `task_919ea449`) locally (no Docker re-check this run, out of this package's own time budget); the
+CI poll below is the fresh evidence for whether it still holds.
+
+**Stage A perf vs the M3 baseline** (`bench/run.sh build/release/bench/stage_a_stage_a_bench`, load1 7.2 → 3.4,
+threshold 8.0: ok; `scripts/perf_gate.py ... --json bench/results/d448afd70180/m4.json`): verdict **PASS**, 17/17
+benchmarks within the 1.25x self-regression threshold, 0 regressions, 0 new, 0 not measured — every ratio 0.86–1.03x
+(fresh/baseline), i.e. flat to modestly faster, consistent with D56's own "no absolute win from M4 yet on the real
+Stage A shape" (R1–R4/fma still do not fire there; row-fusion / AD-mode-per-block are not wired onto Stage A's own
+live pipeline). `o3_speedup` = 1.160 (`BM_Adjoint/1`, single-lane reverse ladder, 32.635→28.145 ms); the batched
+B=64 reverse figure is 1.113x (280.650→252.259 ms, the real win — the catalogue covers ~99.9% of Adjoint's own
+wall time on Stage A, D55); the forward ladder (`BM_ForwardLadder`, untouched by any M4 rule) is flat at 1.006x
+(1383.955→1375.565 ms). `o4_speedup` = 1.028 (`BM_Run/64`, the scenario-grid benchmark per `bench/stage_a/
+stage_a_bench.cpp`'s own header comment: "O2 / O4: B scenario lanes of the grid, each recalibrated, chord
+policy"); `BM_Run/1` and `BM_Run/8` are 1.030x / 1.030x, consistent. `o2_speedup` = 1.006 (`BM_Evaluate/1/1`, the
+file's own "O2 evaluation: the whole-program interpreter alone at the record point" — CLAUDE.md's baseline "price
+the book (O2) 1.5ms" is exactly this benchmark, 1.522→1.513 ms).
+
+**M1 strict pairing** (informational, D9/D27, never gated; `bench/optimise/egraph_e1_extract_m1_bench` at its
+actual production default, `use_catalogue = true`): `BM_E1ExtractedB1` / `BM_E1ExtractedB64` = 67492.276 /
+1945736.377 ns against the already-committed `bench/hand` v0 numbers (46214.839 / 710456.654 ns) — ratios
+**1.460 (B=1) / 2.739 (B=64)**, reproducing D56's own as-shipped finding (1.4615 / 2.7434) almost exactly: M4/C1's
+catalogue still silently disables `ExpMode::poly` on every catalogue-eligible domain (`task_f7b9c87d`, unfixed,
+out of this package's own file scope), so the historical ~1.19x/1.62x `exp_poly` win is still not visible on this
+pairing with the catalogue at its production default.
+
+**CI (D46's own discipline: never trust Apple-clang-only):** `gh run list --branch integrate/m1-m5` polled for
+the run matching this package's own landed commit, `gh run view` to completion on both `ubuntu-latest` and
+`macos-latest`. Result and run id/URL are in this package's own final report (`docs/RESUME.md` §5's landing entry
+for this package carries the same figure) rather than duplicated a third time here.
+
+No SwapEngine file opened. This package's own diff against `origin/integrate/m1-m5` before its commit touches only
+`docs/` and `bench/results/` paths — no engine, maths, rewrite, adjoint, catalogue or optimise source file.

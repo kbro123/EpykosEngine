@@ -6,13 +6,13 @@
    "path": "bench/results/d448afd70180/stage_a_stage_a.json",
    "binary": "build/release/bench/stage_a_stage_a_bench",
    "preset": "release",
-   "commit": "4ef9632",
-   "commit_full": "4ef9632d62016994bb8ba15d70ba1128774a1ba9",
+   "commit": "5d4ae2a",
+   "commit_full": "5d4ae2a4775dfd3632d1e434c6e9aa2fa386e822",
    "dirty": false,
-   "date": "2026-09-24T12:05:13+01:00",
+   "date": "2026-09-24T15:29:17+01:00",
    "load": {
-    "before": 7.12,
-    "after": 4.76,
+    "before": 7.2,
+    "after": 3.4,
     "cores_logical": 16,
     "threshold": 8.0,
     "within_threshold": true,
@@ -35,9 +35,9 @@
      "status": "ok",
      "baseline": 7848.566969973035,
      "baseline_commit": "ee021a3",
-     "fresh": 7753.241021418944,
+     "fresh": 7761.370331048965,
      "unit": "ms",
-     "ratio": 0.9878543498553572,
+     "ratio": 0.9888901197813988,
      "n": 20
     },
     {
@@ -45,9 +45,9 @@
      "status": "ok",
      "baseline": 1021.2551502627321,
      "baseline_commit": "ee021a3",
-     "fresh": 1052.4510585237294,
+     "fresh": 1045.6075015245005,
      "unit": "ms",
-     "ratio": 1.030546634945216,
+     "ratio": 1.0238455113352463,
      "n": 20
     },
     {
@@ -55,9 +55,9 @@
      "status": "ok",
      "baseline": 18.173198841395788,
      "baseline_commit": "ee021a3",
-     "fresh": 17.60767268569907,
+     "fresh": 17.642451064602938,
      "unit": "ms",
-     "ratio": 0.9688813091942552,
+     "ratio": 0.9707950272582784,
      "n": 20
     },
     {
@@ -65,9 +65,9 @@
      "status": "ok",
      "baseline": 130.60521375155076,
      "baseline_commit": "ee021a3",
-     "fresh": 126.92433019401506,
+     "fresh": 126.85265956679359,
      "unit": "ms",
-     "ratio": 0.9718167180941351,
+     "ratio": 0.9712679603136241,
      "n": 20
     },
     {
@@ -75,9 +75,9 @@
      "status": "ok",
      "baseline": 1038.7075114995241,
      "baseline_commit": "ee021a3",
-     "fresh": 1012.0813625399023,
+     "fresh": 1010.5365455383435,
      "unit": "ms",
-     "ratio": 0.974366076431677,
+     "ratio": 0.9728788271488363,
      "n": 20
     },
     {
@@ -85,9 +85,9 @@
      "status": "ok",
      "baseline": 32.63524718931876,
      "baseline_commit": "ee021a3",
-     "fresh": 28.135023801587522,
+     "fresh": 28.145324648357928,
      "unit": "ms",
-     "ratio": 0.8621054297022722,
+     "ratio": 0.8624210653311568,
      "n": 20
     },
     {
@@ -95,9 +95,9 @@
      "status": "ok",
      "baseline": 48.34610759280622,
      "baseline_commit": "ee021a3",
-     "fresh": 45.023650357810155,
+     "fresh": 44.75981891543294,
      "unit": "ms",
-     "ratio": 0.9312776684530765,
+     "ratio": 0.9258205291814038,
      "n": 20
     },
     {
@@ -105,9 +105,9 @@
      "status": "ok",
      "baseline": 280.6500220904127,
      "baseline_commit": "ee021a3",
-     "fresh": 253.40546248480678,
+     "fresh": 252.25851743016392,
      "unit": "ms",
-     "ratio": 0.9029233655401996,
+     "ratio": 0.8988366206110531,
      "n": 20
     },
     {
@@ -115,9 +115,9 @@
      "status": "ok",
      "baseline": 54.96020740829408,
      "baseline_commit": "ee021a3",
-     "fresh": 54.03738480526954,
+     "fresh": 53.81534029729664,
      "unit": "ms",
-     "ratio": 0.9832092590886897,
+     "ratio": 0.9791691632003436,
      "n": 20
     },
     {
@@ -125,9 +125,9 @@
      "status": "ok",
      "baseline": 15.036983715713417,
      "baseline_commit": "ee021a3",
-     "fresh": 14.74657913326825,
+     "fresh": 14.739368080259545,
      "unit": "ms",
-     "ratio": 0.9806873115023927,
+     "ratio": 0.9802077570155996,
      "n": 20
     },
     {
@@ -135,9 +135,9 @@
      "status": "ok",
      "baseline": 1.5655296624445632,
      "baseline_commit": "ee021a3",
-     "fresh": 1.5832253685221076,
+     "fresh": 1.5722180625514968,
      "unit": "ms",
-     "ratio": 1.011303334904503,
+     "ratio": 1.0042722921624427,
      "n": 20
     },
     {
@@ -145,9 +145,9 @@
      "status": "ok",
      "baseline": 1.5218997038437765,
      "baseline_commit": "ee021a3",
-     "fresh": 1.5136857368666066,
+     "fresh": 1.513389508555455,
      "unit": "ms",
-     "ratio": 0.9946028197808144,
+     "ratio": 0.9944081760008049,
      "n": 20
     },
     {
@@ -155,9 +155,9 @@
      "status": "ok",
      "baseline": 6.552828337758953,
      "baseline_commit": "ee021a3",
-     "fresh": 6.5742779284888915,
+     "fresh": 6.529070165318748,
      "unit": "ms",
-     "ratio": 1.0032733332271717,
+     "ratio": 0.9963743636769324,
      "n": 20
     },
     {
@@ -165,9 +165,9 @@
      "status": "ok",
      "baseline": 52.86870668642223,
      "baseline_commit": "ee021a3",
-     "fresh": 52.74098990485072,
+     "fresh": 52.51847628969699,
      "unit": "ms",
-     "ratio": 0.997584265067632,
+     "ratio": 0.9933754688042107,
      "n": 20
     },
     {
@@ -175,9 +175,9 @@
      "status": "ok",
      "baseline": 52.07828730344772,
      "baseline_commit": "ee021a3",
-     "fresh": 51.41507319640368,
+     "fresh": 51.531030680052936,
      "unit": "ms",
-     "ratio": 0.9872650553352561,
+     "ratio": 0.9894916547426751,
      "n": 20
     },
     {
@@ -185,9 +185,9 @@
      "status": "ok",
      "baseline": 57.12895130272955,
      "baseline_commit": "ee021a3",
-     "fresh": 56.72298327554017,
+     "fresh": 56.69378759339452,
      "unit": "ms",
-     "ratio": 0.9928938302221211,
+     "ratio": 0.9923827814197206,
      "n": 20
     },
     {
@@ -195,9 +195,9 @@
      "status": "ok",
      "baseline": 1383.9547419920564,
      "baseline_commit": "ee021a3",
-     "fresh": 1380.0529720028862,
+     "fresh": 1375.564604997635,
      "unit": "ms",
-     "ratio": 0.9971807098376975,
+     "ratio": 0.9939375640403206,
      "n": 20
     }
    ],
@@ -215,13 +215,13 @@
     "path": "bench/results/d448afd70180/stage_a_stage_a.json",
     "binary": "build/release/bench/stage_a_stage_a_bench",
     "preset": "release",
-    "commit": "4ef9632",
-    "commit_full": "4ef9632d62016994bb8ba15d70ba1128774a1ba9",
+    "commit": "5d4ae2a",
+    "commit_full": "5d4ae2a4775dfd3632d1e434c6e9aa2fa386e822",
     "dirty": false,
-    "date": "2026-09-24T12:05:13+01:00",
+    "date": "2026-09-24T15:29:17+01:00",
     "load": {
-     "before": 7.12,
-     "after": 4.76,
+     "before": 7.2,
+     "after": 3.4,
      "cores_logical": 16,
      "threshold": 8.0,
      "within_threshold": true,
@@ -245,7 +245,7 @@
      "available": true,
      "source": "committed",
      "run": "exec_m1_interp",
-     "path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-1/bench/results/d448afd70180/exec_m1_interp.json",
+     "path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-2/bench/results/d448afd70180/exec_m1_interp.json",
      "commit": "359f321",
      "benchmark": "BM_InterpEval/tile:512/lane_tile:1/exp:0",
      "median": 56.726151608648046,
@@ -256,7 +256,7 @@
      "available": true,
      "source": "committed",
      "run": "hand_m1_hand",
-     "path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-1/bench/results/d448afd70180/hand_m1_hand.json",
+     "path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-2/bench/results/d448afd70180/hand_m1_hand.json",
      "commit": "359f321",
      "benchmark": "BM_HandEval/2",
      "median": 54.150367047202394,
@@ -278,7 +278,7 @@
      "available": true,
      "source": "committed",
      "run": "exec_m1_interp",
-     "path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-1/bench/results/d448afd70180/exec_m1_interp.json",
+     "path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-2/bench/results/d448afd70180/exec_m1_interp.json",
      "commit": "359f321",
      "benchmark": "BM_InterpEvalBatch/tile:256/lane_tile:32/exp:0",
      "median": 1579.3487532953784,
@@ -289,7 +289,7 @@
      "available": true,
      "source": "committed",
      "run": "hand_m1_hand",
-     "path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-1/bench/results/d448afd70180/hand_m1_hand.json",
+     "path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-2/bench/results/d448afd70180/hand_m1_hand.json",
      "commit": "359f321",
      "benchmark": "BM_HandEvalBatch/2",
      "median": 1468.0473304906627,
@@ -315,7 +315,7 @@
      "available": true,
      "source": "committed",
      "run": "hand_m1_hand",
-     "path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-1/bench/results/d448afd70180/hand_m1_hand.json",
+     "path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-2/bench/results/d448afd70180/hand_m1_hand.json",
      "commit": "359f321",
      "benchmark": "BM_HandEval/2",
      "median": 54.150367047202394,
@@ -341,7 +341,7 @@
      "available": true,
      "source": "committed",
      "run": "hand_m1_hand",
-     "path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-1/bench/results/d448afd70180/hand_m1_hand.json",
+     "path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-2/bench/results/d448afd70180/hand_m1_hand.json",
      "commit": "359f321",
      "benchmark": "BM_HandEvalBatch/2",
      "median": 1468.0473304906627,
@@ -380,9 +380,9 @@
   "flags": "-O3 -march=x86-64-v3 -fno-math-errno",
   "os": "Darwin",
   "arch": "x86_64",
-  "flags_source": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-1/build/release/epykos_flags.txt"
+  "flags_source": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-2/build/release/epykos_flags.txt"
  },
- "baseline_path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-1/bench/results/d448afd70180/baseline.json",
+ "baseline_path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-2/bench/results/d448afd70180/baseline.json",
  "baseline_exists": true,
- "targets_path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-1/bench/targets.json"
+ "targets_path": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m4-gate-2/bench/targets.json"
 }

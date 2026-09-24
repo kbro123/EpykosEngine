@@ -782,3 +782,35 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   DESIGN,RESUME}.md` -- no engine maths, adjoint or IR file, no SwapEngine file opened. Gate
   results (fingerprint d448afd70180) and the landing protocol's own outcome are in this package's
   own final report, not duplicated here.
+
+2026-09-24  M4-gate-2  independent re-verification of M4 to date, run 2 -- full account in
+  `docs/DECISIONS.md` D58, summarised here. Fresh worktree from `origin/integrate/m1-m5` at
+  `5d4ae2a` (D57's own tip), fingerprint unchanged (d448afd70180). `ctest --preset release`
+  107/107, `--preset reference` 107/107 (0 failed each); `scripts/mutation_test.sh` 43/43
+  registered mutants caught, 0 survivors; `scripts/catalogue_regen.sh --check` a no-op. Cost
+  model error re-cited (84.4241% / 69.2692%, `src/optimise/cost.cpp` unchanged since e5c20bc --
+  not re-run). EG experiments re-run fresh, not re-cited: rediscovery still ties the default on
+  the cost model (ratio 1.0) but misses the 1.02x wall-clock target barely (1.0277x at B=1,
+  1.0427x at B=64, `bench/optimise/egraph_full_rules_m1_bench`, quiet machine); cross-stage
+  reproduces D57's own correction exactly -- under the real fitted cost model the Stage A
+  "r5.group_formation x2 + reduction_fusion" candidate is 0.999716x the default (noise), not the
+  0.977299x the synthetic model gives, so `cross_stage_wins` = 0 and PROBLEM.md §7's cross-stage
+  item stays unsatisfied; AD-mode reproduces the Reverse (book) / Forward (full ladder) split
+  exactly under both cost multipliers; every extracted program (M1 book E0, M1 sub-book E1, Stage
+  A small fixture) verifies at its declared class, including D57's added true-original check.
+  Catalogue coverage: 100% (groups and rows) on both reference workloads on Apple clang, as
+  before; a fresh ad hoc `-DEPYKOS_EXEC_PROFILE` probe puts the catalogue at 9.56% of Stage A's
+  own Interpreter wall time and 99.89% of its Adjoint wall time (0.3805 / 0.9980 on the M1 book),
+  within a point or two of D56's own numbers -- ordinary measurement noise, not a code change.
+  Stage A perf vs the M3 baseline (`bench/run.sh` + `scripts/perf_gate.py` into
+  `bench/results/d448afd70180/m4.json`, load1 7.2->3.4): verdict PASS, 17/17 within 1.25x, 0
+  regressions -- o2_speedup 1.006 (`BM_Evaluate/1/1`), o3_speedup 1.160 single-lane / 1.113
+  batched (`BM_Adjoint/1`, `/64`), o4_speedup 1.028 (`BM_Run/64`); the forward ladder is flat at
+  1.006x, untouched by any M4 rule. M1 strict pairing (informational): 1.460x (B=1) / 2.739x
+  (B=64) against bench/hand v0, reproducing D56's own as-shipped finding that M4/C1's catalogue
+  still silently disables `exp_poly` on every catalogue-eligible domain (`task_f7b9c87d`, still
+  unfixed, still out of this package's own file scope). CI verification and this package's own
+  landing outcome (rebase, push, `ci_green`, run id/URL) are in this package's own final report;
+  this package's diff against `origin/integrate/m1-m5` touches only `docs/` and `bench/results/`
+  paths -- no engine, maths, rewrite, adjoint, catalogue or optimise source file. No SwapEngine
+  file opened.

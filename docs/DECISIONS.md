@@ -2306,3 +2306,45 @@ survives: R2 and R1 have no sites on either REFERENCE fixture, the crash of D52 
 unowned, and the R2-then-R1 chain that does fire on the bounded book still extracts at **0.999716x fitted** —
 noise — in the same test run. Rules firing and the search finding a win are different claims, and only the second
 one is M4's gate. That points back at the cost model's unpriced `plan.group`, not at the rule set's reach.
+
+## D66 — `EGraph::saturate`'s plan context is the tier root for every rule, which makes R6's upstream-decision guard inert inside the e-graph; the memo is sound anyway, for a different reason than its comment gave (2026-09-24)
+
+(D63 and D65 are left free for two concurrent packages already told to take them.)
+
+**Finding, from reading D62's own landed code rather than its entry.** `src/optimise/egraph.cpp`'s matching loop
+passes every rule the program node's plan-tier ROOT annotation, `plans_[pid][0].content`, which is
+`ir::PlanAnnotations{}` and is never written. The comment there justified the application memo by asserting that
+"Structural rules (R1-R7) never depend on plan content today (their own `match` is unconditionally empty)".
+
+**That clause is false for R6.** Seven of the eight rules leave the `ir::PlanAnnotations` parameter of `match`
+unnamed and genuinely ignore it (R1, R2, R3, R4a, R4b, R5, R7 — checked by signature, one per file).
+`R6MaterialiseBoundaries::match` names it `plan` and reads it:
+
+```
+if (d < plan.domain.size() && !(plan.domain[d] == ir::DomainPlan{})) continue;  // already decided upstream
+```
+
+**The memo is still sound, and D62's own entry argues it correctly.** D62 point 1 says "every skipped call would
+have returned content the graph already holds", and the surviving half of the code comment says "`match`'s two
+inputs never change for this node". Both are true and neither needs the false clause: soundness rests on the
+context being CONSTANT, not on rules ignoring it. No behaviour changes here and no gate is re-run — this entry
+corrects a load-bearing comment and records the consequence the comment obscured.
+
+**The consequence, which is real but is a SEARCH limitation, not a correctness one.** Because R6 only ever sees
+the empty root, its upstream-decision guard never fires inside the e-graph. R6 therefore re-proposes inlining for
+domains a sibling plan node has already decided, instead of declining them. Every extraction is still verified
+against the true unrewritten program (D57), so the cost is duplicate plan-tier work, never a wrong program. This
+compounds with D62 point 4's own finding that the plan tier, not the program tier, is the binding constraint
+once `NoFreshCrossRule` is on.
+
+**Why this is not fixed here.** Giving R6 the plan node actually being extended would make the guard live, but it
+would also make `match`'s inputs vary per plan node, which is exactly the property D62's memo key relies on not
+varying. The fix is therefore not a one-line context swap: it needs a memo key that includes the plan node, and
+it should be measured against the plan-tier growth it is meant to reduce. Left open, with the requirement written
+into the code comment so the next change cannot make the swap without also widening the key.
+
+**Method note, and the third instance today of the same failure mode.** This was found by checking a premise
+instead of accepting it, after D60 (a correction that corrected a correct number, withdrawn in D64) and D64's own
+first draft (an undeclared fire-count shorthand, amended the same day). In all three the prose was confident and
+the primary source was one command away. The rule that keeps working: read the signature, run the test, do not
+trust the sentence. See D53, D60, D64.

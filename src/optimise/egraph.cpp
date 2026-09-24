@@ -339,11 +339,24 @@ SaturationReport EGraph::saturate(const std::vector<const rewrite::Rule*>& rules
         }
 
         const ir::Program& prog = programs_[static_cast<std::size_t>(pid)].program;
-        // Structural rules (R1-R7) never depend on plan content today (their own `match` is
-        // unconditionally empty); a rule that DOES want plan context for a Program-kind site
-        // sees the program's OWN root (unplanned) annotation, node 0 of its plan tier. That
-        // annotation is `ir::PlanAnnotations{}` and nothing ever writes to it, which is precisely
-        // why (A)'s memo below is sound: `match`'s two inputs never change for this node.
+        // A rule matching a Program-kind site sees the program's OWN root (unplanned) annotation,
+        // node 0 of its plan tier. That annotation is `ir::PlanAnnotations{}` and nothing ever
+        // writes to it, which is why (A)'s memo below is sound: `match`'s two inputs never change
+        // for this node. NOTE the memo's soundness rests on that constancy ALONE -- an earlier
+        // version of this comment also claimed "structural rules (R1-R7) never depend on plan
+        // content (their own `match` is unconditionally empty)", which is FALSE for R6:
+        // `R6MaterialiseBoundaries::match` names its `plan` parameter and declines any domain
+        // whose `plan.domain[d]` is already decided ("already decided upstream",
+        // src/rewrite/r6_materialise_boundaries.cpp). R1-R5, R7 and fma_contraction do all leave
+        // the parameter unnamed and genuinely ignore it. The memo is unaffected either way, but
+        // the CONSEQUENCE of always passing the empty root is real and is a search limitation,
+        // not a correctness one: inside the e-graph R6's upstream-decision guard is inert, so R6
+        // re-proposes for domains a sibling plan node has already decided instead of declining
+        // them. Extraction still verifies every candidate against the true original program
+        // (D57), so this costs duplicate plan-tier work, never a wrong program. Giving R6 the
+        // plan node actually being extended -- rather than the tier root -- would make the guard
+        // live, and would also make `match`'s inputs vary per plan node, so it must come with a
+        // memo key that includes the plan node. See D66.
         const ir::PlanAnnotations& ctx = plans_[static_cast<std::size_t>(pid)][0].content;
 
         SiteMemo& memo = memo_[static_cast<std::size_t>(pid)][slot];

@@ -224,8 +224,8 @@ that is a difference of terms, such as a swap PV, the tolerance is relative to t
 
 | # | rule | class | recovers (in SwapEngine terms) | fires? (M1 book / Stage A, D51/D52/D50, measured) |
 |---|---|---|---|---|
-| R1 | fold uniform columns (`k==1`, `konst==0`, `w==1`) | E0 | `cpn_is_plain` | no / no (0/0 — the signature pass already folds this at construction time) |
-| R2 | bucket rows by uniform-column signature | E0 | per-kind batches | no / no (0/0 with its own safety gate; verifies correct on both fixtures without the gate, but a real `adjoint::` crash on the resulting split bars shipping that way, D52 pt.4) |
+| R1 | fold uniform columns (`k==1`, `konst==0`, `w==1`) | E0 | `cpn_is_plain` | M1 book 0 sites / Stage A 0 sites on an unrewritten tape (the signature pass already folds this at construction time) — but **Stage A 16 sites** on the 80 domains the tape becomes after an R2 pass, which is the pairing R1 exists for (D65) |
+| R2 | bucket rows by uniform-column signature | E0 | per-kind batches | **M1 book 0 sites / Stage A 3 sites** (D65). The `adjoint::` crash D52 pt.4 blocked this on was a test-harness buffer-sizing defect, not an adjoint defect; the gate is now two structural floors (consolidate something; be a per-kind partition). Without the per-kind floor: M1 book 5 sites / Stage A 23 sites, all bit-exact but fragmenting rather than batching, and enough proposals to blow the e-graph's node bound |
 | R3 | elide trivial maps (length-1 segments, identity gathers ⇒ merge domains) | E0 | `sub_is_identity` | no / no (0/0) |
 | R4a | push pure unary ops through gathers toward the smaller domain, then CSE (`exp`) | E0 | `exp` once per time | no / no (0/0 — a record-time df memo already removes the redundancy on both fixtures) |
 | R4b | same for `recip` (`a/b → a·recip(b)`) | E1 | shared `INV` | no / no (0/0 — heterogeneous per-curve gathers avoid the shared-site shape) |
@@ -257,15 +257,22 @@ nothing could gate a rule that populated it (D49 point 5).
 pass's own column classification (§5.5) already performs R1's fold at construction time -- but IS needed after a
 rewrite that introduces a fresh Column without classifying it, which R2 does by construction (a bucket's
 signature columns are uniform within it by definition). R2 buckets by MAXIMAL CONTIGUOUS RUNS of matching
-signature, not a sort (a sort would need renumbering every downstream reader of the domain, program-wide); it
-also rejects any split with a singleton run, both because a singleton is not a "kind's batch" (this rule's own
-point) and because, measured directly, a large singleton-heavy split crashes building the rewritten program's
-`adjoint::Adjoint` on the Stage A tape specifically (not the M1 book, which has no scan domain and handles the
-same shape correctly) -- a fault in `src/adjoint/` this package's own budget did not extend to chasing down; see
-D52. Consequence: at this landing, R1, R2 and R3 all verify correct (bit-identical interpreter and adjoint) on
-their own synthetic tests, and R2 additionally verifies correct on the M1 book and the Stage A tape WITHOUT its
-safety gate (a diagnostic build, not what ships) but does not currently fire on either real fixture WITH it; R1
-and R3 do not fire on either real fixture regardless. `rewrite::detail` (`bucket_split_edit.hpp`) holds the
+signature, not a sort (a sort would need renumbering every downstream reader of the domain, program-wide).
+
+**Amended by D65.** R2's gate used to reject any split with a singleton run, partly on quality grounds and partly
+because a large singleton-heavy split reproducibly aborted with heap corruption while the rewritten program's
+adjoint ran. That abort is a caller-side buffer-sizing defect in R-a's own Stage A test -- it handed
+`adjoint::Adjoint::run` a 70-entry `state_bar` for a tape with 148 Inputs -- and nothing in `src/adjoint/` is
+wrong; the harness now derives state and buffer lengths from the Program so the class is unreachable, and
+`tests/adjoint/state_bar_bounds_e0_test.cpp` pins the write-bounds clause the caller broke. R2's gate is now two
+structural floors: the split must consolidate something (fewer buckets than rows), and it must be a PER-KIND
+PARTITION -- every distinct signature in exactly one contiguous run, which is what "per-kind batches" above
+means. Singleton buckets are allowed. Measured: R2 fires on the M1 book's 10 domains 0 times and on the full
+Stage A tape's 67 domains 3 times, every site bit-identical interpreter and adjoint; R1, given that R2 pass,
+fires 0 times on the M1 book and 16 times on the 80 domains Stage A becomes. With the per-kind floor removed R2
+fires 5 and 23 times and is still bit-exact, but the splits fragment rather than batch (M1 domain 4: 2,432 rows,
+2 kinds, 1,243 contiguous runs) and the resulting proposal count blows `optimise::EGraph`'s node bound. R3 does
+not fire on either fixture regardless. `rewrite::detail` (`bucket_split_edit.hpp`) holds the
 editing primitives this package's three rules share (`drop_owned_entries`, `shift_domain_ids`, `eliminate_domain`)
 -- renumbering domain ids after a domain is split or removed, and redirecting every reference to an eliminated
 domain's rows to the value it now equals; `recompute_reads` itself is M4/R-b's own `ir_edit.hpp` (landed the same

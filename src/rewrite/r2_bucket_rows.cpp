@@ -2,7 +2,9 @@
 
 #include <cstdint>
 #include <cstring>
+#include <set>
 #include <utility>
+#include <vector>
 
 #include "epykos/mutation/mutation.hpp"
 #include "epykos/rewrite/bucket_split_edit.hpp"
@@ -85,22 +87,56 @@ std::vector<std::pair<std::int32_t, std::int32_t>> run_buckets(std::int32_t rows
       lo = r;
     }
   }
-  // Reject a split with ANY singleton run: DESIGN.md §6's own point for R2 is forming the "per-kind
-  // BATCHES a hand-written kernel would form" (this file's own header) -- a run of exactly one row
-  // is not a kind's batch, it is one row, and this landing does not additionally try to fold it into
-  // a neighbouring bucket. This is also a safety gate, not just a quality one: measured directly,
-  // splitting a 177-row Stage A domain into 168 buckets (159 of them singletons) crashes building
-  // the SPLIT program's adjoint::Adjoint (a heap-corruption-shaped SIGABRT some way past the actual
-  // fault, src/adjoint/plan.cpp / adjoint_e0.cpp, not this package's code) -- yet the SAME shape (a
-  // 16,103-row M1 book domain splitting into 9,152 buckets, most of them singletons too) builds and
-  // runs correctly, bit-exact including the adjoint, at the record point AND over the M1 differential
-  // ball. The M1 program has no scan domain; the Stage A tape has five. This package did not have
-  // the budget to chase that difference into src/adjoint/ (code R-a does not own) to confirm it is
-  // the cause rather than something else Stage-A-scale-specific, so it closes the whole shape off by
-  // construction instead of shipping a rule that can crash: R-a's notes flag this as a finding for
-  // the adjoint's own owners, with the reproduction above.
-  for (const auto& [lo, hi] : ranges) {
-    if (hi - lo < 2) return {};
+  // ---- the two quality floors (D65; both structural, neither a constant) ------------------------
+  //
+  // The gate used to be "reject a split with ANY singleton run", because a singleton-heavy Stage A
+  // split reproducibly aborted with heap corruption while its adjoint ran, and D52 point 4
+  // attributed that to src/adjoint/ and walled the whole shape off rather than ship a rule that can
+  // crash. D65 chased it: nothing in src/adjoint/ is wrong. R-a's own Stage A test passed
+  // `StageATape::record_quotes()` -- the 70 calibration quotes -- as the state and the state_bar
+  // buffer of a tape with 148 Inputs, and adjoint::Adjoint::run wrote 78 doubles past the end of
+  // that buffer (tests/rewrite/record_point_check.hpp's header). Singleton buckets are not unsound
+  // and never were; with the caller fixed, every site of the pure-soundness version of this gate
+  // verifies bit-exact, interpreter and adjoint, on both real fixtures.
+  //
+  // (1) The split must CONSOLIDATE SOMETHING: as many buckets as rows is one one-row domain per
+  //     row, strictly more IR describing the same maths with no batch formed anywhere.
+  if (!epykos::mutant("r2.accepts_full_singleton_split") && ranges.size() >= idx(rows)) return {};
+
+  // (2) The split must be a PER-KIND PARTITION: every distinct signature occupies exactly ONE run,
+  //     i.e. the recording order already groups the kinds. That is literally what DESIGN.md §6 asks
+  //     R2 for ("the per-kind BATCHES a hand-written kernel would form") and, since runs >= kinds
+  //     always, `ranges.size() == distinct` is the whole test -- no threshold, no ratio, no row
+  //     count.
+  //
+  //     Without it the rule proposes FRAGMENTATIONS rather than batches, which is what these two
+  //     fixtures mostly offer: the kinds are there, but interleaved. Measured (D65), rows / runs /
+  //     distinct signatures: M1 book domain 4, 2,432 / 1,243 / 2; M1 book domain 3, 16,103 / 9,152 /
+  //     2,169; Stage A domain 6, 17,083 / 7,805 / 22. A contiguous-run split of any of those makes
+  //     hundreds or thousands of near-singleton domains out of a handful of real kinds. They are
+  //     E0-correct (measured directly) and useless, and they are not free to propose: with floor (2)
+  //     off, R2 fires on 5 of the M1 book's 10 domains, R1 then matches 19,619 of the resulting
+  //     19,624, and `optimise::EGraph` -- which materialises one whole-Program alternative per rule
+  //     SITE (D49) -- hits its 2,000-program-node bound in 2 rounds on 10,111 structural
+  //     site-matches, 700 s, failing both of `egraph_full_rules_m1_test`'s exit-gate assertions
+  //     (D59 clause 1). This floor is the rule declining to propose what it was never asked to form.
+  //
+  //     What it does NOT do is judge whether a real per-kind split PAYS -- that is the cost model's
+  //     job (D47/D48), and this floor deliberately admits a thin one (Stage A domain 41: 13 rows,
+  //     12 kinds, 12 runs) rather than invent a rows-per-bucket threshold HARD RULE 9 forbids.
+  //
+  // Mutant r2.accepts_fragmented_split: drops floor (2). Mutant r2.accepts_full_singleton_split:
+  // drops floor (1). Both splits preserve every value, so no differential check can see either --
+  // the match count is the only witness, and r2_bucket_rows_e0_test.cpp has a synthetic domain for
+  // each (an all-distinct column; an interleaved {1,1,2,2,1,1} column).
+  if (!epykos::mutant("r2.accepts_fragmented_split")) {
+    std::set<std::vector<std::uint64_t>> kinds;
+    std::vector<std::uint64_t> key(varying.size());
+    for (std::int32_t r = 0; r < rows; ++r) {
+      for (std::size_t c = 0; c < varying.size(); ++c) key[c] = bits_of(varying[c]->values[idx(r)]);
+      kinds.insert(key);
+    }
+    if (ranges.size() != kinds.size()) return {};
   }
   return ranges;
 }

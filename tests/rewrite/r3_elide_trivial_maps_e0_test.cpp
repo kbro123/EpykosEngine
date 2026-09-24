@@ -154,14 +154,18 @@ TEST(R3ElideTrivialMaps, MatchesAndVerifiesOnTheStageATape) {
   const std::vector<rewrite::MatchSite> sites = rule.match(program, ir::PlanAnnotations{});
   std::cout << "[ r3 ] Stage A: " << sites.size() << " of " << program.domains.size() << " domain(s) are pure length-1 sums\n";
 
-  const std::vector<double> quotes = epykos::test::stage_a_tape().record_quotes();
+  // The FULL recorded input vector (Program::inputs order: the 70 calibration quotes AND the 78
+  // realised fixings recorded alongside them), never StageATape::record_quotes() -- that is the
+  // quote subset alone, and exec::Interpreter::run / adjoint::Adjoint::run read and WRITE exactly
+  // `program.inputs.size()` entries with no length to check (D65, record_point_check.hpp's header).
+  const std::vector<double>& state = program.input_values;
   rewrite::VerifyOptions options;
   options.ball.rho = 0.0005;
   options.ball.draws = 3;
   options.adjoint_ball_draws = 2;
   options.max_outputs_checked = 24;
   const rewrite::RuleVerifyReport report =
-      rewrite::verify_rule(rule, program, quotes.data(), static_cast<int>(quotes.size()), static_cast<int>(program.outputs.size()),
+      rewrite::verify_rule(rule, program, state.data(), static_cast<int>(state.size()), static_cast<int>(program.outputs.size()),
                            ir::PlanAnnotations{}, options);
   EXPECT_TRUE(report.passed()) << report.report.summary();
 }

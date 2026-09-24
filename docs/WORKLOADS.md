@@ -138,6 +138,7 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   | `r1.wrong_slot` | the fold always overwrites operand `a`, even when the uniform column was read from `b` / `c` / `konst` | a synthetic `Mul(gather, uniform column)` step (the column in `b`) |
   | `r2.wrong_run_boundary` | a run boundary compares row `r` to `r-2` instead of `r-1`, mis-sizing the buckets | a synthetic 5-row domain whose signature column is `{1,1,2,2,2}` (asserted bucket sizes `{2,3}`) |
   | `r2.column_slice_uses_wrong_bucket` | bucket `k` (`k>0`) is built from bucket `k-1`'s row range instead of its own | the same synthetic domain, checked value-for-value against the un-split program |
+  | `r2.accepts_full_singleton_split` | `run_buckets` drops its "consolidate something" floor, so a domain whose every row has a distinct signature becomes one one-row domain per row | `tests/rewrite/r2_bucket_rows_e0_test.cpp`'s all-distinct synthetic domain: the rule must report no site there (the split preserves every value, so only the match count can see it) |
   | `r3.off_by_one_member` | a domain's row substitutes the NEXT row's sole member instead of its own | a synthetic length-1-Sum domain of more than one row |
   | `r3.treats_length_two_as_trivial` | a two-member segment row is wrongly accepted as trivial, dropping the second additive term | a synthetic two-member Sum domain |
 

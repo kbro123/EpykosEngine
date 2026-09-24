@@ -18,6 +18,8 @@
 #include "epykos/rewrite/r1_fold_uniform_columns.hpp"
 #include "epykos/rewrite/verifier.hpp"
 #include "epykos/tape/tape.hpp"
+#include "r2_pass.hpp"
+#include "record_point_check.hpp"
 #include "stage_a/stage_a_test_helpers.hpp"
 
 #ifndef EPYKOS_FP_CONTRACT_OFF
@@ -100,10 +102,9 @@ TEST(R1FoldUniformColumns, SyntheticDomainFoldsOnlyTheUniformColumnAndCatchesBot
 // so no domain `ir::infer` ever produces can have a uniform Column left for R1 to find. R1 is not
 // dead code: it exists for a Program a REWRITE has since changed underneath the signature pass's
 // own classification -- concretely, R2 bucket rows, whose own point is that every column of a
-// freshly-split bucket domain is uniform by construction (r2_bucket_rows.hpp's own header; this
-// file's synthetic test above exercises R1's own fold directly, not that pairing -- R2's own
-// safety gate, D52, currently keeps it from firing on either real fixture too, so the pairing is
-// not currently observable end to end on either).
+// freshly-split bucket domain is uniform by construction (r2_bucket_rows.hpp's own header). Until
+// D65 that pairing was not observable end to end, because R2's own safety gate kept IT from firing
+// on either real fixture as well; the two tests at the bottom of this file now measure it.
 TEST(R1FoldUniformColumns, MatchesAndVerifiesOnTheM1Book) {
   const fixtures::Book book = fixtures::make_m1_book();
   const epykos::Tape tape = fixtures::record_m1(book);
@@ -130,14 +131,64 @@ TEST(R1FoldUniformColumns, MatchesAndVerifiesOnTheStageATape) {
   std::cout << "[ r1 ] Stage A: " << sites.size() << " of " << program.domains.size() << " domain(s) fold at least one column\n";
   EXPECT_EQ(sites.size(), 0u) << "a domain straight out of ir::infer should never have a foldable column (see the test's own comment)";
 
-  const std::vector<double> quotes = epykos::test::stage_a_tape().record_quotes();
+  // The FULL recorded input vector (Program::inputs order: the 70 calibration quotes AND the 78
+  // realised fixings recorded alongside them), never StageATape::record_quotes() -- that is the
+  // quote subset alone, and exec::Interpreter::run / adjoint::Adjoint::run read and WRITE exactly
+  // `program.inputs.size()` entries with no length to check (D65, record_point_check.hpp's header).
+  const std::vector<double>& state = program.input_values;
   rewrite::VerifyOptions options;
   options.ball.rho = 0.0005;
   options.ball.draws = 3;
   options.adjoint_ball_draws = 2;
   options.max_outputs_checked = 24;
   const rewrite::RuleVerifyReport report =
-      rewrite::verify_rule(rule, program, quotes.data(), static_cast<int>(quotes.size()), static_cast<int>(program.outputs.size()),
+      rewrite::verify_rule(rule, program, state.data(), static_cast<int>(state.size()), static_cast<int>(program.outputs.size()),
                            ir::PlanAnnotations{}, options);
   EXPECT_TRUE(report.passed()) << report.report.summary();
+}
+
+// D53/D64's gate, and the point of D65: R1's fire-count on each named fixture ONCE R2 HAS RUN.
+// Fresh out of ir::infer it is 0 of the M1 book's 10 domains and 0 of the Stage A tape's 67 (the
+// two tests above). After one full R2 pass it is 0 of the M1 book's 10 (R2 finds no per-kind split
+// there at all: every one of its five bucketable domains has its kinds interleaved -- measured in
+// D65, e.g. domain 4 is 2,432 rows over 2 kinds in 1,243 contiguous runs) and 16 of the 80 domains
+// the Stage A tape becomes after its 3 splits. These two tests measure exactly that, rather than
+// arguing it from the rules' shapes.
+TEST(R1FoldUniformColumns, DoesNotFireOnTheM1BookEvenAfterAnR2Pass) {
+  const fixtures::Book book = fixtures::make_m1_book();
+  const ir::Program program = ir::infer(fixtures::record_m1(book));
+  std::size_t r2_sites = 0;
+  const ir::Program after_r2 = epykos::test::apply_r2_everywhere(program, r2_sites);
+  const rewrite::R1FoldUniformColumns rule;
+  const std::size_t n_sites = rule.match(after_r2, ir::PlanAnnotations{}).size();
+  std::cout << "[ r1 ] M1 book after " << r2_sites << " R2 split(s): " << n_sites << " of " << after_r2.domains.size()
+            << " domain(s) fold at least one column\n";
+  // Not an invariant of R1, a measured property of this fixture: R2 has nothing to hand it here.
+  // If R2 ever learns to sort rows into kinds (D52 point 2 / D65's own open item) this flips, and
+  // that is exactly when the number wants re-measuring rather than restating.
+  EXPECT_EQ(r2_sites, 0u) << "R2 now fires on the M1 book: re-measure R1's own count here";
+  EXPECT_EQ(n_sites, 0u);
+}
+
+TEST(R1FoldUniformColumns, FiresOnTheStageATapeOnceR2HasSplitItsBucketDomains) {
+  const ir::Program program = ir::infer(epykos::test::stage_a_tape().tape);
+  std::size_t r2_sites = 0;
+  const ir::Program after_r2 = epykos::test::apply_r2_everywhere(program, r2_sites);
+  // The whole R2 pass first: a chain of structural rewrites has to be bit-exact as a chain, not
+  // only one rewrite at a time (record point only -- this tape's Inputs feed an implicit block).
+  const auto pass_report = epykos::test::compare_at_record_point(program, after_r2);
+  EXPECT_TRUE(pass_report.passed) << "the " << r2_sites << "-site R2 pass itself: " << pass_report.detail;
+
+  const rewrite::R1FoldUniformColumns rule;
+  const std::vector<rewrite::MatchSite> sites = rule.match(after_r2, ir::PlanAnnotations{});
+  std::cout << "[ r1 ] Stage A after " << r2_sites << " R2 split(s): " << sites.size() << " of " << after_r2.domains.size()
+            << " domain(s) fold at least one column\n";
+  ASSERT_GT(r2_sites, 0u) << "R2 fires nowhere on the Stage A tape: the pairing this test measures is gone";
+  ASSERT_GT(sites.size(), 0u) << "R2 split " << r2_sites << " domain(s) and left R1 nothing to fold: the pairing D52 predicted is broken";
+
+  const rewrite::Proposal p = rule.propose(after_r2, ir::PlanAnnotations{}, sites.front());
+  ASSERT_TRUE(p.is_structural());
+  ir::validate(*p.program);
+  const auto report = epykos::test::compare_at_record_point(after_r2, *p.program);
+  EXPECT_TRUE(report.passed) << "domain " << sites.front().domain << ": " << report.detail;
 }

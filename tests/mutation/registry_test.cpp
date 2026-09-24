@@ -63,6 +63,8 @@ const std::vector<std::string> documented = {
     "r1.wrong_slot",
     "r2.wrong_run_boundary",
     "r2.column_slice_uses_wrong_bucket",
+    "r2.accepts_full_singleton_split",
+    "r2.accepts_fragmented_split",
     "r3.off_by_one_member",
     "r3.treats_length_two_as_trivial",
     "r6.ignore_reduction_boundary",

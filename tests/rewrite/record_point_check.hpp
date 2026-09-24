@@ -13,6 +13,23 @@
 // tape is self-consistent at, for a plain exec::Interpreter / adjoint::Adjoint exactly as well as
 // for solver::ImplicitProgram, so it is enough to confirm a structural rewrite changed no bits
 // there, without teaching this package's rule tests solver::ImplicitProgram's own API.
+//
+// The record point and the buffer sizes are taken FROM THE PROGRAM (`before.input_values`,
+// `before.inputs.size()`, `before.outputs.size()`), never from the caller -- see D65. This helper
+// originally took `state` / `n_inputs` / `n_outputs` as parameters and R-a's own Stage A tests
+// passed `StageATape::record_quotes()` for all three. That vector is the 70 calibration QUOTES,
+// a strict subset of the Stage A tape's 148 Inputs (the quotes plus the realised fixings recorded
+// alongside them). `exec::Interpreter::run` and `adjoint::Adjoint::run` take exactly
+// `program.inputs.size()` entries and, per their own contract (adjoint.hpp: "zero allocations in
+// run()"), are handed raw pointers with no length to check -- so the 70-entry vector was read 78
+// doubles past its end by the forward pass and, fatally, WRITTEN 78 doubles past the end of the
+// `state_bar` vector sized from the same 70. That 624-byte heap write overflow is the
+// "heap-corruption-shaped abort some distance past the actual fault inside src/adjoint/" D52
+// point 4 attributed to the adjoint and walled R2 off for; it is a caller-side sizing defect and
+// nothing in `src/adjoint/` is wrong (D65). M4/R-b and R-c hit the same SIGABRT independently and
+// fixed it caller-side in their own tests (r4a_push_unary_e0_test.cpp, r5_group_formation_e0_test.cpp,
+// fma_contraction_verify_test.cpp all carry a comment saying to use `program.input_values`);
+// deriving it here instead of documenting it again is what makes the whole class unreachable.
 #pragma once
 
 #include <algorithm>
@@ -43,11 +60,23 @@ struct RecordPointReport {
 
 // Bitwise-compares exec::Interpreter(before) vs exec::Interpreter(after) over every output, and
 // adjoint::Adjoint(before) vs adjoint::Adjoint(after) over a sample of seeded outputs (one-hot
-// out_bar), both AT `state` ONLY -- no ball.
-inline RecordPointReport compare_at_record_point(const ir::Program& before, const ir::Program& after, const double* state, int n_inputs,
-                                                 int n_outputs, int max_outputs_checked = 24) {
+// out_bar), both AT THE RECORD POINT ONLY (`before.input_values`) -- no ball, and no caller-chosen
+// state or buffer length (see this file's header).
+inline RecordPointReport compare_at_record_point(const ir::Program& before, const ir::Program& after, int max_outputs_checked = 24) {
   RecordPointReport report;
   std::ostringstream detail;
+
+  // A structural rewrite preserves the recording's own interface; anything else is a bug in the
+  // rule, not something to paper over with a differently sized buffer.
+  const int n_inputs = static_cast<int>(before.inputs.size());
+  const int n_outputs = static_cast<int>(before.outputs.size());
+  if (before.input_values.size() != before.inputs.size() || after.inputs.size() != before.inputs.size() ||
+      after.outputs.size() != before.outputs.size()) {
+    report.passed = false;
+    report.detail = "record point: the before/after programs disagree on their input or output count";
+    return report;
+  }
+  const double* const state = before.input_values.data();
 
   exec::Interpreter interp_before(before, {});
   exec::Interpreter interp_after(after, {});

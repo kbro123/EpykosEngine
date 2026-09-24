@@ -265,9 +265,7 @@ TEST(EGraphFullRulesStageA, ExtractedE0PlanPassesVerificationAndIsNoWorseThanThe
   const ir::Program& unannotated = result.program;  // .plan left empty: the interpreter derives its own default
   ir::Program annotated = result.program;
   annotated.plan = result.plan;  // the extracted decision
-  const epykos::test::RecordPointReport record_check = epykos::test::compare_at_record_point(
-      unannotated, annotated, program.input_values.data(), static_cast<int>(program.input_values.size()),
-      static_cast<int>(program.outputs.size()));
+  const epykos::test::RecordPointReport record_check = epykos::test::compare_at_record_point(unannotated, annotated);
   EXPECT_TRUE(record_check.passed) << record_check.detail;
 
   // D57 (alongside, not instead of, the check above): the check above only ever compares
@@ -278,9 +276,7 @@ TEST(EGraphFullRulesStageA, ExtractedE0PlanPassesVerificationAndIsNoWorseThanThe
   // never mutated). `options.max_exactness = E0` means no E1 rule can be in `result.history`, so
   // this is a bitwise check, same record-point reasoning as above (a ball is still the wrong check
   // on an implicit-node tape's quotes).
-  const epykos::test::RecordPointReport extraction_check = epykos::test::compare_at_record_point(
-      program, annotated, program.input_values.data(), static_cast<int>(program.input_values.size()),
-      static_cast<int>(program.outputs.size()));
+  const epykos::test::RecordPointReport extraction_check = epykos::test::compare_at_record_point(program, annotated);
   EXPECT_TRUE(extraction_check.passed) << "extracted program vs the true original Stage A tape (D57): " << extraction_check.detail;
 
   const ir::PlanAnnotations default_plan = rewrite::planner::default_plan(program, rewrite::planner::DefaultPlanOptions{});

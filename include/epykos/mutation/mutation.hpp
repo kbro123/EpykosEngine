@@ -54,6 +54,8 @@ inline constexpr std::string_view registry[] = {
     "r1.wrong_slot",                 // rewrite::R1FoldUniformColumns: the literal is always written into operand `a`, even when the uniform column was read from b / c / konst
     "r2.wrong_run_boundary",         // rewrite::R2BucketRows: a run boundary compares row r to r-2 instead of r-1, mis-sizing the buckets
     "r2.column_slice_uses_wrong_bucket", // rewrite::R2BucketRows: bucket k (k>0) is built from bucket (k-1)'s row range instead of its own
+    "r2.accepts_full_singleton_split", // rewrite::R2BucketRows: run_buckets drops its "consolidate something" floor, so a domain whose every row has a distinct signature is split into one one-row domain per row -- more IR, no batch formed (D65; tests/rewrite/r2_bucket_rows_e0_test.cpp's all-distinct synthetic domain)
+    "r2.accepts_fragmented_split", // rewrite::R2BucketRows: run_buckets drops its per-kind floor, so a domain whose kinds are INTERLEAVED is split into one domain per contiguous run -- hundreds of fragments where a handful of kinds exist (D65; tests/rewrite/r2_bucket_rows_e0_test.cpp's interleaved synthetic domain)
     "r3.off_by_one_member",          // rewrite::R3ElideTrivialMaps: a domain's row substitutes the NEXT row's sole member instead of its own
     "r3.treats_length_two_as_trivial", // rewrite::R3ElideTrivialMaps: a two-member segment row is wrongly accepted as trivial, dropping the second term
     "r6.ignore_reduction_boundary",  // R6MaterialiseBoundaries: a producer feeding a Sum/Affine segment (or an output) is inlined away anyway -- its consumer's segment then reads an unmaterialised row

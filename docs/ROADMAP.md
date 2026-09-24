@@ -119,8 +119,10 @@ correction), is **0.999716x** — noise, not a win, so `cross_stage_wins` = 0. T
 (84.4% overall / 69.3% restricted to material domains) misses its <25% target; `EGraph::saturate` has no
 redundancy/subsumption check and grows unboundedly on Stage-A-shaped programs past a small bound (1.87 GB and climbing
 by round 4 on a 60-trade fixture, killed); rules R1, R2 (with its safety gate), R3, R4a, R4b and fma-contraction fire
-zero times on both reference fixtures (each for a different, independently measured reason, D51/D52); a live,
-reproducible `adjoint::` crash on a real R2 split shape (D52 point 4, `src/adjoint/`) and a silent
+zero times on both reference fixtures (each for a different, independently measured reason, D51/D52; **R2 and R1
+unblocked by D65 — R2 now fires on 0 of the M1 book's 10 domains and 3 of the full Stage A tape's 67, and R1 on 16
+of the 80 domains Stage A becomes after that R2 pass, which changes nothing about what the search selects**); a live,
+reproducible `adjoint::` crash on a real R2 split shape (D52 point 4, `src/adjoint/` — **root-caused and closed by D65: it was a test-harness buffer-sizing defect, not an adjoint defect**) and a silent
 `ExpMode::poly`-disabled interaction with the catalogue's own production default (`task_f7b9c87d`) are both flagged,
 unowned by any M4 package. CI: `ci_green` = false, citing a pre-existing, unrelated GCC-only catalogue-coverage gap
 (`task_919ea449`) confirmed unfixed at both M4-gate runs; this package's own diff touches only `docs/` and

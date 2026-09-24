@@ -27,14 +27,17 @@
 // several domains would break the scan machinery's row-order contract (ir/program.hpp), so a scan
 // or a level-split scan-candidate domain never matches.
 //
-// A split with any run of exactly one row is ALSO rejected (r2_bucket_rows.cpp's own comment on
-// run_buckets has the full account, D52): a one-row run is not a "kind's batch" this rule's own
-// point is to form, and a large singleton-heavy split has been measured to crash building the
-// rewritten program's adjoint::Adjoint on the Stage A tape specifically (not the M1 book, which
-// has no scan domain and handles the identical shape correctly) -- a fault inside src/adjoint/
-// this package does not own. Consequence, reported per CLAUDE.md rather than hidden: with this
-// gate, R2 does not currently fire on EITHER real fixture (0/10 M1 domains, 0/67 Stage A domains),
-// though it is verified correct on both WITHOUT the gate.
+// Two structural quality floors, neither a constant (r2_bucket_rows.cpp's own comment on
+// run_buckets has the full account and the measurements): the split must CONSOLIDATE SOMETHING
+// (fewer buckets than rows), and it must be a PER-KIND PARTITION (every distinct signature in
+// exactly one contiguous run -- literally the "per-kind batches" of DESIGN.md §6). The gate read
+// "reject any singleton run at all" from D52 until D65, on the strength of a singleton-heavy Stage
+// A split that aborted with heap corruption during its adjoint; D65 found that fault in R-a's own
+// test harness, not in src/adjoint/, so singleton buckets are allowed now and the floors say what
+// they actually mean. Measured fire-counts with the floors as shipped: 0 of the M1 book's 10
+// domains, 3 of the Stage A tape's 67. Measured with the per-kind floor OFF (the pure soundness
+// gate): 5 of 10 and 23 of 67, all bit-exact, but fragmenting rather than batching -- and enough
+// proposals to blow the e-graph's own node bound. D65 has the numbers.
 #pragma once
 
 #include <string>

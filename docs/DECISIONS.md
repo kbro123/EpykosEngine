@@ -1880,6 +1880,29 @@ Closes M4 the way D27 closed M1: a milestone-verdict decision, not a supersessio
 
 **Suites** (Apple clang 21, fingerprint `d448afd70180`, re-confirmed at M4-gate-2 and not re-run again by this docs-only package — no test reads `DECISIONS.md`/`RESUME.md`/`CLAUDE.md`/`README.md`/`ROADMAP.md`/`PROBLEM.md`/`DESIGN.md` content at runtime, confirmed by grep before relying on this): `ctest --preset release` 107/107, `--preset reference` 107/107, 0 failed each; `scripts/mutation_test.sh` **43/43** registered mutants caught, 0 survivors, exit 0.
 
-**Rule fire-counts, restated once for the closing record** (M1 book / Stage A default; every rule's own E0/E1 differential and mutation gate passes regardless of whether it fires on a real fixture — `rules_e0_ok` and `rules_e1_ok` both true): R1 0/0, R2 0/0 (with its safety gate), R3 0/0, R4a 0/0, R4b 0/0, R5 0/3, R6 0/3, R7 2/5, `fma_contraction` 0/0.
+**Rule fire-counts, corrected in D60 after this entry propagated an unverified figure — see D60 for the correct numbers and how the error was caught.** ~~R1 0/0, R2 0/0 (with its safety gate), R3 0/0, R4a 0/0, R4b 0/0, R5 0/3, R6 0/3, R7 2/5, `fma_contraction` 0/0.~~ (struck through, not deleted, per the append-only convention: this is what shipped in the original closing commit and was wrong for R5 and R6.)
 
 **Landing.** Git protocol per CLAUDE.md: fresh worktree `.worktrees/m4-close`, branch `m4/m4-close` from `origin/integrate/m1-m5` at `d8700e8`. This entry, plus the RESUME.md §5 additions ("M4/<pkg>" one-liners and the "M4 result" block), the CLAUDE.md and README.md Status paragraphs, the ROADMAP.md M4 "Result" paragraph, DESIGN.md §6's per-rule status column and §7's closing "As built" paragraph, and PROBLEM.md §7's "As built" line, are committed together as `docs(m4): close M4 — verdict fail, D59`. No SwapEngine file opened. No data compiled or reported here beyond what the R0/CM/R-a/R-b/R-c/EG-core/EG-integration/C1/M4-gate/M4-fix/M4-gate-2 packages already measured and committed (D47–D58) — this package's own contribution is the closing verdict and cross-reference, not a fresh measurement.
+
+## D60 — Correction to D59: R5 and R6 fire on 3 of 3 candidates on Stage A, not 0 of 3 (2026-09-24)
+
+D59's closing record restated "R5 0/3, R6 0/3" as the rule fire-counts for the milestone's own permanent account.
+That figure is wrong and has now been independently re-derived as wrong twice, by two separate agents, neither
+looking for this specifically: the order-independence investigation launched the same day (checking whether R6's
+own cross-rule precedence logic works inside the e-graph) ran `rewrite_r6_materialise_boundaries_e0_test` and
+`rewrite_r5_group_formation_e0_test` fresh and got 3 of 3 for both on the full Stage A tape, and separately noted
+it could not find "0 of 3" recorded anywhere in D50, D51, D54, or `bench/results/d448afd70180/m4_experiments.json`.
+The scaling-hypothesis investigation, working independently and for an unrelated purpose (instrumenting e-graph
+growth), used `r5.group_formation` firing twice in sequence as its own worked example of the one candidate the
+search does find — which is only possible if R5 fires at all, confirming the same thing a second, unrelated way.
+
+Best guess at the origin: M4-gate-1's own notes (D56) introduced the figure as a "restatement… not re-derived,"
+citing D49–D52 as the source; no entry in that range actually states 0/3 for either rule, so the number was likely
+transcribed incorrectly at that point and then carried forward unchecked through D57, D58 and D59's own closing
+record, each of which explicitly says it is restating rather than re-measuring. This is the exact failure mode
+CLAUDE.md's "report honestly" rule and D53's own gate-tightening exist to prevent, and it got through anyway
+because "restate, don't re-derive" was applied to a number nobody had actually derived correctly in the first
+place. No further action needed on the milestone's own verdict: R5/R6 firing on Stage A was already known and
+correctly reflected in the perf and coverage numbers (R5's merge and R6's materialisation decisions are part of
+what the 66/66-domain catalogue and the 0.86–1.03x perf-gate ratios already measured); this entry corrects the
+documented count, not any measured outcome.

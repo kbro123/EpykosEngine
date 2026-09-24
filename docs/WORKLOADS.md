@@ -81,8 +81,8 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
 - **Forward mode** is the same templated maths instantiated on a dual-number `Scalar`.
 - **Mutation set:** for each pass that exists (fold-sum, CSE, affine collapse, expander, adjoint) at least one mutant
   (wrong constant fold, dropped gather, off-by-one segment offset, wrong transpose) that must fail a gate.
-  Rewrite mutants (R1–R7, an fma-contraction rule) land in M4 with the rewrites that need them (D35 re-plan; first
-  landed by M4/R-b). As registered (`include/epykos/mutation/mutation.hpp`, pinned
+  Rewrite mutants (R1–R7, an fma-contraction rule) land in M4 with the rewrites that need them (D35 re-plan). As
+  registered (`include/epykos/mutation/mutation.hpp`, pinned
   by `tests/mutation/registry_test.cpp`, run by `scripts/mutation_test.sh`; D32), in harness order:
   `cse.merge_nonequal` (a Const operand's bit pattern is ignored by the CSE key), `fold_sum.wrong_order` (Sum operands
   reversed), `affine.wrong_coefficient` (the first coefficient of the first Affine emitted is one ulp off),
@@ -124,6 +124,22 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   | `expander.scan_carry_from_init` | `expand`: every step of a chain reads the chain's initial value instead of the previous step (the scan unrolled without its recurrence) | the round-trip identity on both scan fixtures |
   | `interpreter.scan_drop_last_wave` | `Interpreter::run`: the last wave of every scan (the last step of its longest chains) is not evaluated | the E0 interpreter gate on both scan fixtures |
   | `adjoint.scan_forward_order` | `Adjoint::run`: the reverse scan visits the rows forwards, so the carried adjoint arrives after it was pulled | the adjoint vs forward mode / FD gate on both scan fixtures |
+
+  then the M4/R-a rewrite mutants (R1 fold uniform columns, R2 bucket rows, R3 elide trivial maps;
+  one line each in `src/rewrite/r1_fold_uniform_columns.cpp` / `r2_bucket_rows.cpp` /
+  `r3_elide_trivial_maps.cpp`), caught by each rule's own `tests/rewrite/r*_e0_test.cpp` — a
+  differential check via `rewrite::verify_rule` / `compare_programs` against a synthetic program
+  built by hand to exercise the exact defect (none of R1-R3 currently fires on the M1 book or the
+  Stage A tape as recorded; `docs/RESUME.md`'s R-a landing entry says why):
+
+  | mutant | defect (one line) | exercised by |
+  |---|---|---|
+  | `r1.ignores_last_row` | the uniformity check stops one row early, so a column differing only in its last row is wrongly folded to a literal | a synthetic domain whose column matches every row but the last |
+  | `r1.wrong_slot` | the fold always overwrites operand `a`, even when the uniform column was read from `b` / `c` / `konst` | a synthetic `Mul(gather, uniform column)` step (the column in `b`) |
+  | `r2.wrong_run_boundary` | a run boundary compares row `r` to `r-2` instead of `r-1`, mis-sizing the buckets | a synthetic 5-row domain whose signature column is `{1,1,2,2,2}` (asserted bucket sizes `{2,3}`) |
+  | `r2.column_slice_uses_wrong_bucket` | bucket `k` (`k>0`) is built from bucket `k-1`'s row range instead of its own | the same synthetic domain, checked value-for-value against the un-split program |
+  | `r3.off_by_one_member` | a domain's row substitutes the NEXT row's sole member instead of its own | a synthetic length-1-Sum domain of more than one row |
+  | `r3.treats_length_two_as_trivial` | a two-member segment row is wrongly accepted as trivial, dropping the second additive term | a synthetic two-member Sum domain |
 
   R6 / R7's mutants (M4/R-c, landed once the Stage A tape existed — the "R1-R7 land in M3" line
   above was written before D35's milestone re-plan moved them to M4), caught by each rule's own

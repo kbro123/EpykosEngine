@@ -50,6 +50,12 @@ inline constexpr std::string_view registry[] = {
     "expander.scan_carry_from_init", // expand: every step of a scan chain reads the chain's initial value instead of the previous step (no scan on the M1 book: the scan fixtures' round-trip gates)
     "interpreter.scan_drop_last_wave", // Interpreter::run: the last wave of every scan (the last step of its longest chains) is not evaluated (the scan fixtures' E0 gates)
     "adjoint.scan_forward_order",    // Adjoint::run: the reverse scan visits the rows forwards, so the carried adjoint arrives after it was pulled (the scan fixtures' adjoint gates)
+    "r1.ignores_last_row",           // rewrite::R1FoldUniformColumns: the uniformity check stops one row early, so a column differing only in its last row is wrongly folded
+    "r1.wrong_slot",                 // rewrite::R1FoldUniformColumns: the literal is always written into operand `a`, even when the uniform column was read from b / c / konst
+    "r2.wrong_run_boundary",         // rewrite::R2BucketRows: a run boundary compares row r to r-2 instead of r-1, mis-sizing the buckets
+    "r2.column_slice_uses_wrong_bucket", // rewrite::R2BucketRows: bucket k (k>0) is built from bucket (k-1)'s row range instead of its own
+    "r3.off_by_one_member",          // rewrite::R3ElideTrivialMaps: a domain's row substitutes the NEXT row's sole member instead of its own
+    "r3.treats_length_two_as_trivial", // rewrite::R3ElideTrivialMaps: a two-member segment row is wrongly accepted as trivial, dropping the second term
     "r6.ignore_reduction_boundary",  // R6MaterialiseBoundaries: a producer feeding a Sum/Affine segment (or an output) is inlined away anyway -- its consumer's segment then reads an unmaterialised row
     "r6.ignore_fanout_boundary",     // R6MaterialiseBoundaries: only the first reader gather's consumer is checked, so a producer read by several distinct consumers is still inlined into just one of them
     "r7.no_offset_rebase",           // R7BlockLinmap::split_linmap_domain: a block's sliced segment keeps the ORIGINAL whole-domain absolute offsets instead of rebasing them to its own members array

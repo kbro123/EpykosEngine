@@ -83,6 +83,17 @@ std::unique_ptr<FullRuleSet> make_full_rule_set(int lane_tile) {
 
 optimise::CostModel test_model() { return optimise::CostModel{optimise::CostCoefficients::defaults(), "test", false}; }
 
+// D57: the names of the E1-classed rules in `rules` (fma / r4b today), for
+// rewrite::verify_extraction's own `e1_rule_names` parameter -- built from each rule's own
+// `exactness_class()`, never hard-coded (HARD RULE 9).
+std::vector<std::string> e1_rule_names(const std::vector<const rewrite::Rule*>& rules) {
+  std::vector<std::string> names;
+  for (const rewrite::Rule* r : rules) {
+    if (r->exactness_class() == rewrite::Exactness::E1) names.push_back(r->name());
+  }
+  return names;
+}
+
 }  // namespace
 
 TEST(EGraphFullRulesM1, SaturatesWithEveryLandedM4RuleWithoutHittingTheBound) {
@@ -133,6 +144,17 @@ TEST(EGraphFullRulesM1, ExtractedE0PlanPassesVerificationAndIsNoWorseThanTheDefa
   const int n_outputs = static_cast<int>(program.outputs.size());
   const rewrite::VerifyReport verify = rewrite::verify_annotations(result.program, result.plan, book.z0.data(), n_inputs, n_outputs);
   EXPECT_TRUE(verify.passed()) << verify.summary();
+
+  // D57 (alongside, not instead of, verify_annotations above): compares the extracted PROGRAM
+  // against the TRUE, unrewritten M1 program -- verify_annotations alone only ever compares
+  // `result.program` against itself, so it cannot see whether the structural rewrite CHAIN that
+  // produced it (R1-R7 + fma, composed by the e-graph, `result.history`) drifted from the
+  // original tape. `options.max_exactness = E0` above means no E1 rule (fma / r4b) can appear in
+  // `result.history`, so this is a bitwise check here -- the strongest one available.
+  const rewrite::VerifyReport extraction_check =
+      rewrite::verify_extraction(program, result.program, result.plan, result.history, e1_rule_names(rule_set->rules), book.z0.data(),
+                                 n_inputs, n_outputs);
+  EXPECT_TRUE(extraction_check.passed()) << "extracted program vs the true original (D57): " << extraction_check.summary();
 
   std::size_t extracted_paired_steps = 0, default_paired_steps = 0;
   for (const ir::GroupPlan& g : result.plan.group) extracted_paired_steps += g.pairings.size();

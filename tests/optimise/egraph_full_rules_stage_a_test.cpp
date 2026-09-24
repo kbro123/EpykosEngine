@@ -36,20 +36,31 @@
 // (tests/rewrite/ad_mode_stage_a_shapes_test.cpp instead validates that rule's decision logic
 // directly against Stage A's own already-measured real numbers, without needing the tape at all).
 //
-// What IS checked here, safely bounded, IS a genuine positive result: the full structural +
-// planner rule set actually firing on a multi-domain financial recording beyond the M1 book (R1
-// fires here though it never does on the M1 book, D52's own predicted mechanism: R2's output
-// gives R1 something to fold), and the E0 extraction at 3 rounds finds `r5.group_formation`
-// applied TWICE in sequence (once onto its own prior output) plus `planner.reduction_fusion` --
-// 0.9773x the M1-shaped 5-rule default plan's OWN estimated cost on this program, i.e. a real,
-// measured-by-the-cost-model 2.3% win a FIXED single-pass pipeline (which never re-applies R5 to
-// what R5 itself just produced) structurally cannot express -- and passes PROBLEM.md §6 bit-for-
-// bit AT THE RECORD POINT (epykos::test::compare_at_record_point, not a perturbation ball: see
-// this file's own comment at the call site for why a ball is the wrong check on this tape).
+// What IS checked here, safely bounded, is a genuine positive result at the STRUCTURAL level: the
+// full structural + planner rule set actually firing on a multi-domain financial recording beyond
+// the M1 book (R1 fires here though it never does on the M1 book, D52's own predicted mechanism:
+// R2's output gives R1 something to fold), and the E0 extraction at 3 rounds finds
+// `r5.group_formation` applied TWICE in sequence (once onto its own prior output) plus
+// `planner.reduction_fusion` -- a candidate a FIXED single-pass pipeline (which never re-applies
+// R5 to what R5 itself just produced) structurally cannot express -- and passes PROBLEM.md §6
+// bit-for-bit AT THE RECORD POINT (epykos::test::compare_at_record_point, not a perturbation
+// ball: see this file's own comment at the call site for why a ball is the wrong check on this
+// tape). CORRECTED BY D57 (a review finding on the M4-gate-1 landing, docs/DECISIONS.md D57):
+// this file used to also claim that candidate was "0.9773x the default plan's cost, i.e. a real,
+// measured-by-the-cost-model 2.3% win". That number came from `optimise::CostCoefficients::
+// defaults()`, a synthetic, never-fitted, uniform-per-op cost model -- under this machine's real,
+// fitted `bench/results/<fingerprint>/cost_model.json` (D48) the ratio is 0.999716, i.e. noise,
+// and there is no wall-clock bench corroborating either number. See the second TEST below for the
+// honest, both-models comparison; PROBLEM.md §7's cross-stage-win gate item is NOT considered
+// satisfied by this experiment.
 #include <gtest/gtest.h>
 
+#include <cstdio>
+#include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "epykos/exec/interpreter.hpp"
@@ -78,8 +89,42 @@ namespace ir = epykos::ir;
 namespace rewrite = epykos::rewrite;
 namespace optimise = epykos::optimise;
 namespace fixtures = epykos::fixtures;
+namespace fs = std::filesystem;
 
 namespace {
+
+// scripts/fingerprint.sh --id, or "" if it cannot be run — the SAME popen pattern
+// tests/optimise/cost_test.cpp and tests/scripts/perf_gate_test.cpp already use, repeated here
+// rather than shared (neither of those is a header this file could include without pulling in
+// their own test-only fixtures). D9: a cost-model ratio only means something for THIS machine's
+// own fitted coefficients, never compared across fingerprints.
+fs::path repo_root() {
+  if (const char* e = std::getenv("EPYKOS_SOURCE_DIR")) return fs::path(e);
+  return fs::path(__FILE__).parent_path().parent_path().parent_path();
+}
+
+std::string shell_quote(const std::string& s) {
+  std::string r = "'";
+  for (char c : s) {
+    if (c == '\'') r += "'\\''";
+    else r += c;
+  }
+  return r + "'";
+}
+
+std::string current_fingerprint_id() {
+  const fs::path script = repo_root() / "scripts" / "fingerprint.sh";
+  if (!fs::exists(script)) return "";
+  const std::string cmd = shell_quote(script.string()) + " --id 2>/dev/null";
+  FILE* p = popen(cmd.c_str(), "r");
+  if (p == nullptr) return "";
+  std::string out;
+  char buf[256];
+  while (std::size_t n = std::fread(buf, 1, sizeof buf, p)) out.append(buf, n);
+  pclose(p);
+  while (!out.empty() && (out.back() == '\n' || out.back() == '\r' || out.back() == ' ')) out.pop_back();
+  return out;
+}
 
 struct SmallStageA {
   fixtures::StageA s;
@@ -163,7 +208,36 @@ TEST(EGraphFullRulesStageA, ExtractedE0PlanPassesVerificationAndIsNoWorseThanThe
   // nodes exist), so this is informational, not a precondition.
   std::cout << "[ stage_a ] bound_hit=" << (report.bound_hit ? "true" : "false") << " (" << report.bound_reason << ")\n";
 
-  const optimise::CostModel model{optimise::CostCoefficients::defaults(), "test", false};
+  // D57 (supersedes the cross-stage-win claim of D54/D56): this test used to cost both candidates
+  // with `optimise::CostCoefficients::defaults()` -- a SYNTHETIC, uniform 1-ns-per-op fallback
+  // that has never been fitted to any machine -- and reported the resulting ratio (0.9773) as "a
+  // real, measured-by-the-cost-model 2.3% win". It is not: every op costs the SAME under
+  // `defaults()`, so the ratio it produces reflects only which candidate has fewer *steps*, never
+  // this machine's actual per-op timings, and this experiment has no wall-clock companion bench
+  // to corroborate it either way (contrast `bench/optimise/egraph_full_rules_m1_bench.cpp` for
+  // experiment (1), D54 point 4). Loading the real, fingerprint-fitted model this project is
+  // gated against everywhere else (`bench/results/<fingerprint>/cost_model.json`, D48) is the
+  // honest comparison: under it the "win" collapses to noise (measured while fixing this finding,
+  // on fingerprint d448afd70180: ratio 0.999716, i.e. ~0.03%, not 2.3%). `load_or_default` (not
+  // `load`) is used deliberately: this test also runs on CI hosts (a different fingerprint, no
+  // committed cost_model.json there) and must not fail merely because no fitted model exists for
+  // the CURRENT machine (D9's own cross-fingerprint discipline says nothing here is comparable
+  // across machines anyway) -- `loaded_from_file` and both ratios are printed either way so a
+  // human reading this test's own stdout on ANY host sees which model actually priced the
+  // candidates, never silently. Only the tautological "no worse than the model's own default
+  // candidate" check is asserted (`EXPECT_LE` below: the e-graph's search space always contains
+  // the default plan, so this can never be a real gate against a defaults-shaped cost model,
+  // fitted or not) -- this test no longer asserts, or lets a reader infer, that the cost model
+  // found "a win"; that claim now requires a real wall-clock bench, not yet written for Stage A
+  // (D57). PROBLEM.md §7's cross-stage-win gate item is therefore NOT considered satisfied by
+  // this experiment alone.
+  const std::string fingerprint_id = current_fingerprint_id();
+  const optimise::CostModel synthetic_model{optimise::CostCoefficients::defaults(), "test", false};
+  const optimise::CostModel fitted_model =
+      fingerprint_id.empty() ? synthetic_model : optimise::CostModel::load_or_default(fingerprint_id, "bench/results", &std::cerr);
+  std::cout << "[ cost model ] fingerprint '" << fingerprint_id << "', fitted coefficients "
+            << (fitted_model.loaded_from_file ? "LOADED" : "NOT FOUND (using synthetic defaults -- see this test's own header comment)") << '\n';
+  const optimise::CostModel& model = fitted_model;
   optimise::ExtractOptions options;
   options.max_exactness = rewrite::Exactness::E0;
   options.B = 1;
@@ -191,11 +265,33 @@ TEST(EGraphFullRulesStageA, ExtractedE0PlanPassesVerificationAndIsNoWorseThanThe
       static_cast<int>(program.outputs.size()));
   EXPECT_TRUE(record_check.passed) << record_check.detail;
 
+  // D57 (alongside, not instead of, the check above): the check above only ever compares
+  // `result.program` against ITSELF (plan cleared vs the extracted plan) -- it is structurally
+  // blind to whether the e-graph's OWN structural rewrite chain (`result.history`: this fixture's
+  // own extraction finds `r5.group_formation` applied TWICE in sequence, this file's header) drifted
+  // from the TRUE, unrewritten 60-trade Stage A tape (`program`, this function's own first local,
+  // never mutated). `options.max_exactness = E0` means no E1 rule can be in `result.history`, so
+  // this is a bitwise check, same record-point reasoning as above (a ball is still the wrong check
+  // on an implicit-node tape's quotes).
+  const epykos::test::RecordPointReport extraction_check = epykos::test::compare_at_record_point(
+      program, annotated, program.input_values.data(), static_cast<int>(program.input_values.size()),
+      static_cast<int>(program.outputs.size()));
+  EXPECT_TRUE(extraction_check.passed) << "extracted program vs the true original Stage A tape (D57): " << extraction_check.detail;
+
   const ir::PlanAnnotations default_plan = rewrite::planner::default_plan(program, rewrite::planner::DefaultPlanOptions{});
   const optimise::Plan default_bridged = optimise::plan_from_annotations(program, default_plan, options.tile, options.lane_tile);
-  const optimise::ProgramCost default_cost = optimise::estimate_program(program, default_bridged, options.B, model);
+  const optimise::ProgramCost default_cost_fitted = optimise::estimate_program(program, default_bridged, options.B, fitted_model);
+  const optimise::ProgramCost default_cost_synthetic = optimise::estimate_program(program, default_bridged, options.B, synthetic_model);
+  const optimise::ExtractResult result_synthetic = optimise::extract(graph, synthetic_model, options);
+  ASSERT_TRUE(result_synthetic.found);
   std::cout << "[ compare ] stage_a: default (greedy R1..R7-then-planner order not run here; M1-shaped 5-rule planner"
-            << " default) plan estimated " << default_cost.total_ns << " ns; ratio " << (result.estimated_ns / default_cost.total_ns)
-            << '\n';
-  EXPECT_LE(result.estimated_ns, default_cost.total_ns + 1e-6);
+            << " default) plan estimated " << default_cost_fitted.total_ns << " ns fitted / " << default_cost_synthetic.total_ns
+            << " ns synthetic; ratio " << (result.estimated_ns / default_cost_fitted.total_ns) << " fitted / "
+            << (result_synthetic.estimated_ns / default_cost_synthetic.total_ns)
+            << " synthetic -- ONLY the fitted ratio (when a fitted model was found for this host) is anything close to a real number;"
+               " the synthetic one is what D54/D56 mistakenly reported as a 2.3% win (D57)\n";
+  // Tautological by construction (extract.hpp's own header: the search space always contains the
+  // default candidate), kept as a smoke check that extraction never regresses vs. the default
+  // under WHICHEVER model priced it -- not evidence of a win, under either model.
+  EXPECT_LE(result.estimated_ns, default_cost_fitted.total_ns + 1e-6);
 }

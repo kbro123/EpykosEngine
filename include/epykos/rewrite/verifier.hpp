@@ -13,6 +13,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "epykos/adjoint/adjoint.hpp"
 #include "epykos/exec/interpreter.hpp"
@@ -82,5 +83,40 @@ struct RuleVerifyReport {
 
 RuleVerifyReport verify_rule(const Rule& rule, const ir::Program& program, const double* state, int n_inputs,
                             int n_outputs, const ir::PlanAnnotations& base_plan = {}, const VerifyOptions& options = {});
+
+// Verifies an e-graph extraction's PROGRAM against the TRUE, unrewritten root it came from -- not
+// merely that its OWN PlanAnnotations are transparent given whatever structural rewrites already
+// produced it. D57 (a review finding on the M4-gate-1 landing): every shipped
+// tests/optimise/egraph_*_test.cpp called only `verify_annotations(result.program, result.plan,
+// ...)`, which compares `result.program` against ITSELF (plan cleared vs the same plan) --
+// verify_annotations' own documented contract, correct for what IT checks, but never a comparison
+// against the original tape, so a composed chain of more than one E1-classed structural rewrite
+// (fma_contraction and R4bSharedReciprocal are both landed as E1, D51) could in principle drift
+// arbitrarily from ground truth with no gate ever noticing. Call this ALONGSIDE verify_annotations
+// (which still has its own job: catching a planner-rule regression), not instead of it.
+//
+// `history` is the rule-name trail the extraction followed (ExtractResult::history, or the
+// program-history prefix of it: a plan-only rule changes no value an E0/E1 differential can see,
+// so including plan history in `history` costs nothing but adds no real risk either);
+// `e1_rule_names` is the subset of names in `history` that the CALLER knows are E1-classed --
+// taken as a parameter, never hard-coded here (HARD RULE 9), typically `rule->name()` for every
+// `rule->exactness_class() == Exactness::E1` in whatever rule set built the e-graph. The tolerance
+// actually used is the UNION (widen, never narrow) of `options.interpreter_tolerance` /
+// `.adjoint_tolerance` as given and a bound derived from `history`: bitwise (E0) when none of
+// `history` names an E1 rule, else `verify::Tolerance::e1(4.0 * count)` with `count` = how many
+// `history` entries are E1-classed -- an explicit, stated way to bound a CHAIN of independently
+// ~4-ulp-bounded roundings without pretending accumulation cannot happen. Passing default-
+// constructed `options` (E0) therefore gets exactly the history-derived bound; passing an already-
+// looser tolerance for a reason orthogonal to `history` (e.g. `exec::ExpMode::poly`'s own E1
+// deviation from `std::exp`) keeps it, widened further only if `history` needs more. This is still
+// an UNSCALED ulps-of-value bound, so it inherits fma_contraction.hpp's own D57 caveat wherever
+// `history` includes a rewrite (fma_contraction today) whose soundness depends on a scale other
+// than the output: a caller whose composed history may hit catastrophic cancellation should check
+// that case separately, scaled, rather than trust this function's default bound to catch it (D57's
+// own fma_contraction regression test does exactly that, directly, without going through this
+// function at all).
+VerifyReport verify_extraction(const ir::Program& original, const ir::Program& extracted, const ir::PlanAnnotations& extracted_plan,
+                               const std::vector<std::string>& history, const std::vector<std::string>& e1_rule_names,
+                               const double* state, int n_inputs, int n_outputs, VerifyOptions options = {});
 
 }  // namespace epykos::rewrite

@@ -92,6 +92,17 @@ TEST(EGraphM1, ExtractedE0PlanPassesVerificationAndBeatsTheDefaultPlan) {
   const rewrite::VerifyReport verify = rewrite::verify_annotations(program, result.plan, state.data(), n_inputs, n_outputs);
   EXPECT_TRUE(verify.passed()) << verify.summary();
 
+  // D57 (alongside, not instead of, verify_annotations above): this file's own PROGRAM tier never
+  // moves (only R1/R3, both still identity stubs here, could have proposed a structural rewrite,
+  // and match() is always empty for both -- SaturatesWithRealRulesAndUnrelatedStubsMixedIn already
+  // asserts that), so `result.program` provably equals `program` and this reduces to comparing
+  // `program` against itself -- kept anyway as the same explicit end-to-end check the other three
+  // egraph_*_test.cpp files now run, so this file does not silently become the one exception the
+  // moment a real structural rule is ever added to its rule set.
+  const rewrite::VerifyReport extraction_check =
+      rewrite::verify_extraction(program, result.program, result.plan, result.history, /*e1_rule_names=*/{}, state.data(), n_inputs, n_outputs);
+  EXPECT_TRUE(extraction_check.passed()) << "extracted program vs the true original (D57): " << extraction_check.summary();
+
   // The default (all-five-rules-in-fixed-order, lane_tile 8) plan was one specific point in the
   // e-graph's own search space the whole time; the global extraction minimum can never be worse.
   const ir::PlanAnnotations default_plan = rewrite::planner::default_plan(program, rewrite::planner::DefaultPlanOptions{});

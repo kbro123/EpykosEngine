@@ -122,6 +122,43 @@ VerifyReport verify_annotations(const ir::Program& program, const ir::PlanAnnota
   return compare_programs(bare, annotated, state, n_inputs, n_outputs, options);
 }
 
+namespace {
+
+// The UNION of two tolerances -- "passes A or passes B" -- which is exactly the tolerance whose
+// ulps and rel are each the member-wise max of the two (proof, D57: ulp_distance <= ulps1 OR
+// ulp_distance <= ulps2 iff ulp_distance <= max(ulps1, ulps2), and likewise for rel; the compiled
+// value's own within() check is itself an OR of an ulps test and a rel test, so this composes
+// exactly, never approximately). Widening-only: never accepts less than either input alone would.
+verify::Tolerance loosen(const verify::Tolerance& a, const verify::Tolerance& b) {
+  if (a.cls == verify::Exactness::E0 && b.cls == verify::Exactness::E0) return verify::Tolerance::e0();
+  const double ulps = std::max(a.cls == verify::Exactness::E1 ? a.ulps : 0.0, b.cls == verify::Exactness::E1 ? b.ulps : 0.0);
+  const double rel = std::max(a.cls == verify::Exactness::E1 ? a.rel : 0.0, b.cls == verify::Exactness::E1 ? b.rel : 0.0);
+  return verify::Tolerance{verify::Exactness::E1, ulps, rel};
+}
+
+}  // namespace
+
+VerifyReport verify_extraction(const ir::Program& original, const ir::Program& extracted, const ir::PlanAnnotations& extracted_plan,
+                               const std::vector<std::string>& history, const std::vector<std::string>& e1_rule_names,
+                               const double* state, int n_inputs, int n_outputs, VerifyOptions options) {
+  std::size_t e1_count = 0;
+  for (const std::string& h : history) {
+    if (std::find(e1_rule_names.begin(), e1_rule_names.end(), h) != e1_rule_names.end()) ++e1_count;
+  }
+  const verify::Tolerance history_tolerance =
+      e1_count == 0 ? verify::Tolerance::e0() : verify::Tolerance::e1(4.0 * static_cast<double>(e1_count));
+  // Widen, never narrow, whatever the caller already asked for (e.g. Tolerance::e1() for its own
+  // reason unrelated to `history`, such as exec::ExpMode::poly's own E1 deviation from std::exp,
+  // orthogonal to any rewrite): a caller-supplied tolerance already looser than the
+  // history-derived one is kept exactly as given.
+  options.interpreter_tolerance = loosen(options.interpreter_tolerance, history_tolerance);
+  options.adjoint_tolerance = loosen(options.adjoint_tolerance, history_tolerance);
+
+  ir::Program annotated = extracted;
+  annotated.plan = extracted_plan;
+  return compare_programs(original, annotated, state, n_inputs, n_outputs, options);
+}
+
 RuleVerifyReport verify_rule(const Rule& rule, const ir::Program& program, const double* state, int n_inputs,
                             int n_outputs, const ir::PlanAnnotations& base_plan, const VerifyOptions& options) {
   RuleVerifyReport result;

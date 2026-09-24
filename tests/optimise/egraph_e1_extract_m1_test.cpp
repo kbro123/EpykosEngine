@@ -80,6 +80,17 @@ std::unique_ptr<FullRuleSet> make_full_rule_set(int lane_tile) {
   return s;
 }
 
+// D57: the names of the E1-classed rules in `rules` (fma / r4b today), for
+// rewrite::verify_extraction's own `e1_rule_names` parameter -- built from each rule's own
+// `exactness_class()`, never hard-coded (HARD RULE 9).
+std::vector<std::string> e1_rule_names(const std::vector<const rewrite::Rule*>& rules) {
+  std::vector<std::string> names;
+  for (const rewrite::Rule* r : rules) {
+    if (r->exactness_class() == rewrite::Exactness::E1) names.push_back(r->name());
+  }
+  return names;
+}
+
 // bench/results/<fp>/hand_m1_hand.json's own "benchmarks" object: BM_HandEval/0 (B=1) and
 // BM_HandEvalBatch/0 (B=64) medians, index 0 == D27's exp mode variant 0 (v0). A tiny ad hoc
 // scan (not a JSON parser dependency, D12): informational only, never asserted against.
@@ -129,6 +140,18 @@ TEST(EGraphE1ExtractM1, ExtractedE1PlanWithExpPolyPassesVerificationAtE1Toleranc
   const rewrite::VerifyReport verify_report =
       rewrite::verify_annotations(result.program, result.plan, book.z0.data(), fixtures::n_knots, static_cast<int>(program.outputs.size()), vopts);
   EXPECT_TRUE(verify_report.passed()) << verify_report.summary();
+
+  // D57 (alongside, not instead of, verify_annotations above): verify_annotations only ever
+  // compares `result.program` against ITSELF, so it is structurally blind to whether the e-graph's
+  // OWN structural rewrite chain (`result.history`, which CAN include fma_contraction / R4b here --
+  // options.max_exactness = E1 makes both eligible, unlike the E0 sibling test in this same rule
+  // set) drifted from the true M1 program. D51/D54 measured 0/0 fires for both on this fixture, so
+  // this is currently a bitwise-equivalent check in practice, but it is the composed-history check
+  // itself that matters going forward, not today's particular history being empty.
+  const rewrite::VerifyReport extraction_check =
+      rewrite::verify_extraction(program, result.program, result.plan, result.history, e1_rule_names(rule_set->rules), book.z0.data(),
+                                 fixtures::n_knots, static_cast<int>(program.outputs.size()), vopts);
+  EXPECT_TRUE(extraction_check.passed()) << "extracted program vs the true original (D57): " << extraction_check.summary();
 
   // Informational only (D9): the already-committed hand-kernel v0 numbers, for a human reading
   // this test's own stdout to compare against the companion bench file's freshly measured ones.

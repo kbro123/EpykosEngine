@@ -285,6 +285,21 @@ rewrite; a `PlanAnnotations` delta, for a planning decision), usable both as a g
 and, unbuilt, as an e-graph (M4/EG): "produce the alternative without discarding the original" is the contract's
 own words, not this package's implementation of one.
 
+**As built (M4/CM, D48):** `PROBLEM.md` §7's cost model (`include/epykos/optimise/cost.hpp`) prices an `ir::Program`
+per domain — rows x lanes x per-op cost, tile-aware L1/L2/L3/DRAM byte traffic (the working set is one tile's
+worth, `tile rows x lane width`, not the whole domain: DESIGN.md §4's own scratch is sized that way), a gather cost
+per indirect read, a per-kernel dispatch cost, a reduction-epilogue cost per fold step, and a Jacobian block's cost
+by AD mode (forward / reverse / closed-form affine, §7's own "the forward-versus-reverse choice per Jacobian
+block"). It prices its own `Treatment` / `Plan` annotation rather than reading M4/R0's `ir::PlanAnnotations` above,
+because the two packages ran in parallel from the same base and CM's cost function must also be able to price a
+*candidate* program EG has not built a real `Interpreter` for; `infer_plan` reproduces the planner's fusion /
+inlining rules as IR-structure predicates for that case, and a live `ir::PlanAnnotations` (when a caller has one)
+is the more accurate source the two should be reconciled onto in a follow-up. `tools/costmodel/` calibrates the
+coefficients per fingerprint by relative-error least squares on the M1 book and the Stage A tape under a new
+`profile` preset; on this machine the fit falls short of the package's own < 25% mean-relative-error target (84%
+overall, 69% restricted to domains that are a material share of their config's time), reported as such rather than
+narrowed to a friendlier number — `bench/results/<fingerprint>/cost_model_validation.md` names the causes.
+
 ---
 
 ## 8. Value-dependent behaviour

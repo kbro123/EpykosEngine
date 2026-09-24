@@ -2037,9 +2037,20 @@ work to any hot path, it reorders two operand slots once per step at plan time.
   broken and is the direct test of this fix; CI's own `catalogue_regen.sh --check --no-build` on ubuntu-latest is
   the same check through `git diff`.
 - `scripts/mutation_test.sh` on GCC 13 in Docker: its BASELINE gate — the one that previously failed outright, so
-  that not a single mutant was ever tried on GCC — now passes, 54/54 gate tests, 0 failed. The full 44-mutant
-  sweep and the CI verification of this commit are recorded in `docs/RESUME.md` §5 and in the follow-up
-  `docs(resume)` commit, per the convention `d8700e8` set for D58.
+  that not a single mutant was ever tried on GCC — now passes, 54/54 gate tests, 0 failed.
+- **CI on the landed commit `67d7c0e`, run
+  <https://github.com/kbro123/EpykosEngine/actions/runs/36047130322>: `ci_green` = true, all FOUR jobs green for
+  the first time since M4/C1 landed.** `ubuntu-latest / release` (GCC 13): `100% tests passed, 0 tests failed out
+  of 108`, and `scripts/catalogue_regen.sh --check --no-build` reports `22 distinct signature(s)` then
+  `git diff --exit-code on the generated files / unchanged` — the cross-compiler byte-identity above, re-proved
+  through `git diff` in a standard `build/release` directory. `ubuntu-latest / reference` (GCC 13): `100% tests
+  passed, 0 tests failed out of 108`. `macos-latest / release`: `100% tests passed out of 108`.
+  `ubuntu-latest / mutation` (GCC 13, `scripts/mutation_test.sh`): `44 mutant(s), 54 gate test(s)` ...
+  `every mutant caught`, including this entry's own `catalogue.signature_ignores_commutativity`, caught by
+  `adjoint_adjoint_catalogue_e0_test`, `exec_interpreter_catalogue_e0_test` AND
+  `catalogue_signature_commutative_e0_test`. That job also settles the one local GCC discrepancy above: CI builds
+  into `build/release`, so `scripts_perf_gate_test` passes there and the GCC suite is 108/108, confirming the
+  107/108 measured in Docker was the build-directory artefact and nothing else.
 
 No SwapEngine file opened. No `-ffast-math`. No test threshold relaxed, no platform `#ifdef`, and no registry
 regenerated on GCC to paper the difference over: the three assertions that were failing are unchanged.

@@ -216,28 +216,43 @@ TEST(RuleFramework, PlanAnnotationsEqualityIgnoresContentByDesign) {
   EXPECT_TRUE(plan == ir::PlanAnnotations{});
 }
 
-// R1-R5 are still identity stubs (R-a/R-b's job): match() returns no sites on a program that
-// would exercise every real rule's target shape were it real. R6 / R7 (M4/R-c) are real rules as
-// of this package -- tiny_program() is exactly R6's own target shape (domain 0's two rows are
-// each read once, by one consumer, that is not a reduction), so it is checked separately below,
-// not folded into "never matches" (rewrite/r6_materialise_boundaries.hpp, rewrite/r7_block_
-// linmap.hpp; the identity-stub file remains rewrite/stub_rule.hpp for R1-R5's own tests to use).
-TEST(RuleFramework, R1ThroughR5StubsNeverMatchAndReportTheirDeclaredExactness) {
+// R1-R3 are the only identity stubs left (R-a's job): match() returns no sites on a program that
+// would exercise every real rule's target shape were it real. R4a/R4b/R5 (M4/R-b) and R6/R7
+// (M4/R-c) are all real rules as of this package -- tiny_program() is exactly R6's own target
+// shape (domain 0's two rows are each read once, by one consumer, that is not a reduction), so R6
+// and R7 are checked separately below (rewrite/r6_materialise_boundaries.hpp, rewrite/r7_block_
+// linmap.hpp), and R4a/R4b/R5 separately again just after this test (rewrite/
+// r4a_push_unary_through_gathers.hpp etc.) -- neither pair is folded into "never matches" here;
+// the identity-stub file remains rewrite/stub_rule.hpp for R1-R3's own tests to use.
+TEST(RuleFramework, R1R2R3StubsNeverMatchAndReportTheirDeclaredExactness) {
   const ir::Program program = tiny_program();
   const ir::PlanAnnotations plan;
   const rewrite::R1FoldUniformColumns r1;
   const rewrite::R2BucketRows r2;
   const rewrite::R3ElideTrivialMaps r3;
-  const rewrite::R4aPushUnaryThroughGathers r4a;
-  const rewrite::R4bSharedReciprocal r4b;
-  const rewrite::R5GroupFormation r5;
-  const rewrite::Rule* stubs[] = {&r1, &r2, &r3, &r4a, &r4b, &r5};
+  const rewrite::Rule* stubs[] = {&r1, &r2, &r3};
   for (const rewrite::Rule* stub : stubs) {
     EXPECT_TRUE(stub->match(program, plan).empty()) << stub->name();
   }
   EXPECT_EQ(r1.name(), "r1.fold_uniform_columns");
   EXPECT_EQ(r1.exactness_class(), rewrite::Exactness::E0);
+}
+
+TEST(RuleFramework, R4aR4bR5DoNotMatchTheFrameworksTinyAddProgramEither) {
+  const ir::Program program = tiny_program();
+  const ir::PlanAnnotations plan;
+  const rewrite::R4aPushUnaryThroughGathers r4a;
+  const rewrite::R4bSharedReciprocal r4b;
+  const rewrite::R5GroupFormation r5;
+  EXPECT_TRUE(r4a.match(program, plan).empty());
+  EXPECT_TRUE(r4b.match(program, plan).empty());
+  EXPECT_TRUE(r5.match(program, plan).empty());
+  EXPECT_EQ(r4a.name(), "r4a.push_unary_through_gathers");
+  EXPECT_EQ(r4a.exactness_class(), rewrite::Exactness::E0);
+  EXPECT_EQ(r4b.name(), "r4b.shared_reciprocal");
   EXPECT_EQ(r4b.exactness_class(), rewrite::Exactness::E1);  // the one E1 rewrite in DESIGN.md §6
+  EXPECT_EQ(r5.name(), "r5.group_formation");
+  EXPECT_EQ(r5.exactness_class(), rewrite::Exactness::E0);
 }
 
 // R6 / R7's own declared names / exactness, plus the shape of their (real, non-stub) behaviour:

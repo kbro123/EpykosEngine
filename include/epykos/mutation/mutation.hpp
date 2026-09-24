@@ -54,6 +54,14 @@ inline constexpr std::string_view registry[] = {
     "r6.ignore_fanout_boundary",     // R6MaterialiseBoundaries: only the first reader gather's consumer is checked, so a producer read by several distinct consumers is still inlined into just one of them
     "r7.no_offset_rebase",           // R7BlockLinmap::split_linmap_domain: a block's sliced segment keeps the ORIGINAL whole-domain absolute offsets instead of rebasing them to its own members array
     "r7.wrong_block_value_base",     // R7BlockLinmap::split_linmap_domain: the running value_base accumulator advances by a block's segment length instead of its row count
+    "r4a.wrong_literal",             // rewrite::push_unary_through_gathers: the relocated step multiplies by 0.0 instead of 1.0 (M4/R-b's own verify_rule gate)
+    "r4a.wrong_row_map",             // rewrite::push_unary_through_gathers: the new gather reads S_op row `d_row` instead of `row_of(S, old_gather.index[d_row])` (M4/R-b's own verify_rule gate)
+    "r4b.wrong_op",                  // rewrite::shared_reciprocal: combines a and the reciprocal with Add instead of Mul (M4/R-b's own verify_rule gate)
+    "r4b.wrong_row_map",             // rewrite::shared_reciprocal: the new gather reads S_recip row `d_row` instead of `row_of(S, old_gather.index[d_row])` (M4/R-b's own verify_rule gate)
+    "r5.wrong_step_index",           // rewrite::group_formation: the consumer's gather-replacement points at the producer's FIRST step instead of its last (M4/R-b's own verify_rule gate)
+    "r5.drop_last_step",             // rewrite::group_formation: the merged group drops the producer's last step when splicing (M4/R-b's own verify_rule gate)
+    "fma.wrong_operand",             // rewrite::fma_contraction: fma(a,b,c) built as fma(a,b,b), dropping the Add's real other operand (M4/R-b's own verify_rule gate)
+    "fma.drop_remap",                // rewrite::fma_contraction: kept steps after the fused one are not reindexed after the Mul step is removed (M4/R-b's own verify_rule gate)
 };
 inline constexpr std::size_t registry_size = sizeof(registry) / sizeof(registry[0]);
 

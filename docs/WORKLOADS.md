@@ -81,7 +81,8 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
 - **Forward mode** is the same templated maths instantiated on a dual-number `Scalar`.
 - **Mutation set:** for each pass that exists (fold-sum, CSE, affine collapse, expander, adjoint) at least one mutant
   (wrong constant fold, dropped gather, off-by-one segment offset, wrong transpose) that must fail a gate.
-  Rewrite mutants (R1–R7) land in M3 with the rewrites. As registered (`include/epykos/mutation/mutation.hpp`, pinned
+  Rewrite mutants (R1–R7, an fma-contraction rule) land in M4 with the rewrites that need them (D35 re-plan; first
+  landed by M4/R-b). As registered (`include/epykos/mutation/mutation.hpp`, pinned
   by `tests/mutation/registry_test.cpp`, run by `scripts/mutation_test.sh`; D32), in harness order:
   `cse.merge_nonequal` (a Const operand's bit pattern is ignored by the CSE key), `fold_sum.wrong_order` (Sum operands
   reversed), `affine.wrong_coefficient` (the first coefficient of the first Affine emitted is one ulp off),
@@ -135,6 +136,21 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   | `r6.ignore_fanout_boundary` | `R6MaterialiseBoundaries`: only the first reader gather's consumer domain is checked, so a producer read by several distinct consumers is still inlined into just one | the M1 book and Stage A tape |
   | `r7.no_offset_rebase` | `R7BlockLinmap::split_linmap_domain`: a block's sliced segment keeps the original whole-domain absolute offsets instead of rebasing them to its own `members`/`coefs` arrays | the Stage A tape's multi-curve linmap domain (>= 2 blocks; not exercisable on the M1 book, which has one curve and so one block) |
   | `r7.wrong_block_value_base` | `R7BlockLinmap::split_linmap_domain`: the running `value_base` accumulator advances by a block's segment length instead of its row count | the Stage A tape's multi-curve linmap domain |
+
+  then the M4/R-b rewrite-rule mutants (`src/rewrite/`), each caught by that rule's own `rewrite::verify_rule` gate
+  (a `*_e0_test.cpp` or `*_verify_test.cpp` under `tests/rewrite/`, matched by `scripts/mutation_test.sh`'s gate
+  regex) on the M1 book and the Stage A tape:
+
+  | mutant | defect (one line) | exercised by |
+  |---|---|---|
+  | `r4a.wrong_literal` | `push_unary_through_gathers`: the relocated step multiplies the shared value by `0.0` instead of `1.0` | `tests/rewrite/r4a_push_unary_e0_test.cpp`'s `verify_rule` gate on the M1 book and Stage A |
+  | `r4a.wrong_row_map` | `push_unary_through_gathers`: the new gather reads `S_op` row `d_row` directly instead of `row_of(S, old_gather.index[d_row])` | same gate (wrong whenever the relocated gather is not already the identity) |
+  | `r4b.wrong_op` | `shared_reciprocal`: combines `a` and the reciprocal with `Add` instead of `Mul` | `tests/rewrite/r4b_shared_reciprocal_verify_test.cpp`'s `verify_rule` gate (E1, 4 ulps) |
+  | `r4b.wrong_row_map` | `shared_reciprocal`: the new gather reads `S_recip` row `d_row` directly instead of `row_of(S, old_gather.index[d_row])` | same gate |
+  | `r5.wrong_step_index` | `group_formation`: the consumer's replacement slot points at the producer's first step instead of its last | `tests/rewrite/r5_group_formation_e0_test.cpp`'s `verify_rule` gate |
+  | `r5.drop_last_step` | `group_formation`: the merged group drops the producer's last step when splicing the two step lists together | same gate |
+  | `fma.wrong_operand` | `fma_contraction`: builds `fma(a, b, b)` instead of `fma(a, b, c)`, dropping the Add's real other operand | `tests/rewrite/fma_contraction_verify_test.cpp`'s `verify_rule` gate (E1, 4 ulps) |
+  | `fma.drop_remap` | `fma_contraction`: kept steps after the fused one keep their pre-removal Step-slot indices | same gate |
 - **Near-miss shapes** (`include/epykos/fixtures/nearmiss_shapes.hpp`, the gate fixture the mutation harness showed
   was missing, D32): 42 templated shapes over six positive inputs, each an op tree that differs from a neighbour in
   exactly one respect a signature may overlook — a constant on the left or the right of `−` and `/`, a constant in

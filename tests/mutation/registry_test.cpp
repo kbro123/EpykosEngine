@@ -63,6 +63,14 @@ const std::vector<std::string> documented = {
     "r6.ignore_fanout_boundary",
     "r7.no_offset_rebase",
     "r7.wrong_block_value_base",
+    "r4a.wrong_literal",
+    "r4a.wrong_row_map",
+    "r4b.wrong_op",
+    "r4b.wrong_row_map",
+    "r5.wrong_step_index",
+    "r5.drop_last_step",
+    "fma.wrong_operand",
+    "fma.drop_remap",
 };
 
 std::vector<std::string> registry_names() {

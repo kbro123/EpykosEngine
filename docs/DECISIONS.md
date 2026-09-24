@@ -1054,3 +1054,98 @@ Implements `PROBLEM.md` §7 for M4/CM (`include/epykos/optimise/cost.hpp`, `src/
    point 1 above). This would likely narrow some of D48 point 5's shortfall: `infer_plan`'s approximation of
    `decide_inline` (found and fixed once already, point 2 above) is one plausible source of it, on top of the
    named instrumentation-noise and coefficient-sharing causes measurement can already see directly.
+
+## D49 — M4/EG-core: a two-tier e-graph over whole (Program, PlanAnnotations) alternatives, deferred
+hash-consing with rebuild, extraction by CM cost with an exactness floor (2026-09-24)
+Implements `PROBLEM.md` §7 / `RESUME.md` §3's EG package, the "core" slice: the e-graph and extraction only
+(`include/epykos/optimise/egraph.hpp`, `extract.hpp`, `plan_bridge.hpp`, `src/optimise/*.cpp`) — the AD-mode-per-
+Jacobian-block rule and the cross-stage sharing rules `RESUME.md`'s EG row also names are a later package's scope,
+not touched here. Five choices:
+1. **Two tiers, matching the two `rewrite::Proposal` payloads, not one flat term e-graph.** `rewrite::Rule`
+   (D47) proposes either a whole rewritten `ir::Program` (a structural rewrite: R1-R7) or an `ir::PlanAnnotations`
+   delta to merge (a planner decision: R0's five rules). Real equality saturation closes a term e-graph over
+   sub-expressions; the landed `Rule` contract does not decompose a Program into sub-terms it rewrites in place —
+   `propose` always returns either a WHOLE new Program or a WHOLE plan delta. EG's e-graph is therefore two tiers
+   of whole-value alternatives: a PROGRAM tier (e-classes of `ir::Program`, hash-consed via `ir::serialize` — an
+   exact identity key, not a hash liable to collide, per that function's own round-trip contract) and, one PER
+   PROGRAM NODE, a PLAN tier (e-classes of `ir::PlanAnnotations`, hash-consed by this package's OWN structural
+   equality/hash, `EGraph::plan_content_equal` / `plan_content_hash` — never `PlanAnnotations::operator==`, which
+   D47 made unconditionally `true` by design, annotate.hpp point 1). With R1-R7 still `IdentityStubRule<Tag>`
+   (`match` always empty), the program tier holds exactly one class today; the machinery is real and covered by a
+   synthetic structural rule (`tests/optimise/egraph_test.cpp`), not yet exercised by a real one.
+2. **Deferred hash-consing, rebuilt once per round, with a persistent-table pre-check so an always-matching rule
+   does not grow the graph forever.** Every node existing at the START of a round is matched against every rule
+   and every site; every resulting Proposal is folded (`merge_annotations`, for a plan delta) and queued, never
+   replacing the node it came from ("produce the alternative without discarding the original", `rewrite/rule.hpp`
+   D47's own words). A round ends with `rebuild()`, which hash-conses the WHOLE queue at once and unions any two
+   pending nodes whose canonical content collides — the standard deferred-canonicalisation pattern (egg, Willsey
+   et al. 2021; D12: no external e-graph library). A naive version of this (check the persistent tables only,
+   never within a round) would miss two DIFFERENT derivations converging to the SAME content in ONE round (e.g.
+   rule A onto rule B's result and rule B onto rule A's result, when A and B touch disjoint domains) — exercised
+   directly by `EGraph.CongruenceAfterRebuildUnifiesPathIndependentDuplicates`. The opposite naive version (queue
+   unconditionally, check only at rebuild, every round) would re-queue R0's five rules' own proposals forever,
+   since every one of them is a whole-program, unconditional `match()` (`planner_rules.hpp`'s own documented
+   shape) — `saturate()` therefore checks `plan_known` / `program_known` against the PERSISTENT (prior-round)
+   tables BEFORE queueing, so a round that discovers nothing new queues nothing and `saturate()` reaches a real
+   fixpoint rather than running to `max_iterations` every time by construction.
+3. **A plan tier is keyed by the program NODE that created it, not by that node's program-tier CLASS — a stated,
+   flagged gap, not a silent one.** Two structurally-different-looking program nodes the program tier later
+   discovers are identical still keep two separate plan tiers rather than sharing one search space. This is free
+   today (R1-R7 never match, so no program node is ever discovered congruent to another after the fact) and is
+   named in `egraph.hpp`'s own header comment as the first thing whichever package lands R1-R7's first real
+   structural rewrite should close.
+4. **`plan_bridge.hpp` is the D48.6 reconciliation, exactly as that entry's point 6 asked for.** `optimise::Plan`
+   (CM's own annotation) and `ir::PlanAnnotations` (R0's) are different types by design (D48 point 1: CM and R0
+   ran in parallel, neither depending on the other). `plan_from_annotations` translates a plan-tier e-node's REAL
+   `ir::PlanAnnotations` into an `optimise::Plan` 1:1 (`Materialize`/`FuseIntoReduction`/`InlineIntoConsumer` to
+   the matching `Treatment`, `keep_rows.size()` to `kept_rows`, `optimise::DomainFacts::segment_readers` supplying
+   the consumer ids `ir::DomainPlan` itself does not store), falling back to `infer_plan`'s structural guess only
+   for the empty root plan node (`ir::PlanAnnotations{}`, "nothing decided yet") — CM's own stated fallback case
+   for "a candidate program that has no attached plan yet", D48.6's own words. `tests/optimise/plan_bridge_test.cpp`
+   proves the two paths actually differ (an explicit all-`Materialize` annotation is NOT the same candidate as the
+   empty one, even though every entry is the same default value, because `infer_plan`'s smarter guess only ever
+   runs on the empty case) and that they use the SAME cost model to reach a real, measured cost gap.
+5. **Extraction is a bottom-up scan over representatives, not a search, and rejects by ACCUMULATED exactness.**
+   With no external ILP/SAT solver (D12) and a saturation-bounded, already-fully-enumerated candidate set, argmin
+   over (program-class representative x plan-class representative) pairs is exact. Every node's `Exactness` is
+   the max of every rule in its own derivation history (an E1 rule anywhere in the chain taints the whole node);
+   `extract()` skips a candidate whose combined exactness exceeds the caller's request before costing it, so E0
+   extraction can never select a cheaper E1 rewrite — proven with a deliberately-wrong-for-its-own-fixture but
+   cheap synthetic E1 rule (`Extract.E0ExtractionNeverSelectsAnE1RewriteEvenACheaperOne`: an `InlineIntoConsumer`
+   annotation on a domain read only through a SEGMENT, never a GATHER, which `cost.hpp`'s own `folded_cost_ns`
+   prices at zero for exactly that reason — a concrete stand-in for "a rewrite the cost model likes for the wrong
+   reason", not a real rewrite). Ties (and re-running extraction on the same graph) are decided by ascending
+   (program id, plan id), so two runs over equal inputs are bit-identical (`Extract.
+   ExtractionIsDeterministicAcrossRepeatedCallsAndIndependentGraphs`).
+
+**First experiment (PROBLEM.md §7's own ask; reported here, NOT a gate — no `bench/targets.json` entry, no
+`--accept`):** `bench/optimise/egraph_m1_bench.cpp` builds two `exec::Interpreter`s over the M1 book, both with the
+interpreter's own Options-driven internal plan derivation bypassed by an explicit `program.plan` (there is no
+other "hard-coded" planner left to switch off since D47 — R1-R7 are still stubs) — `rewrite::planner::default_plan`
+(M1's own fixed-order five-rule greedy pipeline, one specific point) against EG's extraction, saturating ONLY
+those same five rules instantiated at four `lane_tile` choices at once (1, 8, 16, 32 — directly answering
+`RESUME.md` §5's own M3-result note, "row-fusion's lane-tile gate ... is a cost-model decision waiting to be made,
+not yet a rule") and extracted at E0 with the fingerprint's OWN fitted `cost_model.json` (D48) when present.
+Measured on `d448afd70180`: the extracted plan passes `rewrite::verify_annotations` (bit-identical E0) at every
+lane_tile tried and is never worse than `default_plan`'s OWN estimated cost (extraction's global minimum trivially
+includes `default_plan`'s exact point in its search space) — but on REAL measured wall-clock time it does not
+consistently beat the greedy default: faster at (B=1, lane_tile=1) and roughly tied at (B=64, lane_tile=8), slower
+everywhere else, informational numbers only (D9: never gated, this machine only). **Read honestly, not softened**:
+this is consistent with, and does not contradict, D48 point 5's own reported cost-model accuracy — 84.4% mean
+relative error overall, 69.3% restricted to domains that are a material share of their config's time, "NOT MET"
+against the package's own <25% target — an extraction search is only as good as the cost it argmins over, and the
+model it is handed here has not been shown accurate enough yet to reliably beat a plan a person already hand-
+verified against the M1 kill test. The framework itself (saturate -> extract -> verify) is doing exactly its job:
+finding every reachable combination, costing each one consistently, and never selecting anything that fails E0 —
+closing the gap is D48's own follow-up (a live `ir::PlanAnnotations`-aware `infer_plan`, point 4 above; the two
+workloads' separated coefficients; sub-microsecond domains dropped from the fit target), not a defect this package
+introduces or can fix by searching harder over the same numbers.
+
+Verification (fingerprint d448afd70180): `ctest --preset release` and `--preset reference` both 89/89 (85 + this
+package's own `optimise_egraph_test`, `optimise_extract_test`, `optimise_plan_bridge_test`,
+`optimise_egraph_m1_extract_test`); `scripts/mutation_test.sh` 20/20 mutants caught against the unchanged gate set
+— this package registers no new mutant of its own, the same precedent D48 set (point 5, CLAUDE.md's E0/E1
+exactness classes are for rewrites that change what a tape computes; extraction only ever selects among candidates
+R0's own rules already produced and R0's own verifier already covers, per rule.hpp's exactness contract, so a
+mutant of the SEARCH has nothing new to catch that a mutant of a real rule does not already exercise). No
+SwapEngine file opened.

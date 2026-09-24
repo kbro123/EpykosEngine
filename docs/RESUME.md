@@ -443,3 +443,30 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   do not apply to it). Landed in parallel with, and not yet reconciled against, R0's `ir::PlanAnnotations` /
   `rewrite::planner::default_plan` above (D48.6): a follow-up should read an attached plan when one exists rather
   than have `infer_plan` keep reproducing the fusion / inlining rules from IR structure alone.
+
+2026-09-24  M4/EG-core e-graph and extraction  D49; `include/epykos/optimise/egraph.hpp`, `extract.hpp`,
+  `plan_bridge.hpp`, `src/optimise/{egraph,extract,plan_bridge}.cpp`, `tests/optimise/{egraph,extract,plan_bridge,
+  egraph_m1_extract}_test.cpp`, `bench/optimise/egraph_m1_bench.cpp`. The "core" slice of `RESUME.md` §3's EG row
+  (not the AD-mode-per-block rule or cross-stage sharing — a later package's scope): a two-tier e-graph over
+  whole `ir::Program` / `ir::PlanAnnotations` alternatives (`rewrite::Rule`'s own two Proposal payloads), hash-
+  consed program-tier via `ir::serialize` identity and plan-tier via this package's own structural equality
+  (never `PlanAnnotations::operator==`, unconditionally `true` by D47's own design), a saturation loop that
+  queues every site's Proposal without discarding the node it came from and defers hash-consing to one
+  `rebuild()` per round (real congruence — two derivations converging on the same content in the SAME round are
+  unioned there, `EGraph.CongruenceAfterRebuildUnifiesPathIndependentDuplicates`) while a persistent-table
+  pre-check stops an always-matching rule (every one of R0's five) from re-queuing forever, so `saturate()`
+  reaches a genuine fixpoint; extraction by CM's cost model with an exactness floor (E0 extraction never selects
+  an E1 rewrite, proven against a deliberately-cheap synthetic E1 rule) and a deterministic tie-break;
+  `plan_bridge.hpp` closes D48 point 6's own gap (a live `ir::PlanAnnotations` now translates 1:1 into
+  `optimise::Plan`, `infer_plan`'s structural guess demoted to the fallback for an unplanned candidate only).
+  First experiment (PROBLEM.md §7's own ask, reported here, not a gate): extracting over ONLY R0's five rules at
+  four `lane_tile` choices on the M1 book passes E0 verification at every configuration and is never worse than
+  `default_plan`'s own ESTIMATED cost (it is one specific point already inside the search space) but does not
+  consistently beat it on real measured wall-clock time — read against, not in spite of, D48's own reported
+  84.4%/69.3% cost-model error, "NOT MET" against that package's target. `ctest --preset release` / `--preset
+  reference` 89/89 (85 + this package's four new executables); `scripts/mutation_test.sh` 20/20 mutants caught
+  against the unchanged gate set, no new mutant registered (extraction selects only among candidates R0's own
+  rules already produced and R0's own verifier already covers — D48's own precedent for estimation/search
+  tooling that changes nothing about what a tape computes). Known, flagged gap for R1-R7's first real structural
+  rewrite to close: a plan tier is keyed by the program NODE that created it, not that node's program-tier CLASS.
+  No SwapEngine file opened.  (branch `m4/eg-core`)

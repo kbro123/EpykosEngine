@@ -300,6 +300,39 @@ coefficients per fingerprint by relative-error least squares on the M1 book and 
 overall, 69% restricted to domains that are a material share of their config's time), reported as such rather than
 narrowed to a friendlier number — `bench/results/<fingerprint>/cost_model_validation.md` names the causes.
 
+**As built (M4/EG-core, D49):** `include/epykos/optimise/egraph.hpp` is the e-graph M4/R0's own
+`rewrite::Rule` contract was written for ("produce the alternative without discarding the
+original", D47) and M4/CM's `optimise::Plan` was written to cost: two tiers of whole-value
+alternatives — a PROGRAM tier (`ir::Program` values reachable by structural Proposals, hash-consed
+by exact `ir::serialize` identity) and, one per program node, a PLAN tier (`ir::PlanAnnotations`
+values reachable by annotation Proposals folded with `merge_annotations`, hash-consed by this
+package's own structural equality since `PlanAnnotations::operator==` is unconditionally `true` by
+D47's own design). Saturation runs every registered `rewrite::Rule` to a fixpoint or a stated
+bound, queuing every site's Proposal without replacing the node it came from and deferring
+hash-consing to one `rebuild()` per round (real congruence: two derivations converging on the same
+content in ONE round are unioned there); a persistent-table pre-check keeps an always-matching
+rule (every one of R0's five) from re-queuing its own already-known result forever, so the
+`saturate()` loop reaches an actual fixpoint rather than running to its iteration bound every time.
+`include/epykos/optimise/extract.hpp` picks the cheapest (program-class, plan-class) pair by
+CM's `estimate_program`, filtering out any node whose accumulated `rewrite::Exactness` (the max
+over every rule in its own derivation) exceeds the caller's request — E0 extraction can never
+select an E1 rewrite, even the cost model's own favourite one — with a deterministic tie-break.
+`include/epykos/optimise/plan_bridge.hpp` is D48 point 6's own follow-up: a live
+`ir::PlanAnnotations` (what every real plan-tier e-node actually is) translates 1:1 into CM's
+`optimise::Plan`, and `infer_plan`'s structural guess is now only ever the fallback for the empty
+root plan node ("nothing decided yet"), not every candidate the way it was before this package.
+First experiment (PROBLEM.md §7's own ask, not a gate): extracting over ONLY R0's five rules at
+several `lane_tile` choices at once and comparing against `default_plan`'s own greedy pipeline on
+the M1 book — the extracted plan passes the same E0 verification at every configuration tried, but
+does not yet consistently beat the greedy default on REAL measured time, consistent with (not a
+contradiction of) D48's own reported cost-model accuracy shortfall: an extraction search is only
+as good as the cost it argmins over. Rules present: R0's planner rules and the R1-R7 identity
+stubs; adding a rule (R1-R7's real bodies, R-a/R-b/R-c's job) needs no change to this file's own
+machinery, by design — `egraph.hpp` never names a rule by name. Not done in EG-core (a later
+package's scope, `RESUME.md` §3's EG row): the AD-mode-per-Jacobian-block rule, cross-stage sharing
+rules, and reconciling the plan tier's per-node keying onto program-tier CLASSES (flagged, not
+silently assumed, in `egraph.hpp`'s own header comment).
+
 ---
 
 ## 8. Value-dependent behaviour

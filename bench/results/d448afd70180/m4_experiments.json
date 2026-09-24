@@ -1,0 +1,84 @@
+{
+  "format": "epykos-m4-experiments 1",
+  "package": "M4/EG integration (eg-integrate)",
+  "fingerprint": "d448afd70180",
+  "note": "Informational report of the four PROBLEM.md §7 / RESUME.md §3 EG-row experiments. Numbers are measured on this fingerprint unless marked 'estimated' (a CM cost-model prediction) or 'cited' (already committed by an earlier package, reused per D9, never re-derived). See docs/DECISIONS.md D53 for the full landing notes and root-cause discussion.",
+  "experiments": {
+    "1_rediscovery": {
+      "gate": "PROBLEM.md §7: planner hard-coded rules off, e-graph with all rules, extract at E0 for the M1 book; target within 1.02x of the M1 greedy default plan; report the plan diff.",
+      "rule_set": "R1-R7 (real, D49-D52) + fma_contraction + the five planner rules, one e-graph, lane_tile 8",
+      "cost_model_estimate": {
+        "extracted_ns": 281395,
+        "default_ns": 281395,
+        "ratio": 1.0,
+        "plan_diff": "extracted plan.group has 0 step-pairings vs the default plan's 5 -- estimated cost is IDENTICAL because optimise::plan_bridge.hpp's own documented scope excludes plan.group/plan.emitted from the price (fused pairs and chain tails are priced the same whether paired or not), so extraction's deterministic ascending-id tie-break kept the SHORTER history (planner.reduction_fusion alone) over the fully-chained 5-rule default, which is content-tied at the cost-model level but NOT at the level of what exec::Interpreter actually runs."
+      },
+      "measured_wall_clock": {
+        "source": "bench/results/d448afd70180/optimise_egraph_full_rules_m1.json (this package, fresh)",
+        "B1_default_ns": 60729.43,
+        "B1_extracted_ns": 67026.07,
+        "B1_ratio": 1.104,
+        "B64_default_ns": 1760892.63,
+        "B64_extracted_ns": 1903664.19,
+        "B64_ratio": 1.081,
+        "target_1.02x_met": false
+      },
+      "finding": "Target NOT met on measured wall-clock (1.081x-1.104x, vs the 1.02x target), traced to a real, specific cost-model gap (plan.group/plan.emitted unpriced, documented in optimise/plan_bridge.hpp's own header before this package) combined with extraction's own deterministic first-seen tie-break. At the cost-model's OWN estimate level the extracted plan ties the default (ratio 1.0, never worse, satisfying the gate's weaker 'never worse than the search space's own default point' reading) but this does not hold at the measured level. Reported as a real limitation for whoever extends the cost model to price step-pairing (D48 point 6's own follow-up list), not papered over."
+    },
+    "2_cross_stage": {
+      "gate": "PROBLEM.md §7: on the Stage A tape, list every extracted decision the greedy ordered pipeline (R1..R7 then planner) does not make, with the measured effect of each in isolation; at least one must be a win.",
+      "fixture": "small Stage A (fixtures::make_stage_a with trades=60, scenarios=0) -- the FULL 2,000-trade tape was not attempted, see the scaling finding below",
+      "scaling_finding": "Saturating this 60-trade fixture to the SAME bound used for the M1 book (24 iterations, 2000 program nodes) does not converge: round 2 alone (r1/r2/r5/r6/r7 all firing at once) already produced 39 distinct program nodes in 4.4s; by round 4 the process was measured at 1.87 GB resident and still climbing (killed rather than let it continue -- no sign of approaching a fixpoint). Root cause: EGraph::saturate matches every rule against every node accumulated so far, every round; with five structural rules firing simultaneously on Stage A (vs zero-to-one on the M1 book, D49-D52's own measurements) and no redundancy/subsumption check (D12: no external e-graph library), the candidate set grows combinatorially. The FULL 517,036-node Stage A tape was not attempted given this trajectory. Flagged as this package's most significant negative finding, for whoever adds a redundancy check or a per-node rule-application budget next.",
+      "safe_bound_result": {
+        "limits": "3 iterations, 500 program nodes (measured safe: ~16s, under 1 GB)",
+        "extracted_history": "r5.group_formation, r5.group_formation, planner.reduction_fusion",
+        "estimated_ratio_vs_default": 0.9773,
+        "verification": "bit-identical to the unannotated program at the tape's exact record point (epykos::test::compare_at_record_point; a perturbation ball is the WRONG check on an implicit-node tape's quotes -- it walks the calibrated book off-solution and produces NaN outputs unrelated to any rewrite defect, tests/rewrite/record_point_check.hpp's own documented reason)."
+      },
+      "finding": "One real win found and verified: applying R5GroupFormation TWICE in sequence (once onto its own prior output) is 2.3% cheaper by the cost model's own estimate than the M1-shaped single-pass 5-rule default plan on this fixture -- a decision a FIXED single-pass pipeline structurally cannot express (it never re-applies a rule to what that same rule just produced). This satisfies the gate's 'at least one win' with a real, verified example, though found within a deliberately small, safe search bound rather than a full saturation.",
+      "not_completed": "rewrite::cross_stage_sharing_guard (this package's own new code, tested standalone against a synthetic split in tests/optimise/extract_cross_stage_sharing_test.cpp) was not wired onto Stage A's own real residual/book output-ordinal groups -- deriving those exactly needs the O1/O2 output layout the G5/G6 gate tests' own helpers compute, which this package did not have time to extract into reusable, non-Stage-A-specific form within the remaining budget. rewrite::ADModePerBlockRule was likewise not run against Stage A's live ImplicitRegistry blocks; see experiment 3 for how its DECISION logic was validated instead, directly against Stage A's own already-measured real numbers."
+    },
+    "3_ad_mode": {
+      "gate": "PROBLEM.md §7: what the rule chose for O3's Jacobian blocks and the measured O3 time vs the M3 baseline mode.",
+      "method": "rewrite::decide_ad_mode / optimise::estimate_jacobian_ns fed the REAL numbers already committed for this fingerprint (bench/results/d448afd70180/stage_a_stage_a.json, commit cc23459, M3/G6's own baseline) rather than re-recording Stage A (tests/rewrite/ad_mode_stage_a_shapes_test.cpp).",
+      "inputs_cited": {
+        "one_pass_ns": 1530133.377,
+        "n_inputs_free_quotes": 70,
+        "book_only_n_outputs": 1,
+        "book_only_reverse_ns_measured": 32629683.12,
+        "measured_adjoint_multiplier": 21.33,
+        "full_ladder_n_outputs": 2043,
+        "full_ladder_forward_ns_measured": 1373388527.5
+      },
+      "decision": {
+        "book_only": "Reverse (both under the M1-book-calibrated default multiplier 8.0 and Stage A's own measured 21.33) -- matches the M3 baseline's own choice (the IFT reverse adjoint is how O3's book sensitivity is actually computed)",
+        "full_ladder": "Forward (under both multipliers) -- matches RESUME.md's own already-reported fact that the Dual<70> forward ladder is ~6.2-6.3x cheaper than the reverse-per-lane shape on this exact problem"
+      },
+      "model_gaps_found": {
+        "reverse_formula_is_linear_in_n_outputs": "extrapolating the book-only 32.6ms/output linearly to 2,043 outputs (~66.6s) overstates the REAL measured reverse cost (~8.8s, RESUME.md's own number, from B=64 batching and chord-policy Jacobian sharing the linear formula cannot see) by about 7.6x",
+        "forward_formula_understates_a_wide_dual_pass": "one_pass_ns x n_inputs, fed a PLAIN double interpreter's one_pass_ns, understates the real Dual<70> forward ladder (which propagates all 70 tangent directions through ONE wide pass, itself O(70) per elementary op, plus the Newton solve) by about 12.8x (measured: 107.1ms estimated vs 1,373.4ms real)"
+      },
+      "finding": "The rule reproduces both already-known, measured decisions correctly under either multiplier, so its qualitative choice is validated; its two identified cost-model gaps both make forward look artificially closer to reverse than reality (one understates forward, one overstates reverse), so the crossover point itself is not claimed precise -- stated, not hidden."
+    },
+    "4_e1_extraction": {
+      "gate": "PROBLEM.md §7 (informational, D27 pairing): the M1 sub-book with exp_poly, extracted at E1, vs bench/hand's v0 reference kernel.",
+      "extracted_history": "identical to experiment 1's E0 result (planner.reduction_fusion alone) -- fma_contraction / R4bSharedReciprocal (the only two E1-eligible rules landed so far) did not change the cost-model's own choice on this fixture at lane_tile 8",
+      "verification": "passes rewrite::verify_annotations at verify::Tolerance::e1() with exec::Options::exp = poly",
+      "measured_wall_clock": {
+        "source": "bench/results/d448afd70180/optimise_egraph_e1_extract_m1.json (this package, fresh)",
+        "B1_ns": 54888.80,
+        "B64_ns": 1147633.52
+      },
+      "hand_v0_cited": {
+        "source": "bench/results/d448afd70180/hand_m1_hand.json (already committed, M1/P5, informational, D9: a different binary, exp mode is a separate axis cost.hpp cannot price)",
+        "B1_ns": 46214.84,
+        "B64_ns": 710456.65
+      },
+      "ratio_vs_hand_v0": {
+        "B1": 1.188,
+        "B64": 1.615
+      },
+      "finding": "Same root cause as experiment 1 (the extracted plan's missing fused-pairs annotation): both ratios are worse than M1's own official baseline (1.044x / 1.079x, D26/D27), informational only, not gated."
+    }
+  }
+}

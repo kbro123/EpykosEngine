@@ -618,3 +618,44 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   to land without the time to verify them as thoroughly as the rest of this package. `ctest --preset release`
   and `--preset reference` green; `scripts/mutation_test.sh` green, every registered mutant caught (exact counts
   in this package's own landing report). No SwapEngine file opened.
+
+2026-09-24  M4/C1 catalogue  landed (D53): `include/epykos/catalogue/` (`Signature`: the op at each step plus
+  each operand slot's kind -- Step/Literal/Column/Gather/Segment, and, for a Step operand, how many steps back it
+  points; excludes row counts, table indices and every literal/column/gather value; `kernel.hpp`'s ABI and
+  `bind_domain`; `registry.hpp`'s hash-then-full-equality lookup), `tools/catalogue/` (the generator:
+  `record -> ir::infer` only on the Stage A tape at its own defaults and the M1 book, no R1-R7 rewrite or EG
+  extraction first -- see finding 1), `src/catalogue/generated/{kernels_e0.cpp,registry.cpp}` (23 distinct
+  signatures across both workloads), `scripts/catalogue_regen.sh --check` wired into CI's Linux/release leg.
+  `exec::Interpreter::Options::use_catalogue` (default on) dispatches for a plain per-tile Materialize domain
+  only (not fused, not inlining a producer, not itself inlined, not a scan); `adjoint::Adjoint::Options::
+  use_catalogue` dispatches unconditionally in its forward pass (it has none of the Interpreter's fuse/inline
+  optimisations to disturb -- DESIGN.md §7's own "the reverse of a fused group is rewrite / catalogue work
+  (M4)"), scan domains included. Both engines add `coverage()` (`catalogue::Coverage`: groups/rows always; a
+  measured time fraction under `-DEPYKOS_EXEC_PROFILE` via each engine's own new, independent per-instance ns
+  accumulator -- `exec::Interpreter`'s existing process-wide `ProfileTable` that `scripts/exec_coverage.py` and
+  `tools/costmodel/fit_main.cpp` already parse is untouched). Two mutants (`catalogue.binding_wrong_operand_order`,
+  `catalogue.signature_ignores_konst`; `docs/WORKLOADS.md` §M2), caught by the catalogue's own new on/off
+  differential + full-coverage gates (`tests/exec/interpreter_catalogue_e0_test.cpp`, `tests/adjoint/
+  adjoint_catalogue_e0_test.cpp`). Findings reported per CLAUDE.md, not hidden (full account: D53):
+  - **A first version of the Interpreter hook produced numbers tens of millions off** on the M1 book's own DF/exp
+    domain before this package's own new differential test caught it, pre-landing: a domain that itself INLINES
+    a producer (`inline_refs[d]` non-empty) reads that producer's rows from a per-tile temporary the interpreter
+    builds on the fly, not the shared value buffer a catalogued kernel always reads directly -- excluded now.
+  - **Coverage is 100% of candidate domains on both reference workloads** (M1 book: 3/3 groups, Interpreter;
+    9/9, Adjoint. Stage A at its own defaults: 28/28 groups / 80,069 rows, Interpreter; 66/66 groups / 423,087 of
+    the tape's 517,036 total nodes, Adjoint) -- necessarily so, since the registry was generated from exactly
+    these instances. A Stage A instance of a DIFFERENT trade count or quote-noise level reaches ~87-93%, not
+    100%: a per-netting-set PV aggregation records as a fixed-arity Sum (2 or 3 operands, part of the Signature
+    by design, DESIGN.md §5.6) only when that netting set happens to hold 2 or 3 trades, and which netting sets
+    do depends on the trade-to-netting-set draw -- a real structural limit of generating the catalogue from two
+    FIXED reference runs (this package's own scope), not a hash or binding defect (bitwise correctness against
+    the non-catalogued path holds regardless, checked directly on two such instances).
+  - **`interpreter.tile_boundary`'s existing single call site is reused, not duplicated:** the mutant's flag is
+    read once in the constructor and stored (`Impl::trim_mutant`), read by both `run()` (the existing use) and
+    the new catalogue-eligibility check (which must fall back to the generic tiled path whenever this mutant is
+    selected, or a domain it bypasses would silently stop exercising the trim it corrupts) --
+    `tests/mutation/registry_test.cpp`'s one-site-per-mutant check would otherwise fail.
+  `ctest --preset release` (101/101) and `--preset reference` (101/101) pass; `scripts/mutation_test.sh` — 40/40
+  mutants caught, 0 survivors (the 2 above plus the 38 from M2-M4/R-a..R-c, against the same 52-test gate set,
+  which now includes this package's own two new files); `scripts/catalogue_regen.sh --check` a no-op against the
+  committed `src/catalogue/generated/`.

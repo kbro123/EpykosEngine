@@ -131,12 +131,36 @@ TEST(PlanBridge, ExplicitFuseAndInlineTranslateOneToOneWithConsumersFromFacts) {
   EXPECT_EQ(bridged.of(2).treatment, optimise::Treatment::Materialized);
 }
 
-TEST(PlanBridge, MismatchedAnnotationSizeFallsBackToInferPlan) {
+// D63 (was `MismatchedAnnotationSizeFallsBackToInferPlan`): a NON-EMPTY annotation whose `domain`
+// vector does not reach every domain is not a reason to substitute infer_plan's decision. The
+// interpreter's `decide_fusion` loops `d < plan_.domain.size()` and leaves every domain past that
+// end Materialized, so the bridge must too — otherwise a `planner.fused_pairs`-only plan node
+// (which the e-graph really produces, `domain` empty) is priced as if it had reduction fusion the
+// interpreter would never give it, the same defect as the discarded `group` in the opposite
+// direction.
+TEST(PlanBridge, AnnotationShorterThanTheProgramLeavesTheRestMaterialised) {
+  const ir::Program p = reduction_program(64);
+  const optimise::Plan inferred = optimise::infer_plan(p, /*tile=*/256, /*lane_tile=*/8);
+  ASSERT_EQ(inferred.of(0).treatment, optimise::Treatment::FusedIntoReduction)
+      << "the fixture must be one where infer_plan and this annotation DISAGREE, or nothing is gated";
+
+  ir::PlanAnnotations plan;
+  plan.domain.assign(1, ir::DomainPlan{});  // neither 0 nor p.domains.size() (== 2); default = Materialize
+  const optimise::Plan bridged = optimise::plan_from_annotations(p, plan, /*tile=*/256, /*lane_tile=*/8);
+  ASSERT_EQ(bridged.domains.size(), p.domains.size());
+  EXPECT_EQ(bridged.of(0).treatment, optimise::Treatment::Materialized) << "domain 0: the annotation's own choice";
+  EXPECT_EQ(bridged.of(1).treatment, optimise::Treatment::Materialized) << "domain 1: past the annotation's end";
+}
+
+// The same rule for the shape that actually occurs: a plan node that decided step pairing and
+// nothing else (`planner.fused_pairs` alone). Its pairings are real; its materialisation is not.
+TEST(PlanBridge, AGroupOnlyAnnotationIsPairedButFusesNothing) {
   const ir::Program p = reduction_program(64);
   ir::PlanAnnotations plan;
-  plan.domain.assign(1, ir::DomainPlan{});  // neither 0 nor p.domains.size() (== 2)
+  plan.group.assign(p.domains.size(), ir::GroupPlan{});
+  ASSERT_FALSE(plan.empty());
   const optimise::Plan bridged = optimise::plan_from_annotations(p, plan, /*tile=*/256, /*lane_tile=*/8);
-  const optimise::Plan expected = optimise::infer_plan(p, /*tile=*/256, /*lane_tile=*/8);
-  ASSERT_EQ(bridged.domains.size(), expected.domains.size());
-  EXPECT_EQ(bridged.of(0).treatment, expected.of(0).treatment);
+  for (std::size_t d = 0; d < p.domains.size(); ++d) {
+    EXPECT_EQ(bridged.of(static_cast<ir::domain_id>(d)).treatment, optimise::Treatment::Materialized) << "domain " << d;
+  }
 }

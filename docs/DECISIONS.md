@@ -2268,6 +2268,19 @@ all, which is literally what `build_group`'s `if (d < plan_.group.size())` does 
 case is experiment 1's extracted plan (history `planner.reduction_fusion` alone), and it is the case that used to
 tie with the fully-paired default.
 
+**(c2) The same rule, applied to `domain`, closed the mirror image of the same hole.** Found while writing (c)'s
+own gate. `plan_from_annotations` used to substitute `infer_plan`'s decision for ANY annotation whose `domain`
+vector was not exactly `program.domains.size()` long. Two plan nodes the e-graph really produces have `domain`
+empty — `planner.fused_pairs` alone and `planner.emit_outputs` alone — and `Interpreter::Impl::decide_fusion`
+loops `d < plan_.domain.size()` and leaves every domain past that end MATERIALISED, so those candidates run with
+nothing fused and nothing inlined. Pricing them with infer_plan's decision gave them reduction fusion the
+interpreter would never give them: the same defect as the discarded `group`, in the opposite direction, and after
+(d) below it would have been a much larger one. There is now exactly one fallback in the file, for
+`plan.empty()` alone, and it is not a guess: an empty annotation is precisely the case in which the interpreter
+derives `default_plan` for itself. Re-running the M1 extraction and the whole Stage A ladder after this change
+produced byte-identical results, so none of the numbers in §4 depend on it — it closes a latent mispricing, not an
+active one.
+
 **(d) `infer_plan` is now `rewrite::planner::default_plan`, not a reproduction of it** — D48 point 6's
 follow-up, completed. This was NOT in the brief; it was found while validating (a), and it is the larger half of
 the entry. Four file-local predicates (`is_reduction_shape`, `is_scan`, `row_fusion_pays`,
@@ -2346,12 +2359,23 @@ terms fit to exactly zero — see §5.
 | `stage_a B=1 tile=256` | 0.993026x | 1.00603x | 0% (measured effect is negative, i.e. noise) |
 | `stage_a B=64 tile=256` | 0.99811x | 1.00113x | 0% (same) |
 
-Before this entry every row of that table would read `1.000x` predicted, by construction.
+Before this entry every row of that table would read `1.000x` predicted, by construction. Caveat on the
+right-hand column, because it is easy to over-read: the `measured` values there are the grid's own SINGLE
+repetitions, and the dedicated 3-repetition A/B above puts the true `m1 B=1 tile=256` figure at 1.021x rather than
+that row's 1.0168x. The spread across the four M1 rows (1.017x-1.060x) is itself about the size of the
+single-capture noise, so "the model sees 57%" and "the model sees 4%" are the same statement measured twice, not a
+tile-dependent effect. What the column does support: the predicted ratio is no longer identically 1, it moves in
+the right direction, and it is the right ORDER of magnitude for an effect this small.
 
 ### 4. The two experiments the gate turns on, re-run
 
 **Rediscovery (`PROBLEM.md` §7, target within 1.02x of the M1 greedy default plan).** The tie is gone as a
-DEFECT: no candidate lacking the pairings ties with the default any more. What extraction now returns on the M1
+DEFECT, and here is that stated as a number on the real M1 book under this fingerprint's fitted model rather than
+as an argument: the candidate D54 experiment 1 actually extracted — `planner.reduction_fusion` alone, non-empty
+`domain`, empty `group`, 0 pairings — now prices at 65,844.847 ns against the fully-paired default plan's
+65,220.750 ns, a ratio of **1.009569** where before this entry it was **exactly 1.000000**. The empty root
+annotation prices at 65,220.750 ns, i.e. ratio exactly 1.000000 against the default, because `build_plan` expands
+it into precisely that plan. What extraction now returns on the M1
 book is the empty root annotation, priced at 283,853 ns, tying the explicit five-rule default plan at the same
 283,853 ns — but those two are the same execution, not two different ones: `exec::Interpreter::Impl::build_plan`
 expands an empty annotation into exactly `rewrite::planner::default_plan`, and `infer_plan` now prices it as
@@ -2407,18 +2431,20 @@ something: **add `fuse_reductions` and `inline_producers` contrast points to the
 `costmodel_collect` flags now exist and the measurements in §3 were taken with them; what remains is teaching
 `fit_main` to build the matching plan for such a capture, which means `infer_plan` taking a
 `DefaultPlanOptions` rather than assuming all-on). Reduction fusion is worth 1.618x on the M1 book and 1.066x on
-Stage A — 20x and 5x the pairing effect this entry priced — and the model currently has no contrast identifying
-the coefficients that would express it.
+Stage A — 19x and 5x the pairing effect this entry priced, comparing excess over 1x (61.8% vs 3.2% on the M1
+book, 6.6% vs 1.4% on Stage A) — and the model currently has no contrast identifying the coefficients that would
+express it.
 
 **A second finding, about the problem rather than the model, and it may matter more.** On the Stage A tape all
 three of the interpreter's planning decisions TOGETHER are worth at most 6.6% (1.066x, and the other two are
 1.014x and 1.000x). Even a perfect plan-level cost model therefore has at most ~6.6% to find on Stage A by
 re-planning. The search's 0.5% is not obviously far from that ceiling. `PROBLEM.md` §7's "at least one cross-stage
 optimisation the greedy pipeline cannot express" may be asking for something the Stage A tape's structure does not
-contain at the plan level at all — the compounding scan dominates its time (D55 measured `exec::Interpreter` at
-9.56% of Stage A's wall clock in the first place), and no amount of materialisation or pairing choice touches
-that. This is a hypothesis with one measurement behind it, labelled as such; the obvious way to test it is the
-same knob-off measurement at the other lane_tiles and on the adjoint path, which this entry did not do.
+contain at the plan level at all, and there is an independent measurement pointing the same way: D55 found the
+catalogue covering only **9.56%** of Stage A's own wall time through `exec::Interpreter`, with the compounding
+scan — outside catalogue eligibility, and untouched by any materialisation or pairing choice — dominating
+instead. This is a hypothesis with two measurements behind it, labelled as such; the way to test it is the same
+knob-off sweep at the other lane_tiles and on the adjoint path, which this entry did not do.
 
 ### 6. Verification
 
@@ -2441,7 +2467,21 @@ answer: `Cost.InferPlanOnM1BookHasNoFusionOrInlining` -> `Cost.InferPlanIsThePla
 premise, "no domain the planner folds away", is false by 1.618x), and `Cost.UniformAffineProducerCanBeInlined` ->
 `Cost.AFoldedDomainIsNotPricedAsMaterialised` (D48 point 2's property is preserved, at the domain the planner
 really folds: on that fixture the real rule folds domain 0 into domain 1's affine and then declines to inline
-domain 1, `inline_producers_plan`'s own `materialised` test).
+domain 1, `inline_producers_plan`'s own `materialised` test). A third was likewise corrected for (c2):
+`PlanBridge.MismatchedAnnotationSizeFallsBackToInferPlan` ->
+`PlanBridge.AnnotationShorterThanTheProgramLeavesTheRestMaterialised`, joined by
+`PlanBridge.AGroupOnlyAnnotationIsPairedButFusesNothing` for the shape that actually occurs; the first now asserts
+up front that the fixture is one where infer_plan and the annotation DISAGREE, so it cannot pass vacuously.
+
+Suites on the landed (rebased) tree, Apple clang 21, fingerprint `d448afd70180`: `ctest --preset release`
+**111/111** and `--preset reference` **111/111**, 0 failed each (110 before the rebase onto D64/D66 and the R2
+package, 109 before this entry's own new gate). `scripts/mutation_test.sh` baseline **57/57 gate tests pass with
+no mutant selected**, and both of this entry's mutants are caught, each by
+`optimise_cost_step_pairing_verify_test` and by nothing else — which is what a mutant of an ESTIMATION defect
+should look like. Stated precisely rather than rounded up: this entry swept its own two mutants, not the full
+registry of 50; the other 48 are disjoint from every file it touches (`src/optimise/cost.cpp`,
+`src/optimise/plan_bridge.cpp`) except through `optimise::estimate_program`, which no other mutant's gate reaches,
+and CI's ubuntu mutation job runs the merged registry in full on the landed commit.
 
 Exactness: this package declares none and changes none. It adds no rewrite, so there is no arithmetic to classify
 — the same precedent D49 and D62 set. No `-ffast-math`. No SwapEngine file opened.

@@ -39,22 +39,27 @@
 
 namespace epykos::optimise {
 
-// `plan.domain.empty()`: every domain's treatment comes from `infer_plan(program, tile,
-// lane_tile)` (CM's own structural guess — the fallback D48 point 6 names). Otherwise (size ==
-// program.domains.size(), the only other state ir::annotate.hpp's own contract allows): domain d
-// translates 1:1 — Materialize -> Materialized; FuseIntoReduction -> FusedIntoReduction with
-// `kept_rows = keep_rows.size()` and `consumers = facts[d].segment_readers` (the reductions that
-// read it — ir::DomainPlan itself does not store consumer ids, only which rows survive);
-// InlineIntoConsumer -> Inlined with `consumers = {inline_consumer}`. A `plan.domain.size()` that
-// is neither 0 nor `program.domains.size()` (a malformed partial annotation no rule in this
-// codebase produces) falls back to infer_plan entirely, rather than guessing which domains the
-// caller meant to cover.
+// One rule, applied to every field (D63): translate what `exec::Interpreter` will really do with
+// THIS annotation. There is exactly one fallback, and only for `plan.empty()`.
 //
-// `DomainPlan::pairings` is decided separately and independently of `domain` (D63), because
-// exec::Interpreter reads the two separately too: `plan.group.size() == program.domains.size()`
-// -> those pairings verbatim; the WHOLE annotation `empty()` -> infer_plan's (the interpreter
-// derives its own default plan in that case); anything else -> no pairings at all, which is what
-// `build_group`'s `if (d < plan_.group.size())` really does with such an annotation.
+//   * `plan.empty()` (nothing decided): `Interpreter::Impl::build_plan` derives
+//     `rewrite::planner::default_plan` for itself, and that is what `infer_plan` now returns, so
+//     the whole Plan is `infer_plan(program, tile, lane_tile)`.
+//   * otherwise, per domain d < `plan.domain.size()`: Materialize -> Materialized;
+//     FuseIntoReduction -> FusedIntoReduction with `kept_rows = keep_rows.size()` and
+//     `consumers = facts[d].segment_readers` (the reductions that read it — ir::DomainPlan itself
+//     does not store consumer ids, only which rows survive); InlineIntoConsumer -> Inlined with
+//     `consumers = {inline_consumer}`.
+//   * every domain the annotation's `domain` vector does NOT reach stays Materialized, because
+//     `Interpreter::Impl::decide_fusion` loops `d < plan_.domain.size()` and leaves the rest
+//     alone. That covers the two shapes the e-graph really produces — a `planner.fused_pairs`-only
+//     and a `planner.emit_outputs`-only plan node, both with `domain` empty — and it is NOT what
+//     this file used to do: it substituted infer_plan's decision, i.e. priced such a candidate as
+//     if it had reduction fusion the interpreter would never give it. Same defect as the
+//     discarded `group`, opposite direction.
+//   * `DomainPlan::pairings`: `plan.group.size() == program.domains.size()` -> those pairings
+//     verbatim; anything else -> none, which is what `build_group`'s
+//     `if (d < plan_.group.size())` really does.
 Plan plan_from_annotations(const ir::Program& program, const std::vector<DomainFacts>& facts,
                             const ir::PlanAnnotations& plan, int tile, int lane_tile);
 

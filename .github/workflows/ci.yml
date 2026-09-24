@@ -2,6 +2,8 @@
 # Linux as well, because E0 gates run under it. Benchmarks are built but never run in CI; perf
 # gates run only locally and are fingerprinted (D9, D13). The mutation job (Linux GCC 13) runs
 # scripts/mutation_test.sh: the mutation preset, every registered mutant against the gate tests (D32).
+# The Linux/release leg also runs scripts/catalogue_regen.sh --check (M4/C1, D53): regenerating
+# src/catalogue/generated/ from the reference workloads must reproduce it byte-for-byte.
 name: ci
 
 on:
@@ -68,6 +70,10 @@ jobs:
 
       - name: Test
         run: ctest --preset ${{ matrix.preset }}
+
+      - name: Catalogue regen check (M4/C1, D53)
+        if: matrix.os == 'ubuntu-latest' && matrix.preset == 'release'
+        run: scripts/catalogue_regen.sh --check --no-build
 
   mutation:
     name: ubuntu-latest / mutation

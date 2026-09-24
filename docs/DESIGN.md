@@ -419,6 +419,23 @@ gaps (reverse's linear-in-outputs formula misses batching/chord sharing; forward
 understates a wide `Dual<N>` pass); (4) E1 EXTRACTION is informational only, same root cause as
 (1).
 
+**As built (M4/C1, D53):** §7 tier 1's catalogue is `include/epykos/catalogue/` (`Signature`: the
+op at each step plus each operand slot's KIND — Step/Literal/Column/Gather/Segment — and, for a
+Step operand, how many steps back it points; no row count, no table index, no literal/column/
+gather value; `Kernel`, `bind_domain`, `registry.hpp`'s hash-then-full-equality lookup) plus
+`tools/catalogue/`'s generator (`scripts/catalogue_regen.sh`), which walks the Stage A tape and
+the M1 book straight out of `ir::infer` (no R1-R7 rewrite or EG extraction first — either is a
+Program a caller supplies, not what a default `Interpreter`/`Adjoint` construction runs today; a
+later regen against one needs a different `record_and_infer`, not a different `Signature` or
+codegen) and writes one kernel per distinct signature found, deterministically. `exec::Interpreter`
+dispatches to it only for a plain per-tile Materialize domain (not fused into a reduction, not
+inlining a producer, not itself inlined, not a scan — its own three optimisations are left alone);
+`adjoint::Adjoint`, which applies none of those (§7's own "the reverse of a fused group is rewrite
+/ catalogue work (M4)"), dispatches unconditionally for every catalogue-eligible domain, scan
+included. Measured coverage and its one real limit (a per-netting-set fixed-arity Sum's exact
+arity depends on the trade-to-netting-set draw, so a Stage A instance other than the two reference
+workloads reaches ~87-93%, not 100%, of candidate domains) are in D53 and `docs/RESUME.md` §5.
+
 ---
 
 ## 8. Value-dependent behaviour

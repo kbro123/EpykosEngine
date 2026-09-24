@@ -1530,3 +1530,90 @@ correctness-critical, already-gated numerical code is a worse outcome than not l
 Verification (fingerprint d448afd70180): `ctest --preset release` and `--preset reference` both green (see this
 package's own landing report for the exact count); `scripts/mutation_test.sh` green, every registered mutant
 caught including the three new ones. No SwapEngine file opened.
+
+## D53 — M4/C1: the catalogue is a value-independent Signature per domain Group, one hand-portable C++ kernel per
+distinct shape, dispatched from inside `exec::Interpreter`'s plain per-tile path and unconditionally from
+`adjoint::Adjoint`'s forward pass (2026-09-24)
+Implements DESIGN.md §7 tier 1 / PROBLEM.md §7's catalogue: `include/epykos/catalogue/` (engine API) --
+`signature.hpp` (`Signature`: the op at each step plus each operand slot's KIND -- Step/Literal/Column/Gather/
+Segment -- and, for a Step operand, how many steps back it points; excludes row counts, table indices and every
+literal/column/gather VALUE by construction), `kernel.hpp` (`Kernel`, the ABI every generated function shares:
+given a row range and lane width, write each row's final value to the shared `values` buffer exactly where the
+generic path would have) and `bind_domain` (the pointers one domain's kernel call needs, one array slot per
+Literal/Column/Gather OCCURRENCE in step order -- deliberately not deduplicated by table index, since a
+Signature cannot see which occurrences share one, and a generated kernel and its binding must agree on array
+LENGTH without either naming the other's Program-global indices), and `registry.hpp` (the generated table,
+looked up by hash then verified by full `Signature` equality, so a hash collision can never dispatch the wrong
+kernel). `tools/catalogue/` (codegen.hpp/.cpp, generate_main.cpp, not engine API) runs the two reference
+workloads named by PROBLEM.md §7 -- the Stage A tape (`fixtures::record_stage_a` at its OWN default
+`StageAOptions{}`) and the M1 book -- through `ir::infer` only (no additional rewrite pass; see finding 1 below),
+collects the Signature of every catalogue-eligible domain either produces (excludes only an `Op::Input` step; a
+domain "counts as hot" simply by appearing in one of the two named reference workloads, never a row-count
+threshold, HARD RULE 9) and writes `src/catalogue/generated/{kernels_e0.cpp,registry.cpp}` deterministically
+(sorted by hash); `scripts/catalogue_regen.sh --check` is the `git diff --exit-code` CI wiring the brief asks
+for. Two new mutants (`catalogue.binding_wrong_operand_order`, `catalogue.signature_ignores_konst`;
+`docs/WORKLOADS.md` §M2), caught by the catalogue's own on/off differential tests
+(`tests/exec/interpreter_catalogue_e0_test.cpp`, `tests/adjoint/adjoint_catalogue_e0_test.cpp`), which also carry
+the E0 differential and coverage gates below. Exactness class E0 throughout (a catalogued kernel is a literal,
+row-count-generic transcription of the domain's own recorded op sequence; nothing about the arithmetic changes).
+
+Findings, reported per CLAUDE.md rather than hidden:
+
+1. **The generator does not run the M4/R-a..R-c structural rewrites or an EG extraction first, by choice, not
+   oversight.** It walks the Program `ir::infer` itself produces -- the SAME Program an ordinary
+   `exec::Interpreter(program, Options{})` / `adjoint::Adjoint(program, Options{})` construction already runs
+   today, since R1-R7 and EG extraction are opt-in (a caller supplies its own rewritten/extracted Program) rather
+   than what a default construction executes. Nothing about `Signature` / the registry format is specific to an
+   un-rewritten Program -- a later regen against an R1-R7-rewritten or EG-extracted Program needs a different
+   `record_and_infer` in `tools/catalogue/generate_main.cpp`, no change to `signature.hpp`, `kernel.hpp`,
+   `registry.hpp` or the codegen itself. Deferred rather than attempted this landing given D51/D52's own measured
+   finding that R1-R4/fma fire on neither real fixture today and R5/R7 change only a handful of domains -- the
+   marginal catalogue coverage was judged not worth the added risk of modelling their edits incorrectly within
+   this package's own time budget.
+2. **`exec::Interpreter`'s own hook is deliberately narrower than `adjoint::Adjoint`'s.** The Interpreter already
+   has three of its own hot-path optimisations a catalogued kernel would either duplicate badly or corrupt
+   silently if not excluded: a domain `InlineIntoConsumer`'d into another domain's tiles is (by design) never
+   materialised into the shared value buffer at all -- a first version of this package's hook did not exclude a
+   domain that itself INLINES a producer (`inline_refs[d]` non-empty) and produced wrong numbers (tens of
+   millions off) on the M1 book's own DF/exp domain the moment it was exercised by this package's own new
+   differential test, caught before landing, not after; `FuseIntoReduction`'d domains are safe to gather from
+   (their reader rows are always in `keep_rows`, verified against `rewrite::planner::decide_reduction_fusion`)
+   but the reduction domain itself is `is_whole_segment` and excluded on that basis already; a scan domain's own
+   wave-scheduled, indirect-row execution is excluded outright (`dom.recurrent`) rather than taught to the
+   generated kernel's row-range ABI. `adjoint::Adjoint`'s forward pass has none of these three optimisations of
+   its own (DESIGN.md §7's own words: "the reverse of a fused group is rewrite / catalogue work (M4)") -- it
+   materialises every domain's rows unconditionally today, scan included (`is_scan` only changes its OWN tile
+   size to 1, still ascending row order), so a catalogued kernel is a safe, unconditional replacement for ANY
+   catalogue-eligible domain there, and the coverage measured below is correspondingly higher.
+3. **Coverage, measured (fingerprint d448afd70180, `ctest --preset release`, `tests/exec/
+   interpreter_catalogue_e0_test.cpp`'s `DefaultStageAIsFullyCatalogued` / `tests/adjoint/
+   adjoint_catalogue_e0_test.cpp`'s own):** on the M1 book, `exec::Interpreter` and `adjoint::Adjoint` both
+   catalogue 3-of-3 / 9-of-9 candidate domains (100%; Adjoint's larger count is exactly the whole-segment Sum/
+   Affine reductions the Interpreter excludes per finding 2). On the FULL default Stage A tape (the same
+   instance the generator itself ran): `exec::Interpreter` catalogues 28/28 candidate domains, 80,069/80,069
+   candidate rows (100%); `adjoint::Adjoint` catalogues 66/66 candidate domains, 423,087/423,087 candidate rows
+   (100% of candidates; 423,087 of the tape's 517,036 total nodes, CLAUDE.md's own Stage A count). A
+   DIFFERENTLY-SIZED or DIFFERENTLY-NOISED Stage A instance (not one of the two reference workloads the registry
+   was built from) reaches ~87-93% of candidate domains, not 100% -- measured and explained, not smoothed over:
+   a per-netting-set PV aggregation records as a FIXED-ARITY Sum (2 or 3 operands, DESIGN.md §5.6, part of the
+   Signature by design) only when that particular netting set happens to hold 2 or 3 trades; a larger one falls
+   back to the row-count-independent Segment form. Which netting sets land on which side of that line depends on
+   the trade-to-netting-set draw, which a different trade count or quote-noise level changes -- a real structural
+   consequence of generating the catalogue from two FIXED reference runs (the brief's own scope), not a hash or
+   binding defect (bitwise correctness against the non-catalogued path holds in every case tested, including
+   these smaller/differently-noised ones: `InterpreterCatalogueE0.DifferentStageAInstanceHitsTheSameCatalogueAndIsMostlyCovered`).
+4. **Engine coverage() is a structural (domain- and row-count) metric always; a measured time fraction only under
+   `-DEPYKOS_EXEC_PROFILE`.** Both `exec::Interpreter::coverage()` and `adjoint::Adjoint::coverage()` return
+   `catalogue::Coverage{groups_total, groups_catalogued, rows_total, rows_catalogued, time_fraction}`; the two
+   engines each keep their OWN lightweight per-instance ns accumulator (gated by the SAME `EPYKOS_EXEC_PROFILE`
+   compile option M4/CM's `profile` preset already defines) rather than reusing `exec::Interpreter`'s existing
+   PROCESS-WIDE `ProfileTable` -- that table's stderr text format is a load-bearing contract of
+   `scripts/exec_coverage.py` and `tools/costmodel/fit_main.cpp`, which this package neither needed to nor
+   should touch. `time_fraction` reads -1.0 (never 0.0) when profiling is not compiled in or no `run()`/`run_chunk()`
+   call has completed yet, so a caller cannot mistake "not measured" for "0% covered".
+
+No SwapEngine file opened. Verification (fingerprint d448afd70180): `ctest --preset release` and `--preset
+reference` both green (see `docs/RESUME.md` §5's landing entry for the exact counts); `scripts/mutation_test.sh`
+green, all registered mutants caught including this package's own two; `scripts/catalogue_regen.sh --check`
+a no-op against the committed `src/catalogue/generated/` (regenerating from the same two workloads and the seed
+of `docs/WORKLOADS.md` reproduces it byte-for-byte).

@@ -19,8 +19,18 @@ M1 book, all 13 registered mutants are caught by the gates, the differential tes
 nodes, 67 IR domains, 5 scan domains) with every `PROBLEM.md` §6 gate ok on fingerprint d448afd70180 — adjoint vs FD
 9.65e-10, vs Dual 2.79e-15, IFT vs bump-and-recalibrate 5.09e-8, optimality 1.235e-13, 0/262,112 O4 mismatches on the
 sampled lanes and 0 lanes not converged on the full 1,000-lane grid, 20/20 mutants caught, timings recorded as the M4
-baseline (D35, D44, D45; `docs/RESUME.md` §5 "M3 result"). M4 onward in progress on branch `integrate/m1-m5`. Nothing
-merges to `main` without the owner.
+baseline (D35, D44, D45; `docs/RESUME.md` §5 "M3 result"). **M4 (optimise the totality) failed 2026-09-24** (D59;
+`docs/RESUME.md` §5 "M4 result"): of `PROBLEM.md` §7's four exit-gate clauses, two hold (every e-graph-extracted
+program verifies at its declared exactness class; the self-regression gate against the M3 baseline passes, 17/17
+benchmarks, 0 regressions, catalogue coverage giving a real 1.11–1.16× win on the reverse risk ladder) and two miss
+(rediscovery of M1's three kill-path fusions ties the cost model's own estimate but misses its 1.02× wall-clock
+target at 1.0277×/1.0427×; the one cross-stage optimisation found, re-priced under this fingerprint's real fitted
+cost model, is 0.999716× — noise, not a win, so `cross_stage_wins` = 0). The Rule/e-graph/cost-model/catalogue
+framework (D47–D49, D54–D55) and rules R1–R7 plus fma-contraction all landed with their exactness class,
+differential test and mutation test (43/43 mutants caught); the cost model's mean relative error (84.4%) misses its
+<25% target, `EGraph::saturate` has no redundancy check and grows unboundedly past a small bound, and CI is red on
+GCC-only (ubuntu-latest) for a pre-existing catalogue-coverage gap unrelated to this verdict (`task_919ea449`). M5
+onward awaits the owner's decision on this failed exit gate. Nothing merges to `main` without the owner.
 
 ## Rules
 - **Decisions are in `docs/DECISIONS.md`.** Changing one means appending a new entry that supersedes it, in the same

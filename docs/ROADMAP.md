@@ -101,6 +101,31 @@ finds at least one cross-stage optimisation the greedy pipeline cannot express; 
 `PROBLEM.md` §6 at its declared class; self-regression gate (D9) against the M3 baseline. Informational rows: the
 M1 sub-book vs the hand kernel under every D27 pairing; adjoint risk vs bump-and-recalibrate.
 
+**Result (2026-09-24): fail.** On fingerprint `d448afd70180` (Xeon W-3223, 8 cores / 16 threads, Apple clang 21, `-O3
+-march=x86-64-v3 -fno-math-errno`) at `a49ad34` (M4-gate-2, the independent re-verification run; `d8700e8` on top is a
+docs-only CI-verification addendum): the Rule interface, cost model, two-tier e-graph and extraction, rules R1–R7 plus
+fma-contraction, the AD-mode-per-Jacobian-block rule and its required consumer, a cross-stage-sharing extraction
+guard, and the catalogue all landed (D47–D55), each with its exactness class, differential test and mutation test —
+43/43 registered mutants caught, `ctest` 107/107 under both release and reference. Of this section's own four
+exit-gate clauses, two hold and two miss. Hold: every e-graph-extracted program verifies at its declared class against
+the true unrewritten original (D57's own added check); the self-regression gate against the M3 baseline passes, 17/17
+benchmarks within 1.25x, 0 regressions — catalogue coverage gives a real 1.11–1.16x win on the reverse risk ladder
+(`adjoint::Adjoint` now dispatches to a catalogued kernel for ~99.9% of its own Stage A wall time). Miss: rediscovery
+of M1's three kill-path fusions ties the cost model's own estimate (ratio 1.0, `plan_bridge.hpp`'s documented pricing
+gap) but misses its 1.02x measured-wall-clock target at **1.0277x** (B=1) / **1.0427x** (B=64); the one cross-stage
+candidate found (`r5.group_formation` applied twice on a bounded Stage A fixture) was originally reported as a 0.977x
+win but, re-priced under this fingerprint's real fitted cost model rather than the synthetic default (D57's
+correction), is **0.999716x** — noise, not a win, so `cross_stage_wins` = 0. The cost model's own mean relative error
+(84.4% overall / 69.3% restricted to material domains) misses its <25% target; `EGraph::saturate` has no
+redundancy/subsumption check and grows unboundedly on Stage-A-shaped programs past a small bound (1.87 GB and climbing
+by round 4 on a 60-trade fixture, killed); rules R1, R2 (with its safety gate), R3, R4a, R4b and fma-contraction fire
+zero times on both reference fixtures (each for a different, independently measured reason, D51/D52); a live,
+reproducible `adjoint::` crash on a real R2 split shape (D52 point 4, `src/adjoint/`) and a silent
+`ExpMode::poly`-disabled interaction with the catalogue's own production default (`task_f7b9c87d`) are both flagged,
+unowned by any M4 package. CI: `ci_green` = false, citing a pre-existing, unrelated GCC-only catalogue-coverage gap
+(`task_919ea449`) confirmed unfixed at both M4-gate runs; this package's own diff touches only `docs/` and
+`bench/results/`. Full account: `docs/RESUME.md` §5 "M4 result", `docs/DECISIONS.md` D47–D59.
+
 ## M5 — Stages B and C, streaming (`PROBLEM.md` §4 Stages B, C)
 - EURUSD MtM-resetting xccy basis swaps, FX spot as input, EUR discounting under USD collateral, FX delta.
 - GBP (SONIA) and JPY (TONA) with their calendars and conventions; GBPUSD and USDJPY xccy; the ~5,000-trade book.

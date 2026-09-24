@@ -109,6 +109,14 @@ rediscovers M1's three kill-path fusions unaided, finds at least one cross-stage
 cannot express, and every extracted program passes §6 at its declared class. Performance is gated against
 ourselves (D9); the M1 hand kernel and bump-and-recalibrate risk are informational rows.
 
+**As built (2026-09-24): fail.** All of the above shipped as rules with exactness classes, differential tests
+and mutation tests (D47–D55; 43/43 mutants caught). Two of the three gate clauses in this section's own text
+miss: rediscovery ties the cost model's own estimate but misses its 1.02x wall-clock target (1.0277x/1.0427x),
+and the one cross-stage candidate found is 0.999716x under this fingerprint's real fitted cost model — noise,
+not a win, once D57 corrected the synthetic-cost-model pricing bug that had made it look like one. Every
+extracted program does pass §6 at its declared class, and the self-regression gate against the M3 baseline (D9)
+passes (17/17 benchmarks). Full account: `docs/RESUME.md` §5 "M4 result", `docs/DECISIONS.md` D59.
+
 ## 8. Milestones (D35; supersedes ROADMAP M3–M5 as first written)
 
 - **M3 — groundwork and the Stage A tape**: conventions layer with sources, real instruments, all schemes and

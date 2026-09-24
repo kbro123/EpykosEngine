@@ -222,16 +222,17 @@ the calibration residuals and the book, no discount factor computed twice.
 Applied in order. Each has an **exactness class**: *E0* bit-identical, *E1* ≤ 1 ulp per op (tolerance-gated; for a value
 that is a difference of terms, such as a swap PV, the tolerance is relative to the scale of the terms, D26).
 
-| # | rule | class | recovers (in SwapEngine terms) |
-|---|---|---|---|
-| R1 | fold uniform columns (`k==1`, `konst==0`, `w==1`) | E0 | `cpn_is_plain` |
-| R2 | bucket rows by uniform-column signature | E0 | per-kind batches |
-| R3 | elide trivial maps (length-1 segments, identity gathers ⇒ merge domains) | E0 | `sub_is_identity` |
-| R4a | push pure unary ops through gathers toward the smaller domain, then CSE (`exp`) | E0 | `exp` once per time |
-| R4b | same for `recip` (`a/b → a·recip(b)`) | E1 | shared `INV` |
-| R5 | group formation: maximal elementwise region per domain; gathers in; segment-sum epilogue | E0 | fused coupon→leg loop |
-| R6 | materialise only at domain boundaries (before `linmap`, at reductions, on profitable fan-out) | E0 | "materialise before a sparse reduce" (a measured 1.28× trap becomes unrepresentable) |
-| R7 | block `linmap` by the column span its rows read | E0 | per-curve block GEMV |
+| # | rule | class | recovers (in SwapEngine terms) | fires? (M1 book / Stage A, D51/D52/D50, measured) |
+|---|---|---|---|---|
+| R1 | fold uniform columns (`k==1`, `konst==0`, `w==1`) | E0 | `cpn_is_plain` | no / no (0/0 — the signature pass already folds this at construction time) |
+| R2 | bucket rows by uniform-column signature | E0 | per-kind batches | no / no (0/0 with its own safety gate; verifies correct on both fixtures without the gate, but a real `adjoint::` crash on the resulting split bars shipping that way, D52 pt.4) |
+| R3 | elide trivial maps (length-1 segments, identity gathers ⇒ merge domains) | E0 | `sub_is_identity` | no / no (0/0) |
+| R4a | push pure unary ops through gathers toward the smaller domain, then CSE (`exp`) | E0 | `exp` once per time | no / no (0/0 — a record-time df memo already removes the redundancy on both fixtures) |
+| R4b | same for `recip` (`a/b → a·recip(b)`) | E1 | shared `INV` | no / no (0/0 — heterogeneous per-curve gathers avoid the shared-site shape) |
+| R5 | group formation: maximal elementwise region per domain; gathers in; segment-sum epilogue | E0 | fused coupon→leg loop | no / **yes** (0/3 producer→consumer merges, 423,235 → 406,661 recorded values on Stage A) |
+| R6 | materialise only at domain boundaries (before `linmap`, at reductions, on profitable fan-out) | E0 | "materialise before a sparse reduce" (a measured 1.28× trap becomes unrepresentable) | no / **yes** (0/3 domains, 16,574 rows, into 3 consumers on Stage A) |
+| R7 | block `linmap` by the column span its rows read | E0 | per-curve block GEMV | **yes** / **yes** (2 splits on the M1 book, 5 on Stage A — rows `[7456, 7668, 48, 3, 1742]`) |
+| — | `fma_contraction`: `a·b+c` chains folded into one `Op::Fma` (D51; not in the original R1–R7 numbering) | E1 (scale abs(a·b)+abs(c), D57) | — | no / no (0/0 on both; latent only — D57 found the originally-declared flat-ulp tolerance unsound under cancellation before any real fire) |
 
 Flip classification (from measured degenerate-tie flips): a `select`/guard flip is significant only if the **arm gap**
 exceeds a threshold, never on the bit alone.
@@ -447,6 +448,27 @@ inlining a producer, not itself inlined, not a scan — its own three optimisati
 included. Measured coverage and its one real limit (a per-netting-set fixed-arity Sum's exact
 arity depends on the trade-to-netting-set draw, so a Stage A instance other than the two reference
 workloads reaches ~87-93%, not 100%, of candidate domains) are in D55 and `docs/RESUME.md` §5.
+
+**As built (M4-close, D59): the search, cost model and catalogue, verdict fail.** All four §7 mechanisms described
+above shipped — the `rewrite::Rule` interface and planner-as-rules (D47), the fitted per-domain cost model (D48), the
+two-tier e-graph with saturation and cost-based extraction (D49), the AD-mode-per-Jacobian-block rule and
+cross-stage-sharing guard (D54), and the catalogue (D55) — each with its exactness class, differential test and
+mutation test (43/43 registered mutants caught, 0 survivors, `ctest` 107/107 under both release and reference at
+fingerprint `d448afd70180`). Against `PROBLEM.md` §7's own exit gate: every e-graph-extracted program verifies at its
+declared class against the true unrewritten original (D57's own added `verify_extraction` check) and the
+self-regression gate against the M3 baseline passes (17/17 benchmarks, 0 regressions — catalogue coverage gives a real
+1.11–1.16x win on the reverse risk ladder, `adjoint::Adjoint` now dispatching to a catalogued kernel for ~99.9% of its
+own Stage A wall time); but rediscovery of M1's three kill-path fusions ties the cost model's own estimate exactly
+(ratio 1.0, `plan_bridge.hpp`'s documented unpriced-terms gap) while missing its own 1.02x measured-wall-clock target
+(1.0277x at B=1, 1.0427x at B=64), and the one cross-stage candidate the search found beyond the fixed pipeline
+(`r5.group_formation` applied twice on a bounded Stage A fixture) is, once D57 corrected the pricing bug that made it
+look like a 0.977x win, actually 0.999716x — noise under this fingerprint's real fitted cost model, not a win. Two
+mechanism-level gaps explain most of the shortfall: the cost model's mean relative error (84.4% overall, 69.3%
+restricted to domains material to their own config's time) is well outside its own <25% target, so extraction argmins
+over a materially wrong cost surface; and `EGraph::saturate` has no redundancy or subsumption check (D12 rules out an
+external e-graph library), so it grows unboundedly on Stage-A-shaped programs past a small, deliberately safe bound —
+the full 517,036-node Stage A tape was never saturated. Verdict: **fail** (`docs/RESUME.md` §5 "M4 result",
+`docs/DECISIONS.md` D59).
 
 ---
 

@@ -817,3 +817,98 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   (`task_919ea449`, GCC-only, unfixed since), and ubuntu-latest/mutation failed for the same root
   cause; this package's diff against its parent commit touches only `docs/` and `bench/results/`
   paths, confirmed again on this run's own log. No SwapEngine file opened.
+
+2026-09-24  M4/r0  landed (D47, the Rule interface and the planner factored into rules)  486bb84412687b55579a9fabf04e1293431878ac (branch m4/r0-rules, fast-forward-merged onto origin/integrate/m1-m5)
+2026-09-24  M4/cm  landed (D48, the cost model)  16c9805 (tip of origin/integrate/m1-m5 after push; package branch origin/m4/cm-cost-model also pushed, force-updated, 3 commits: e5c20bc feat(optimise), 4cccd28 docs(decisions) D48, 16c9805 docs(design))
+2026-09-24  M4/eg-core  landed (D49, the two-tier e-graph and extraction)  35ced5c340f5507d024cce4302c3572e90654d69
+2026-09-24  M4/r-c  landed (D50, R6 materialise-at-boundaries and R7 block linmap)  22ae68f (pushed to origin/integrate/m1-m5, fast-forward from 35ced5c; package branch origin/m4/r-c-rules-6-7 also pushed for reference; local commits in order: bda16de feat(rewrite) R6+R7 rule bodies and 4 mutants, 4911513 test(rewrite) their differential/mutation gates, 22ae68f docs(decisions) D50 landing note + DESIGN/RESUME/WORKLOADS updates)
+2026-09-24  M4/r-b  landed (D51, R4a push-unary-through-gathers, R4b shared reciprocal, R5 group formation, plus fma-contraction)  614d1fa
+2026-09-24  M4/r-a  landed (D52, R1 fold uniform columns, R2 bucket rows, R3 elide trivial maps)  fe6e4c65871c7aec3a6c53e94fd9fdf27a387414
+2026-09-24  M4/eg-integrate  landed (D54, the AD-mode-per-Jacobian-block rule and its required adjoint::block_jacobian consumer, the cross-stage-sharing extraction guard, the four PROBLEM.md section 7 experiments)  7a922fb2dd083ecc94ba5a95e3a13f2593666c53 (tip of both origin/integrate/m1-m5 and origin/m4/eg-integrate)
+2026-09-24  M4/c1  landed (D55, the catalogue: Signature/Kernel/registry, the build-time generator, dispatch from exec::Interpreter and adjoint::Adjoint)  4ef9632 (pushed to origin/integrate/m1-m5 and origin/m4/c1-catalogue)
+2026-09-24  M4-gate (run 1)  done (D56; independent re-verification, fresh worktree; two real, previously-unknown defects found: fma-contraction's declared E1 tolerance unsound under cancellation, and no gate ever compared an extracted program against its true unrewritten original)  2c99023928aea3f6cf2ded4ee8936703d91d4dee
+2026-09-24  M4-fix  landed (D57; all three M4-gate-1 findings confirmed and fixed with regression tests, including re-pricing the Stage A "cross-stage win" under the fingerprint's real fitted cost model instead of the synthetic default -- it turns out to be noise, not a win)  5d4ae2a4775dfd3632d1e434c6e9aa2fa386e822
+2026-09-24  M4-gate-2 (run 2)  done (D58; independent re-verification on a fresh worktree, every number re-measured; confirms D57's fix; ci_green false, citing the pre-existing GCC-only catalogue-coverage gap task_919ea449, unrelated to this package's own docs/bench-results-only diff)  a49ad344da2c06b0aeead82d3b4cdccae8bd88bf
+
+### M4 result (2026-09-24)
+
+**Verdict: fail** (M4-close, at M4 close; the exit gate is `PROBLEM.md` §7: rediscover M1's three kill-path fusions
+unaided, find at least one cross-stage optimisation the greedy pipeline cannot express, every extracted program passes
+§6 at its declared class, and the self-regression gate (D9) against the M3 baseline). Engine measured:
+`a49ad344da2c06b0aeead82d3b4cdccae8bd88bf` (M4-gate-2, fingerprint `d448afd70180`; `d8700e8` on top is a docs-only
+CI-verification addendum, no engine file). Order landed: R0 → {CM, EG-core} (parallel from the same base, D49) → R-c →
+R-b → R-a → EG integration → C1 catalogue → M4-gate (run 1) → M4-fix → M4-gate (run 2) → M4-close (this entry).
+
+- **Gate item 1, rediscovery — miss.** `bench/optimise/egraph_full_rules_m1_bench`: extraction ties the cost model's
+  own estimate exactly (ratio 1.0 — `plan_bridge.hpp`'s documented `plan.group`/`plan.emitted` pricing gap, D54/D58)
+  but the measured wall-clock ratio is **1.0277×** at B=1 / **1.0427×** at B=64 against the 1.02× target — closer than
+  M4-gate-1's own re-measurement (1.081-1.104×) but still short; `src/optimise/cost.cpp` and `ir::PlanAnnotations` are
+  unchanged since D48/D54, so this is machine noise around an unmet target, not a fix in progress.
+- **Gate item 2, cross-stage optimisation — miss.** `EGraphFullRulesStageA` finds one candidate the fixed single-pass
+  pipeline cannot express (`r5.group_formation` applied twice, then `planner.reduction_fusion`; extracted program node
+  19, 55 domains) on a bounded 60-trade Stage A fixture (`max_iterations=3`, `max_program_nodes=500`, a deliberately
+  small bound after D54's own unbounded-growth finding) — but D57's fix (pricing it under this fingerprint's real
+  fitted `cost_model.json` instead of the synthetic default) puts the ratio at **0.999716** (noise), not the 0.977299
+  originally reported as a win; **cross_stage_wins = 0**, unchanged at M4-gate-2. The full 517,036-node Stage A tape
+  was never saturated: `EGraph::saturate` has no redundancy/subsumption check (D12 forbids an external e-graph
+  library), and even the small 60-trade fixture at unbounded default limits held 1.87 GB and was still climbing by
+  round 4 before being killed (D54 point 4) — a real, load-bearing gap left open for whoever adds that check next.
+- **Gate item 3, every extracted program verifies at its class — met.** `extracted_verified_ok = true`:
+  `optimise_egraph_full_rules_m1_test` (2/2), `optimise_egraph_e1_extract_m1_test` (1/1),
+  `optimise_egraph_m1_extract_test` (2/2) and `optimise_egraph_full_rules_stage_a_test` (2/2, including D57's
+  `verify_extraction` check of the extracted program against the true unrewritten original) all pass at their declared
+  tolerance.
+- **Gate item 4, self-regression against the M3 baseline (D9) — met.** `bench/run.sh` + `scripts/perf_gate.py` into
+  `bench/results/d448afd70180/m4.json`: verdict **PASS**, 17/17 benchmarks within the 1.25× self-regression threshold,
+  0 regressions. `o2_speedup` 1.006 (`BM_Evaluate/1/1`), `o3_speedup` 1.160 single-lane / 1.113 batched B=64
+  (`BM_Adjoint/1`, `/64` — the one real absolute win: M4/C1's catalogue now covers ~99.9% of `adjoint::Adjoint`'s own
+  Stage A wall time), `o4_speedup` 1.028 (`BM_Run/64`); the forward ladder (`Dual<70>`) is flat, untouched by any M4
+  rule.
+- **Cost model (D48).** Mean absolute relative error **84.4241%** overall / **69.2692%** restricted to domains ≥1% of
+  their own config's time — both miss the <25% target, unchanged since D48 (`src/optimise/cost.cpp` untouched
+  throughout M4).
+- **Rules, fire-counts on (M1 book / Stage A default)** — every rule's own E0/E1 differential and mutation gate passes
+  regardless of whether it fires on a real fixture (`rules_e0_ok` and `rules_e1_ok` both true): R1 0/0, R2 0/0 with
+  its own safety gate (verifies correct on both real fixtures without it, D52, but a live `adjoint::` crash on a real,
+  non-gated split shape bars shipping that way, D52 point 4, `src/adjoint/`, not owned by any M4 package), R3 0/0, R4a
+  0/0, R4b 0/0 (E1), R5 0/3, R6 0/3, R7 2/5 (domain splits), fma-contraction 0/0 (E1; D57 corrected its declared
+  tolerance to scale relative to `|a·b|+|c|` after proving the unscaled bound unsound under cancellation — latent, not
+  a live defect in anything shipped).
+- **AD-mode-per-block rule (D54).** Reproduced exactly by `tests/rewrite/ad_mode_stage_a_shapes_test.cpp`: book-only
+  (`n_outputs=1`) picks **Reverse** under both the 8.0× M1-calibrated and the 21.33× Stage-A-measured multiplier
+  (32.635 ms adjoint vs 1.53 ms one-pass); the full ladder (`n_outputs=2043`) picks **Forward** under both (107.109 ms
+  estimate vs 1373.39 ms measured `Dual<70>`, ratio 0.078), matching the already-measured 6.2-6.3× forward advantage.
+  Two documented, opposite-cancelling cost-model gaps remain unfixed: reverse's formula misses B=64/chord-batching
+  (overstates reverse's true cost at scale); forward's `one_pass_ns` proxy, from a plain `double` interpreter,
+  understates a wide `Dual<N>` pass.
+- **Catalogue (D55).** `InterpreterCatalogueE0` / `AdjointCatalogueE0` 100% (groups and rows) on both reference
+  workloads on Apple clang. Coverage by time (ad hoc `-DEPYKOS_EXEC_PROFILE` probe, informational):
+  `exec::Interpreter` **9.56%** of Stage A's own wall time (the compounding scan, outside catalogue eligibility,
+  dominates instead), `adjoint::Adjoint` **99.89%**. `scripts/catalogue_regen.sh --check --no-build`: no-op against
+  the committed `src/catalogue/generated/`. M1 strict pairing (informational, D9/D27, never gated; catalogue at its
+  production default `use_catalogue=true`): **1.460×** (B=1) / **2.739×** (B=64) against `bench/hand` v0 —
+  `ExpMode::poly` is silently disabled on every catalogue-eligible domain (`catalogue::Signature` has no
+  exp-implementation axis, `task_f7b9c87d`, unfixed, out of every M4 package's own file scope).
+- **CI.** `ci_green` = **false**, run `https://github.com/kbro123/EpykosEngine/actions/runs/36015344410` (matches the
+  gate-2 commit `a49ad34`): macOS-latest/release green; ubuntu-latest release, reference AND mutation all fail on the
+  SAME pre-existing, unrelated defect (`AdjointCatalogueE0.DefaultStageAIsFullyCatalogued` and two
+  `InterpreterCatalogueE0` tests, GCC-only — the default Stage A instance catalogues 63/66 groups on GCC vs 66/66 on
+  Apple clang, `task_919ea449`, first found at M4-gate-1, confirmed still unfixed here). This package's own diff
+  against its parent touches only `docs/` and `bench/results/` paths.
+- **Suites (Apple clang, fingerprint `d448afd70180`).** `ctest --preset release` 107/107, `--preset reference`
+  107/107, 0 failed each; `scripts/mutation_test.sh` **43/43** registered mutants caught, 0 survivors, exit 0;
+  1-minute load 7.2 → 3.4 during the Stage A bench run, the cores/2 threshold never approached.
+- **Verdict rationale.** 2 of `PROBLEM.md` §7's 4 gate clauses hold (every extracted program verifies at its class;
+  the self-regression gate passes) and 2 miss (rediscovery falls short of its own 1.02× wall-clock target; the one
+  cross-stage candidate found is noise under this fingerprint's real cost model, not a genuine win) — reported here as
+  **fail**, not narrowed to the passing subset. Real, shipped machinery: the Rule / e-graph / cost-model / catalogue
+  framework itself (D47-D49, D54-D55), R5/R6/R7 firing on Stage A, the AD-mode rule and its required consumer, and a
+  measured 1.11-1.16× absolute speedup on the reverse risk ladder from catalogue coverage. Real, open gaps, each
+  flagged rather than hidden: `EGraph::saturate`'s unbounded growth with no redundancy check (D54 point 4); the cost
+  model's >25% error and its two known, opposite-cancelling AD-mode formula gaps; `plan_bridge.hpp`'s unpriced
+  group/emitted terms tying every extraction to the greedy default; `ExpMode::poly` silently disabled under the
+  catalogue's own production default (`task_f7b9c87d`); the GCC-only catalogue-coverage shortfall (`task_919ea449`);
+  one live, reproducible `adjoint::` crash on a real R2 split shape (D52 point 4, `src/adjoint/`, unowned by any M4
+  package). This package changed no engine, maths, rewrite, adjoint, catalogue or optimise file — docs only (D59).
+  Full per-package findings, rejected findings and process notes are in `docs/DECISIONS.md` D47-D59 and the
+  per-package entries above.

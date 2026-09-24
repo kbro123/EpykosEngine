@@ -281,6 +281,12 @@ R4b and fma-contraction each find zero profitable sites on both fixtures, for th
 independently measured and documented reasons (D51 point 5) — none of the three targets is wrong,
 each fixture simply already avoids the specific redundancy that rewrite removes, by a different
 mechanism (a record-time memo, heterogeneous per-curve gathers, and `affine_collapse` respectively).
+CORRECTED BY D57 (a review finding on the M4-gate-1 landing): fma-contraction's declared E1 class
+is only sound when checked relative to the pre-fusion operands' own scale (`|a*b| + |c|`, D26's
+"difference of legs" pattern restated for this rule), never a flat ulps-of-VALUE bound — under
+catastrophic cancellation of the Sum's two members the unscaled ulp distance is unbounded, proved
+directly (not merely argued) in `tests/rewrite/fma_contraction_verify_test.cpp`. This is currently
+latent (0/0 fires on both shipped fixtures, above), not a live defect in anything shipped.
 
 ---
 
@@ -408,14 +414,20 @@ Experiments (`bench/results/d448afd70180/m4_experiments.json`; full notes in thi
 entry): (1) REDISCOVERY meets the cost-model's own "never worse than the default" bar (ratio
 1.0, tied) but NOT the 1.02x measured-wall-clock target (measured 1.081x-1.104x), traced to
 `plan_bridge.hpp`'s own pre-existing, documented gap (`plan.group` unpriced) combined with
-extraction's tie-break; (2) CROSS-STAGE found one real, verified win the fixed single-pass
-pipeline cannot express (`r5.group_formation` applied twice, 0.977x) on a SMALL Stage A fixture,
-but also found that saturating the FULL rule set past a few rounds grows unboundedly on Stage-A-
-shaped programs (measured: 1.87 GB and still climbing by round 4 on a 60-trade fixture, killed) —
-this package's most significant finding, left for whoever adds a redundancy/subsumption check
-next; (3) AD MODE reproduces Stage A's own already-measured Forward/Reverse choice correctly under
-both the M1-calibrated and Stage-A-measured adjoint multiplier, with two now-documented cost-model
-gaps (reverse's linear-in-outputs formula misses batching/chord sharing; forward's formula
+extraction's tie-break; (2) CROSS-STAGE found a candidate the fixed single-pass pipeline cannot
+express (`r5.group_formation` applied twice) on a SMALL Stage A fixture — CORRECTED BY D57 (a
+review finding on the M4-gate-1 landing): the 0.977x this package originally reported as "a real,
+verified win" was priced with `optimise::CostCoefficients::defaults()`, a synthetic, never-fitted,
+uniform-per-op model, not this fingerprint's actual `bench/results/d448afd70180/cost_model.json`
+(D48); under the FITTED model the ratio is 0.9997, i.e. noise, and no wall-clock bench corroborates
+either number (contrast experiment (1), which has one). PROBLEM.md §7's cross-stage-win gate item
+is NOT considered satisfied by this experiment (D57). Saturating the FULL rule set past a few
+rounds also grows unboundedly on Stage-A-shaped programs (measured: 1.87 GB and still climbing by
+round 4 on a 60-trade fixture, killed) — this package's most significant finding, left for whoever
+adds a redundancy/subsumption check next; (3) AD MODE reproduces Stage A's own already-measured
+Forward/Reverse choice correctly under both the M1-calibrated and Stage-A-measured adjoint
+multiplier, with two now-documented cost-model gaps (reverse's linear-in-outputs formula misses
+batching/chord sharing; forward's formula
 understates a wide `Dual<N>` pass); (4) E1 EXTRACTION is informational only, same root cause as
 (1).
 

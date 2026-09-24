@@ -1668,3 +1668,80 @@ paths) — per this package's own brief, "if CI is red for a reason unrelated to
 ... rather than ignoring it."
 
 No SwapEngine file opened.
+
+## D57 — M4-fix: three review findings on the M4-gate-1 landing, all confirmed and fixed with regression tests (2026-09-24)
+
+Package M4-fix, responding to three findings on D56's own landed commit. All three were reproduced independently
+before any fix (evidence below), not taken on faith; all three are fixed with a regression test in the same
+commit, per CLAUDE.md's own rule for a decision change.
+
+1. **`FmaContractionRule`'s declared E1 class is unsound at a flat, unscaled ulps-of-value bound
+   (`include/epykos/rewrite/fma_contraction.hpp`, HIGH).** Confirmed exactly as reported: `a = 2^27+1`,
+   `b = 2^27-1` (exact product `2^54-1`, which the double `a*b` rounds UP to `2^54`), `c = -2^54` — the unfused
+   path `fl(a*b) + c` cancels to exactly `0.0` (Sterbenz), while `fma(a,b,c)` rounds the exact `a*b+c = -1.0` and
+   recovers the true answer. `epykos::verify::within(0.0, -1.0, Tolerance::e1(), scale=0.0)` is `false` (~4.5e15
+   ulps) — a bare 4-ulp check reports the mathematically CORRECT rewrite as failing, and would report a genuinely
+   WRONG one the same way, so it catches nothing at this scale. Not a live defect: this rule fires 0/0 times on
+   both shipped fixtures (D51's own measurement, unchanged), so the landmine was latent. Fixed by documenting the
+   real bound in `fma_contraction.hpp`'s own header — sound relative to the PRE-FUSION operands' scale,
+   `|a*b| + |c|` (D26's exact "difference of legs" reasoning: one rounding vs two, each bounded in absolute terms
+   by half a ulp of its OWN intermediate magnitude, never by the — here, arbitrarily small — final result) — and
+   by a new regression test, `FmaContraction.PlainE1ToleranceIsUnsoundButTheD26StyleScaledOneIsSoundUnderCatastrophicCancellation`
+   (`tests/rewrite/fma_contraction_verify_test.cpp`), which proves BOTH halves directly: the bare bound fails
+   (`ulp_distance > 1e15`) and the scaled one passes comfortably (`ulp_distance <= 1.0`, measured 0.125). No
+   rule code changed — the mechanism was always mathematically exact (`std::fma`'s single rounding is the
+   CORRECT answer here); only the tolerance a caller must use to verify it was wrong.
+
+2. **No gate ever verifies an e-graph-extracted program against the true, unrewritten baseline
+   (`src/rewrite/verifier.cpp`, MEDIUM).** Confirmed: `verify_annotations(program, plan, ...)` (verifier.cpp:116)
+   compares `program` with its plan cleared against `program` with `plan` set — the SAME underlying `ir::Program`
+   on both sides, by design (its own doc comment: checking that a PlanAnnotations delta is transparent). Every
+   one of `egraph_full_rules_m1_test.cpp`, `egraph_full_rules_stage_a_test.cpp`, `egraph_e1_extract_m1_test.cpp`
+   and `egraph_m1_extract_test.cpp` called ONLY this, on `result.program` (already the output of e-graph
+   extraction, which can carry a composed structural history of more than one E1-classed rule — fma_contraction
+   and R4bSharedReciprocal are both E1, D51), never a comparison against the ORIGINAL pre-rewrite program. Fixed
+   by a new function, `rewrite::verify_extraction(original, extracted, extracted_plan, history, e1_rule_names,
+   state, n_inputs, n_outputs, options)` (`include/epykos/rewrite/verifier.hpp` / `src/rewrite/verifier.cpp`):
+   runs `compare_programs(original, annotated, ...)` — the ORIGINAL against the fully-annotated extraction — at a
+   tolerance that is the UNION (widen, never narrow) of whatever the caller already asked for and a bound derived
+   from `history`: bitwise when no `history` entry is E1-classed (per the caller's own `e1_rule_names`, never
+   hard-coded, HARD RULE 9), else `Tolerance::e1(4 * count)` for `count` E1 entries — an explicit, stated way to
+   bound a CHAIN of independently-4-ulp rewrites without asserting accumulation cannot happen. This still carries
+   finding 1's own caveat (an unscaled ulps-of-value bound is unsound under cancellation) — stated in the
+   function's own header, not hidden — so a caller whose history may hit that shape verifies it separately,
+   scaled, as finding 1's own regression test now does directly. Wired into all four egraph integration tests
+   ALONGSIDE (not instead of) their existing `verify_annotations` call; `egraph_m1_extract_test.cpp`'s own PROGRAM
+   tier never moves (only identity-stub rules there), so its own new check is a defense-in-depth no-op today, kept
+   so it is not silently the one exception if a real structural rule is ever added to that file's rule set. New
+   regression test proving the gap AND the fix in isolation, without any real rule or fixture:
+   `Verifier.VerifyAnnotationsAloneCannotCatchAWrongStructuralHistoryBakedIntoTheProgram`
+   (`tests/rewrite/verifier_test.cpp`) — a hand-built `Add`-turned-`Sub` "wrong rewrite" that `verify_annotations`
+   passes trivially and `verify_extraction` correctly fails.
+
+3. **The cross-stage-win experiment used the synthetic default cost model, not this fingerprint's fitted one
+   (`tests/optimise/egraph_full_rules_stage_a_test.cpp:166`, HIGH).** Confirmed exactly as reported: reproduced
+   the committed 1.76144e6 / 1.80236e6 ns (ratio 0.9773) on `optimise::CostCoefficients::defaults()` — a
+   synthetic, uniform 1-ns-per-op fallback, never fitted to any machine — then, loading the real fitted
+   `bench/results/d448afd70180/cost_model.json` (D48) for the SAME two candidates, got 140650 / 140690 ns, ratio
+   0.999716: noise, not a 2.3% win. This experiment is also the only one of PROBLEM.md §7's four M4/EG
+   experiments with no wall-clock bench file corroborating either number (contrast experiment (1), which has
+   `bench/optimise/egraph_full_rules_m1_bench.cpp`). Fixed: the test now loads
+   `optimise::CostModel::load_or_default(<this host's fingerprint>, "bench/results", &std::cerr)` (falling back
+   to the synthetic default, with `loaded_from_file` printed either way, ONLY when no fitted model exists for the
+   current host — this test also runs on CI hosts with a different fingerprint and must not fail merely because
+   D9's own cross-fingerprint discipline means nothing there is comparable to this machine's numbers anyway);
+   both the fitted and synthetic ratios are printed for the record, and the test's assertion is now explicitly
+   documented as the tautology it always was (extraction's search space always contains the default candidate),
+   never as evidence of a win. `docs/DESIGN.md` §7's "As built (M4/EG integration, D54)" paragraph is corrected
+   in the same commit. **PROBLEM.md §7's cross-stage-win gate item is NOT considered satisfied by this
+   experiment**; it remains open for whoever locates a structurally-necessary win that survives the fitted model,
+   or adds a real wall-clock companion bench for Stage A.
+
+Verification (fingerprint d448afd70180): every new/changed test built and run individually before the full gate
+(see this package's own landing report, `docs/RESUME.md` §5, for the full-suite numbers) —
+`rewrite_fma_contraction_verify_test` (5/5), `rewrite_verifier_test` (4/4), `optimise_egraph_full_rules_m1_test`
+(2/2), `optimise_egraph_e1_extract_m1_test` (1/1), `optimise_egraph_m1_extract_test` (2/2),
+`optimise_egraph_full_rules_stage_a_test` (2/2, including the corrected cost-model numbers above, measured
+directly on this run, not re-cited from D54/D56). No SwapEngine file opened; no engine maths, adjoint or IR file
+touched — this package's changes are confined to `include/epykos/rewrite/{fma_contraction,verifier}.hpp`,
+`src/rewrite/verifier.cpp`, five test files under `tests/rewrite/` and `tests/optimise/`, and docs.

@@ -755,3 +755,30 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   catalogue file touched by this package). Committed: `bench/results/d448afd70180/{m4.json,
   stage_a_stage_a.json,optimise_egraph_full_rules_m1.json,optimise_egraph_e1_extract_m1.json}`,
   this entry and `docs/DECISIONS.md` D56. No SwapEngine file opened.
+
+2026-09-24  M4-fix  three review findings on the M4-gate-1 landing, all confirmed and fixed with
+  regression tests -- full account in `docs/DECISIONS.md` D57, summarised here. (1)
+  `FmaContractionRule`'s declared E1 tolerance is unsound at a flat, unscaled ulps-of-value bound
+  under catastrophic cancellation (proved directly with a=2^27+1, b=2^27-1, c=-2^54: unfused=0.0,
+  fused=fma=-1.0, the CORRECT answer, yet an unscaled 4-ulp check fails by ~4.5e15 ulps) -- not a
+  live defect (0/0 fires on both shipped fixtures, unchanged), fixed by documenting the sound,
+  D26-style scale (`|a*b|+|c|`) in `fma_contraction.hpp`'s own header and a new regression test
+  proving both the failure and the fix. (2) No gate compared an e-graph-extracted program against
+  its TRUE unrewritten root -- every `egraph_*_test.cpp` called only `verify_annotations(result.
+  program, result.plan, ...)`, comparing `result.program` against itself -- fixed by a new
+  `rewrite::verify_extraction` (original vs. extracted, tolerance = union of the caller's own and
+  one derived from the E1-rule count in `history`), wired into all four egraph integration tests
+  alongside their existing check, with a synthetic regression test proving the gap and the fix in
+  isolation. (3) The Stage A "cross-stage win" (0.9773x, D54/D56) was priced with the SYNTHETIC
+  default cost model, not this fingerprint's fitted one -- reproduced exactly, then re-measured
+  under the real fitted `bench/results/d448afd70180/cost_model.json`: **0.999716, i.e. noise, not
+  a 2.3% win** -- fixed by loading the fitted model (falling back to the synthetic one only when
+  none exists for the current host, e.g. on CI), printing both ratios, and stating explicitly that
+  PROBLEM.md §7's cross-stage-win gate item is NOT satisfied by this experiment. `docs/DESIGN.md`
+  §7 corrected in the same commit (the fma_contraction and M4/EG-integration paragraphs).
+  Files touched: `include/epykos/rewrite/{fma_contraction,verifier}.hpp`, `src/rewrite/
+  verifier.cpp`, `tests/rewrite/{fma_contraction_verify,verifier}_test.cpp`, `tests/optimise/
+  egraph_{full_rules_m1,full_rules_stage_a,e1_extract_m1,m1_extract}_test.cpp`, `docs/{DECISIONS,
+  DESIGN,RESUME}.md` -- no engine maths, adjoint or IR file, no SwapEngine file opened. Gate
+  results (fingerprint d448afd70180) and the landing protocol's own outcome are in this package's
+  own final report, not duplicated here.

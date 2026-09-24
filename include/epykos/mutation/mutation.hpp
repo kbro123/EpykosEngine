@@ -50,6 +50,10 @@ inline constexpr std::string_view registry[] = {
     "expander.scan_carry_from_init", // expand: every step of a scan chain reads the chain's initial value instead of the previous step (no scan on the M1 book: the scan fixtures' round-trip gates)
     "interpreter.scan_drop_last_wave", // Interpreter::run: the last wave of every scan (the last step of its longest chains) is not evaluated (the scan fixtures' E0 gates)
     "adjoint.scan_forward_order",    // Adjoint::run: the reverse scan visits the rows forwards, so the carried adjoint arrives after it was pulled (the scan fixtures' adjoint gates)
+    "r6.ignore_reduction_boundary",  // R6MaterialiseBoundaries: a producer feeding a Sum/Affine segment (or an output) is inlined away anyway -- its consumer's segment then reads an unmaterialised row
+    "r6.ignore_fanout_boundary",     // R6MaterialiseBoundaries: only the first reader gather's consumer is checked, so a producer read by several distinct consumers is still inlined into just one of them
+    "r7.no_offset_rebase",           // R7BlockLinmap::split_linmap_domain: a block's sliced segment keeps the ORIGINAL whole-domain absolute offsets instead of rebasing them to its own members array
+    "r7.wrong_block_value_base",     // R7BlockLinmap::split_linmap_domain: the running value_base accumulator advances by a block's segment length instead of its row count
 };
 inline constexpr std::size_t registry_size = sizeof(registry) / sizeof(registry[0]);
 

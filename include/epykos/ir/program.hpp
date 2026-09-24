@@ -56,6 +56,7 @@
 #include <string>
 #include <vector>
 
+#include "epykos/ir/annotate.hpp"
 #include "epykos/tape/op.hpp"
 
 namespace epykos::ir {
@@ -157,6 +158,14 @@ struct Program {
   std::vector<value_id> inputs;        // per input ordinal
   std::vector<double> input_values;    // per input ordinal: value at record time
   std::vector<value_id> outputs;       // per output ordinal
+  // M4/R0 (D47): a rewrite::Rule pipeline's output (rewrite/rule.hpp, rewrite/greedy.hpp) --
+  // materialisation, fused-pair/tail grouping, emitted outputs, per-Jacobian-block AD mode.
+  // Empty by default; never touched by ir::infer, ir::expand, serialize or deserialize; excluded
+  // from equality (annotate.hpp: PlanAnnotations::operator== is unconditionally true) because it
+  // is derived, Options-dependent planning state, not part of the recording's own identity. A
+  // caller sets it explicitly to hand exec::Interpreter / adjoint::Adjoint a precomputed plan;
+  // left empty, they derive their own (annotate.hpp file header, point 3).
+  PlanAnnotations plan;
   bool operator==(const Program&) const = default;
 
   std::size_t num_values() const noexcept {

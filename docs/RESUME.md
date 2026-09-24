@@ -664,3 +664,94 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   R-a..R-c, and the 3 `eg.*` ones M4/EG integration added while this package was in flight, against the
   now-53-test gate set); `scripts/catalogue_regen.sh --check` a no-op against the committed
   `src/catalogue/generated/`. Pushed to `integrate/m1-m5` and `m4/c1-catalogue`.
+
+2026-09-24  M4-gate (run 1)  independent re-verification, fresh worktree, fingerprint `d448afd70180`
+  (Apple clang 21.0.0, `-O3 -march=x86-64-v3 -fno-math-errno`). `ctest --preset release` 107/107,
+  `ctest --preset reference` 107/107, both 0 failed. `scripts/mutation_test.sh`
+  (`EPYKOS_MUTATION_JOBS=8`): registry 43 mutants, baseline 53/53 gates pass, **43/43 caught, 0
+  survivors**, exit 0. `scripts/catalogue_regen.sh --check`: no-op against the committed
+  `src/catalogue/generated/`. Cost model error: re-cites the already-fitted, already-committed
+  `bench/results/d448afd70180/cost_model_validation.md` rather than re-running the ~15-point
+  profile-preset calibration grid (`src/optimise/cost.cpp` unchanged since `e5c20bc`, same
+  fingerprint) -- **84.4241%** mean absolute relative error overall (target < 25%, NOT met, as
+  D48 already reported), **69.2692%** restricted to domains >= 1% of their config's time.
+  Rule fire-counts (D53's own requirement restated, not re-derived -- all already stated in
+  D49-D52/D55): R1 0/0 (M1/Stage A), R2 0/0 (with its safety gate), R3 0/0, R4a 0/0, R4b 0/0,
+  R5 0/3, R6 0/3, R7 2/5 (domain splits), fma-contraction 0/0; every rule's own E0/E1 differential
+  and mutation gates pass regardless of whether it fires on a real fixture.
+  **EG experiments re-run for the record** (machine quiet: load1 2.1-2.7 for these, vs 7.1-12.6
+  during the mutation/ctest runs -- recorded per D9/D13, never mixed across load regimes):
+  (1) REDISCOVERY (`bench/optimise/egraph_full_rules_m1_bench`, quiet machine): `BM_DefaultPlanB1`
+  66489.795 ns vs `BM_ExtractedFullB1` 68122.154 ns, ratio **1.0246** (misses the 1.02x target,
+  but materially closer than the previously-committed 1.081-1.104x -- a quieter machine this run,
+  not a code change: `ir::PlanAnnotations`/cost function untouched since D54); B64: `BM_DefaultPlanB64`
+  1861772.737 ns vs `BM_ExtractedFullB64` 1941945.250 ns, ratio **1.0431**. Root cause unchanged
+  from D54 (`plan.group`/`plan.emitted` unpriced, `optimise::plan_bridge.hpp`'s own documented gap).
+  (2) CROSS-STAGE: re-ran `EGraphFullRulesStageA.ExtractedE0PlanPassesVerificationAndIsNoWorseThanTheDefaultPlan`
+  directly (`ctest -V`, deterministic cost-model estimate, load-independent) -- reproduces D54's
+  finding exactly: extracted program node 19 (55 domains), history `r5.group_formation
+  r5.group_formation planner.reduction_fusion`, estimated 1.76144e+06 ns vs the default plan's
+  1.80236e+06 ns, **ratio 0.9773** (one real win the fixed pipeline cannot express), bit-identical
+  at the tape's record point. Still only ONE cross-stage win found; the full 517,036-node Stage A
+  tape still not attempted (D54's non-convergence finding not re-tested -- would only re-confirm a
+  known, already-reported risk, not worth the machine time this run).
+  (3) AD MODE: `tests/rewrite/ad_mode_stage_a_shapes_test.cpp` (already in `ctest --preset release`,
+  re-confirmed passing) reproduces D54 exactly -- book-only (n_outputs=1) picks **Reverse** under
+  both the 8.0x default and the measured 21.33x Stage-A multiplier; the full ladder (n_outputs=2043)
+  picks **Forward** under both, matching the 6.2-6.3x measured fact. No new measurement needed
+  (the test is a pure function of already-committed numbers, not a fresh timing).
+  (4) E1 EXTRACTION -- **new finding, not merely a re-run**: `bench/optimise/egraph_e1_extract_m1_bench`
+  (`Options::exp = ExpMode::poly`, `use_catalogue` at its default `true`) now measures
+  `BM_E1ExtractedB1` 67544.023 ns / `BM_E1ExtractedB64` 1948987.383 ns -- **essentially IDENTICAL
+  to the std::exp path** (`BM_ExtractedFullB1/B64` above), not the ~40% faster the
+  already-committed `bench/results/d448afd70180/optimise_egraph_e1_extract_m1.json` (measured
+  before M4/C1 landed, per D54's own text) reports. Traced, not assumed: temporarily setting
+  `use_catalogue = false` in the bench (rebuilt, measured, reverted -- no committed change)
+  reproduces the historical ~40% speedup almost exactly (54484 ns / 1153164 ns). Root cause:
+  `src/catalogue/generated/kernels_e0.cpp`'s generated kernels hard-code `std::exp` (`catalogue::
+  Signature`, D55, has no axis for which exp implementation); M4/C1 landed AFTER this experiment
+  file was authored and its own coverage/differential tests never combine `use_catalogue=true`
+  with `Options::exp = ExpMode::poly`, so this interaction was untested. **`ExpMode::poly` is
+  silently a no-op on any catalogue-eligible domain** whenever `use_catalogue` is left at its
+  default -- flagged via `spawn_task` (task_f7b9c87d) rather than fixed here (out of this
+  package's file scope; the fix touches `catalogue::` and needs its own exactness-class statement
+  and gates per CLAUDE.md). Reported honestly as the CURRENT, as-shipped ratio (not the historical
+  one): `m1_strict_ratio_b1` = 67544.023 / 46214.839 (`hand_m1_hand.json` `BM_HandEval/0`) =
+  **1.4615**; `m1_strict_ratio_b64` = 1948987.383 / 710456.65 (`BM_HandEvalBatch/0`) = **2.7434**
+  (both informational, D27/D9 -- never gated).
+  **Catalogue coverage by time** (ad hoc `-DEPYKOS_EXEC_PROFILE` probe, `profile` preset library
+  only, never a checked-in preset -- the same M3/G6 convention; measured under elevated background
+  load from the concurrent mutation run, load1 ~13-17, informational): `exec::Interpreter`
+  `time_fraction` -- M1 book **0.3888** (rows 100% of candidates), Stage A default **0.1003**
+  (rows 100% of its own candidates, but the compounding scan dominates wall time and scans are
+  outside the Interpreter's catalogue eligibility, D55 finding 2); `adjoint::Adjoint` -- M1 book
+  **0.9983**, Stage A **0.9993** (Adjoint has none of the Interpreter's fuse/inline exclusions, so
+  it catalogues almost all of its own time, exactly as D55 predicted).
+  **Stage A O2/O3/O4 vs the M3 baseline** (`bench/run.sh build/release/bench/stage_a_stage_a_bench`,
+  load1 7.12 -> 4.76, ok; `scripts/perf_gate.py ... --json bench/results/d448afd70180/m4.json`,
+  **verdict PASS**, 17/17 benchmarks within the 1.25x self-regression threshold, 0 regressions, 0
+  new, 0 not measured): every ratio (fresh/baseline) landed at 0.86-1.03x -- essentially flat to
+  modestly faster, no absolute win from M4 yet on the real Stage A shape (expected: R1-R4/fma
+  mostly do not fire there, D51/D52; row-fusion / AD-mode-per-block rules were not wired onto
+  Stage A's own live pipeline this landing, D54). Speedups (baseline median / fresh median): O2
+  (`BM_Evaluate/1/8`) **0.989x** (flat); O3 reverse ladder single-lane (`BM_Adjoint/1`) **1.160x**,
+  batched B=64 (`BM_Adjoint/64`) **1.107x** (the real win: M4/C1's catalogue now covers ~99.9% of
+  `adjoint::Adjoint`'s own wall time on Stage A, see above); O3 forward ladder (`BM_ForwardLadder`)
+  **1.003x** (flat, `Dual<70>` untouched by any M4 rule); O4 (`BM_Run/64`) **1.027x**. Full table
+  in `bench/results/d448afd70180/m4.json`.
+  **CI, checked explicitly per this package's own brief, NOT assumed green**: `integrate/m1-m5`'s
+  tip BEFORE this package's own commit (`4ef9632`, the M4/C1 landing) is **RED on ubuntu-latest**
+  (release, reference AND the mutation job; run `35986197439`) while green on `macos-latest` --
+  the exact D46-class blind spot (verify GCC too) recurring in a NEW place. Root cause traced (not
+  merely observed): on GCC, `AdjointCatalogueE0.DefaultStageAIsFullyCatalogued` and two
+  `InterpreterCatalogueE0` tests fail -- the default Stage A instance catalogues only 63/66 groups
+  (95.45%) on GCC vs 66/66 (100%) on this machine (Apple clang, re-verified locally). 0 mismatches
+  either way (correctness holds wherever the catalogue dispatches) -- a coverage shortfall, not a
+  numeric bug; it also fails `scripts/mutation_test.sh`'s own baseline check on GCC entirely (no
+  mutant is ever tried). Pre-existing, NOT introduced by this package; flagged via `spawn_task`
+  (task_919ea449), not fixed here (the bug is in M4/C1's own files, out of this package's scope).
+  Consequence for this package's own landed commit: `ci_green` is reported **false**, citing this
+  pre-existing, unrelated defect, not this package's own changes (verified: no engine/maths/
+  catalogue file touched by this package). Committed: `bench/results/d448afd70180/{m4.json,
+  stage_a_stage_a.json,optimise_egraph_full_rules_m1.json,optimise_egraph_e1_extract_m1.json}`,
+  this entry and `docs/DECISIONS.md` D56. No SwapEngine file opened.

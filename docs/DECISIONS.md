@@ -1617,3 +1617,54 @@ reference` both green (see `docs/RESUME.md` §5's landing entry for the exact co
 green, all registered mutants caught including this package's own two; `scripts/catalogue_regen.sh --check`
 a no-op against the committed `src/catalogue/generated/` (regenerating from the same two workloads and the seed
 of `docs/WORKLOADS.md` reproduces it byte-for-byte).
+
+## D56 — M4-gate (run 1): independent re-verification of M4 to date; two real, previously-unknown defects found in
+already-landed M4 packages, neither fixed here (2026-09-24)
+
+This package's own brief is measurement and report, not repair (CLAUDE.md HARD RULE 10, "report honestly"; "you do
+not decide the verdict"). Full build/test/mutation re-verification on a fresh worktree, fingerprint `d448afd70180`
+(unchanged from D48 onward): `ctest --preset release` 107/107, `--preset reference` 107/107, `scripts/mutation_test.sh`
+43/43 mutants caught (0 survivors), `scripts/catalogue_regen.sh --check` a no-op — all as already reported by D55,
+independently reproduced, not merely trusted. Full numbers, per-experiment evidence and the EG re-run (rediscovery
+1.0246x/1.0431x on a quieter machine than D54's own run, cross-stage 0.9773x reproduced exactly, AD-mode reproduced
+exactly) are in `docs/RESUME.md` §5's own landing entry for this package; not duplicated here.
+
+Two findings, neither introduced by this package, neither fixed by it (out of scope: both live in other packages'
+files; CLAUDE.md's "keep to your package's files"), both flagged via `spawn_task` for a follow-up session rather
+than silently noted and dropped:
+
+1. **M4/C1's catalogue coverage is compiler-dependent, breaking CI on GCC** (task `task_919ea449`). At
+   `integrate/m1-m5`'s tip before this package's own commit (`4ef9632`), GitHub Actions run `35986197439` is red on
+   `ubuntu-latest` (release, reference, mutation) and green on `macos-latest` — the exact D46 blind spot ("verifying
+   only on Apple clang") recurring in a place D46 itself did not touch. `AdjointCatalogueE0.
+   DefaultStageAIsFullyCatalogued` and two `InterpreterCatalogueE0` tests fail on GCC 13: the DEFAULT Stage A
+   instance (the exact one `scripts/catalogue_regen.sh` generated the registry from) catalogues only 63/66 groups
+   (95.45%) on GCC vs 66/66 (100%) on Apple clang (re-verified locally, this entry). 0 mismatches either way —
+   correctness holds wherever the catalogue dispatches; this is a coverage shortfall, not a numeric bug, but it is
+   severe enough to fail `scripts/mutation_test.sh`'s own baseline gate check on GCC outright (no mutant is ever
+   tried). Root cause not fixed, hypothesised only (D55's own finding 3: a per-netting-set PV aggregation's
+   fixed-arity-Sum signature depends on the trade-to-netting-set draw; if that draw is sensitive, even indirectly,
+   to GCC's cross-TU FMA contraction — the D25/D46 class of defect — the SAME seed could deterministically produce a
+   different netting-set grouping under GCC than under clang for the SAME default instance).
+2. **M4/C1's catalogue silently disables `exec::Options::exp = ExpMode::poly`** (task `task_f7b9c87d`). Re-running
+   `bench/optimise/egraph_e1_extract_m1_bench` (the M4/EG "M1 sub-book E1 strict pairing", D54's experiment 4) for
+   this package's own "for the record" numbers found `BM_E1ExtractedB1`/`BM_E1ExtractedB64` now measure essentially
+   IDENTICAL to the std::exp path, not the ~40% faster the already-committed result file reports (measured before
+   M4/C1 landed). Traced directly: setting `use_catalogue = false` in the bench (rebuilt, measured, reverted — no
+   committed change) reproduces the historical ~40% speedup almost exactly. `src/catalogue/generated/kernels_e0.cpp`
+   hard-codes `std::exp` in its generated kernel bodies; `catalogue::Signature` (D55) has no axis for which exp
+   implementation, so `ExpMode::poly` is silently a no-op on any catalogue-eligible domain whenever `use_catalogue`
+   is left at its default `true` — an interaction neither package's own tests exercise (M4/C1's differential tests
+   never set `Options::exp = poly`; the exp_poly tests never set `use_catalogue = false`). Reported honestly as the
+   CURRENT, as-shipped ratio in `docs/RESUME.md` §5, not the stale historical one (`m1_strict_ratio_b1` 1.4615,
+   `m1_strict_ratio_b64` 2.7434, both informational, D9/D27 — never gated) — this also means every "informational"
+   exp_poly performance claim made after M4/C1 landed understates the real exp_poly benefit for any catalogue-eligible
+   domain, worth a doc correction independent of whether the interaction itself is ever fixed.
+
+`ci_green` for this package's own landed commit is reported **false**: the GCC failure above is pre-existing on the
+branch this package rebased onto and this package touches no engine, maths or catalogue file (verified: `git diff
+--stat` against `origin/integrate/m1-m5` before this entry's own commit lists only `docs/` and `bench/results/`
+paths) — per this package's own brief, "if CI is red for a reason unrelated to your package, report ci_green false
+... rather than ignoring it."
+
+No SwapEngine file opened.

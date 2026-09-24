@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <sstream>
+#include <utility>
 
 #include "epykos/mutation/mutation.hpp"
 
@@ -40,7 +41,28 @@ std::int32_t back_of(const ir::Slot& s, std::size_t k) noexcept {
   return static_cast<std::int32_t>(k) - s.index;
 }
 
+// The ordering key of one operand slot: its SHAPE, then how many steps back a Step slot points.
+// Both are structure (signature.hpp's file header); a table index or a value never enters it.
+// The particular order the SlotShape enumerators happen to be numbered in is arbitrary — all
+// that is asked of it is that it be the same on every platform and in every process.
+std::pair<std::uint8_t, std::int32_t> slot_key(const ir::Slot& s, std::size_t k) noexcept {
+  return {static_cast<std::uint8_t>(shape_of(s)), back_of(s, k)};
+}
+
 }  // namespace
+
+bool canonical_swap_ab(const ir::Step& step, std::size_t k) {
+  // Mutant catalogue.signature_ignores_commutativity: the canonical order is never applied, so
+  // a Signature again carries whichever operand order ir::infer's `Class::emit_swapped` happened
+  // to take from the first recorded instance of the class -- exactly the compiler-dependent
+  // fingerprint D61 fixed. The registry is generated from the CANONICAL order, so every domain
+  // whose recorded order is not already canonical stops matching and coverage falls below the
+  // catalogue e0 gates' 100%.
+  if (epykos::mutant("catalogue.signature_ignores_commutativity")) return false;
+  if (!op_is_commutative(step.op)) return false;
+  if (step.a.kind == ir::SlotKind::None || step.b.kind == ir::SlotKind::None) return false;
+  return slot_key(step.b, k) < slot_key(step.a, k);
+}
 
 bool is_cataloguable(const ir::Program& program, ir::domain_id d) noexcept {
   if (d < 0 || static_cast<std::size_t>(d) >= program.groups.size()) return false;
@@ -66,14 +88,19 @@ Signature signature_of(const ir::Program& program, ir::domain_id d) {
   const bool ignore_konst = epykos::mutant("catalogue.signature_ignores_konst");
   for (std::size_t k = 0; k < g.steps.size(); ++k) {
     const ir::Step& st = g.steps[k];
+    // A commutative step's two operands in canonical order (D61; see signature.hpp's file
+    // header). bind_domain and the generated kernels walk this same order.
+    const bool swap = canonical_swap_ab(st, k);
+    const ir::Slot& first = swap ? st.b : st.a;
+    const ir::Slot& second = swap ? st.a : st.b;
     StepShape ss;
     ss.op = st.op;
-    ss.a = shape_of(st.a);
-    ss.b = shape_of(st.b);
+    ss.a = shape_of(first);
+    ss.b = shape_of(second);
     ss.c = shape_of(st.c);
     ss.konst = ignore_konst ? SlotShape::None : shape_of(st.konst);
-    ss.a_back = back_of(st.a, k);
-    ss.b_back = back_of(st.b, k);
+    ss.a_back = back_of(first, k);
+    ss.b_back = back_of(second, k);
     ss.c_back = back_of(st.c, k);
     ss.konst_back = ignore_konst ? 0 : back_of(st.konst, k);
     sig.steps.push_back(ss);

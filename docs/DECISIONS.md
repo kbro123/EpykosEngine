@@ -1906,3 +1906,140 @@ place. No further action needed on the milestone's own verdict: R5/R6 firing on 
 correctly reflected in the perf and coverage numbers (R5's merge and R6's materialisation decisions are part of
 what the 66/66-domain catalogue and the 0.86–1.03x perf-gate ratios already measured); this entry corrects the
 documented count, not any measured outcome.
+
+## D61 — M4/C1 fix: `catalogue::Signature` made canonical under commutativity; the GCC-only coverage
+shortfall (`task_919ea449`) was a compiler-dependent operand ORDER, not a value, hash or netting-set defect (2026-09-24)
+
+Refines D55 and closes the defect D56 (finding 1) found and D58 confirmed: `AdjointCatalogueE0.
+DefaultStageAIsFullyCatalogued` and `InterpreterCatalogueE0.{DefaultStageAIsFullyCatalogued,
+DifferentStageAInstanceHitsTheSameCatalogueAndIsMostlyCovered}` failed on `ubuntu-latest` (GCC 13) in all three
+Linux CI jobs and passed on `macos-latest`, red on every push to `integrate/m1-m5` since M4/C1 landed. D56
+hypothesised a trade-to-netting-set draw made sensitive, indirectly, to the D25/D46 FMA-contraction class of
+defect. **That hypothesis is wrong** and is superseded here; the real cause was measured, not guessed. (It could
+not have been the netting-set draw: the default instance puts 2,000 trades into 40 netting sets, 36-67 trades
+each, so no netting set is anywhere near the 2-or-3-member boundary D55's finding 3 describes.)
+
+**Reproduction (before any change).** GCC 13.5.0 in Docker (`gcc:13`, x86-64, the `ubuntu-latest` toolchain),
+release preset, this same worktree: `InterpreterCatalogueE0.DefaultStageAIsFullyCatalogued` catalogues 25/28
+groups (89.29%), 79,805/80,069 rows; `DifferentStageAInstanceHitsTheSameCatalogueAndIsMostlyCovered` 14/20
+(70.00%) and 16/23 (69.57%), both under that test's own 0.75 floor;
+`AdjointCatalogueE0.DefaultStageAIsFullyCatalogued` 63/66 (95.45%). Apple clang 21 on the same worktree: 28/28
+and 66/66, 100%. **0 catalogue-on/off bitwise mismatches on either compiler in every case** — a coverage
+shortfall throughout, never a wrong number.
+
+**Root cause, with the evidence that pins it.** A temporary diagnostic (built and run under both compilers from
+this worktree; not committed) dumping the default Stage A tape and its inferred Program gives:
+
+1. The recorded tape has the SAME 517,036 nodes under both compilers and the same number of `mul` nodes with the
+   constant on each side (39,373 `mul(const, x)`, 40,785 `mul(x, const)`) — but a DIFFERENT node ORDER: a
+   node-by-node dump of `(op, a, b, c, nargs)` first diverges at node 107, where GCC has already appended a
+   `neg / const / mul / exp / const / mul` block that Apple clang appends six nodes later. C++ leaves the
+   evaluation order of a binary operator's operands (and of a call's arguments) unsequenced, and the recorder
+   appends one node per operation, so two sibling subexpressions of one recorded statement reach the tape in
+   whichever order the compiler chose. D25 already noted this class of difference in passing
+   ("`tape_replay_e0_test` failed under both GCC presets for an unrelated reason (argument evaluation order)");
+   it is not FMA contraction, and no amount of `-ffp-contract=off` pinning touches it.
+2. `ir::infer` is *almost* immune to it. Its signature pass canonicalises a commutative op's operands for class
+   membership (`op_is_commutative`: `Add`, `Mul`, `CmpEq`; `src/ir/signature.cpp`'s `hash_all` and
+   `extract_tree` sort the two operand tokens), so both orders land in ONE isomorphism class, and the inferred
+   Program is identical under both compilers in every other respect: 67 domains, 67 groups, 6 literals, 24
+   columns, 77 gathers, 18 segments, identical row counts, identical signatures for 57 of the 66
+   catalogue-eligible domains. What is NOT canonical is which of the two orders the emitted `ir::Step` carries:
+   `Class::emit_swapped` is, in its own comment, "the first instance's recorded operand order", and `assemble()`
+   re-applies it (`if (cl.emit_swapped[k]) std::swap(s.a, s.b);`), so a whole class inherits whichever order the
+   FIRST tape node of that class happened to be recorded in — i.e. the compiler's unsequenced choice.
+3. Consequence, measured: nine domains of the default Stage A Program differ between the two compilers by
+   exactly that transposition and by nothing else. Apple clang emits domains 8, 25, 31, 36, 41, 44, 52 as
+   `mul(gat, col)` and domains 14, 51, 54 as `mul(gat, lit)`; GCC emits `mul(col, gat)` and `mul(lit, gat)`.
+4. `catalogue::Signature` recorded each operand slot's kind in the emitted `a`, `b` order with no commutative
+   canonicalisation of its own, so it called those different shapes. `mul(col, gat)` happens to be in the
+   committed registry anyway (the M1 book contributes it), so those seven still dispatched; `mul(lit, gat)` is
+   not, so exactly three domains missed — 63/66 on the Adjoint side, 25/28 on the Interpreter's: precisely the
+   numbers CI had been reporting since M4/C1.
+
+So the fingerprint, not the fixture and not the arithmetic, was at fault: two Groups that `ir::infer` itself
+calls one isomorphism class were given two different `Signature`s, and which one a platform produced depended on
+an unsequenced evaluation order. Being the same for one Group on every platform is exactly what D55's own file
+header claims of it ("a canonical, value- and row-count-independent fingerprint of one domain's Group").
+
+**The fix.** `catalogue::canonical_swap_ab(step, k)` (declared in `include/epykos/catalogue/signature.hpp`,
+defined in `src/catalogue/signature.cpp`): for a commutative op with both operands present, order `a` and `b` on
+the structural key (`SlotShape`, steps-back) — never a table index, never a value. `signature_of` builds the
+`StepShape` in that order; `bind_domain` (`src/catalogue/kernel.cpp`) walks the same order, so the k-th Literal /
+Column / Gather OCCURRENCE a generated kernel reads is the k-th one the binding bound; `tools/catalogue/
+codegen.cpp` needs no logic change, since it already walks the `Signature`, which is now canonical. The registry
+is regenerated accordingly: 22 distinct signatures instead of 23, `mul(gat,col)` and `mul(col,gat)` having
+collapsed onto one kernel. **Exactness class E0, unchanged:** IEEE-754 `+` and `*` are exactly commutative, so
+evaluating the canonical order is bit-for-bit the generic per-step path's result — verified, not assumed, by the
+catalogue's existing on/off bitwise gates (0 mismatches on both compilers, below) and by the new test's own
+bitwise leg. A fixed-arity `Sum` is deliberately untouched: `op_is_commutative(Op::Sum)` is false, and
+reassociating its left fold WOULD change rounding (DESIGN.md §5.6).
+
+**What was NOT done, and why (the judgment call, stated plainly).** The deeper non-determinism is `ir::infer`'s
+own `Class::emit_swapped`, which propagates an arbitrary recording order into the emitted Program — so
+`ir::Domain::name` (`mul(#0,@0)@L2` under GCC vs `mul(@0,#0)@L2` under Apple clang), and anything else keyed on a
+commutative step's operand order, is still compiler-dependent. Making `assemble()` emit the canonical order
+unconditionally would fix that at the source, and was considered. It was rejected for this fix: `emit_swapped`
+exists so that `ir::expand` reproduces the recording's own operand order, the round-trip identity gates
+(`tests/ir/roundtrip_test.cpp`, `scan_roundtrip_test.cpp`, `nearmiss_roundtrip_e0_test.cpp`) are built on that,
+and `src/ir/` is shared ground that the rewrite rules, the cost model and `scripts/exec_coverage.py`'s
+domain-name parsing all read — a change there is its own package with its own gates, not a rider on a CI fix. The
+catalogue-side fix is sufficient and complete for the catalogue's own contract: the catalogue is the consumer
+that declared its fingerprint canonical, and it now is. Flagged here for a follow-up rather than left unsaid.
+Two smaller observations found while reading, also not fixed: `tools/catalogue/generate_main.cpp` keys its
+collection map on `Signature::hash()` alone and appends `found_in` without re-checking full equality, so a
+64-bit hash collision between two genuinely different signatures would silently drop one (the RUNTIME lookup
+does verify full equality, D55, so the consequence could only ever be lost coverage, never a wrong kernel); and
+D55's `signature.hpp` / `registry.hpp` headers named a mutant `catalogue.hash_collision_returns_wrong_kernel` and
+tests `tests/catalogue/{signature_independence,registry}_test.cpp` that were never written — those comments are
+corrected in place here (no mutant or test added for them).
+
+**Regression gate.** `tests/catalogue/signature_commutative_e0_test.cpp` (new ctest entry
+`catalogue_signature_commutative_e0_test`): for the M1 book and a 60-trade Stage A it transposes the operands of
+EVERY commutative step of every group — the same difference `emit_swapped` can introduce between two recordings
+of the same maths — and asserts, domain by domain, equal `Signature`, equal hash, equal `to_string()`, the same
+registry entry (the same `Kernel` pointer), equal coverage, and bitwise-identical `exec::Interpreter` outputs
+against both the transposed Program and the generic non-catalogued path. It fires on real material: 6 transposed
+steps over 9 eligible domains, all 9 dispatching, on the M1 book; 25 over 56, 53 dispatching, on Stage A. Being
+an `_e0_test` it is `-ffp-contract=off` in every preset and is in the mutation harness's gate set (D33's regex).
+New registered mutant `catalogue.signature_ignores_commutativity` (`docs/WORKLOADS.md` §M2; 44 registered mutants
+now): `canonical_swap_ab` always returns false, so a Signature again carries the recorded order and every domain
+whose recorded order is not already canonical stops matching the canonically-generated registry.
+
+**Verification.** Fingerprint `d448afd70180` (Apple clang 21, this machine) and GCC 13.5.0 in Docker (`gcc:13`,
+x86-64, reproducing `ubuntu-latest`); tests only, no performance claim and no perf-gate run — this change adds no
+work to any hot path, it reorders two operand slots once per step at plan time.
+- `ctest --preset release`: Apple clang **108/108**, GCC 13 **107/108**. `ctest --preset reference`: Apple clang
+  **108/108**, GCC 13 **107/108**. (107 tests before this entry; the new gate is the 108th.) The one GCC failure
+  in each is `scripts_perf_gate_test.RunScriptWritesAResultsFile`, and it is an artefact of THIS Docker run's
+  build directory, not of anything here: to avoid clobbering the host's Apple-clang `build/release` on the shared
+  bind mount, the container configures into `build/gcc-release` / `build/gcc-reference`, `bench/run.sh` derives
+  the preset name from that path, and the test asserts
+  `has(text, "\"preset\": \"release\"") || ... "reference" || ... "debug"` — it sees `"preset": "gcc-release"`.
+  This is exactly the artefact D46's own GCC run recorded ("`run.sh` cannot infer a preset name from a path
+  outside `build/<preset>/`"); the same test passes in the Apple clang `build/release` run above, and CI's
+  ubuntu-latest jobs build into `build/release` and are the authoritative GCC check (below).
+- The three previously-failing tests now pass on both compilers, and every catalogue coverage number is
+  IDENTICAL on the two, digit for digit — which is the point of the fix:
+  `InterpreterCatalogueE0`: M1 book 3/3 groups, 3,432/3,432 rows; Stage A default **28/28 groups (100%),
+  80,069/80,069 rows** (GCC was 25/28, 79,805/80,069); 200 trades 20/23 (86.96%), 18,909/18,916 rows; 60 trades
+  18/20 (90.00%), 16,557/16,562 (GCC was 14/20); 300 trades, noise 0, 20/23 (86.96%), 20,394/20,403 (GCC was
+  16/23). `AdjointCatalogueE0`: M1 book 9/9, 42,302/42,302; Stage A default **66/66 groups (100%),
+  423,087/423,087 rows** (GCC was 63/66); 200 trades 56/60 (93.33%), 148,900/148,908. 0 catalogue-on/off bitwise
+  mismatches in every case on both compilers. D55's measured limit for a NON-reference Stage A instance is
+  unchanged (~87-93% of candidate domains — the netting-set arity effect of D55 finding 3, which is real even
+  though it was not the cause of this bug): what changed is that GCC now reports the numbers Apple clang always
+  did, not that either got better.
+- `scripts/catalogue_regen.sh --check --no-build`: a no-op on Apple clang. On GCC 13, the generator's output was
+  byte-compared directly against the committed files (`cmp`, the container has no access to this worktree's git
+  dir): `src/catalogue/generated/{registry.cpp,kernels_e0.cpp}` regenerated under GCC are BYTE-IDENTICAL to the
+  committed, Apple-clang-generated files. That cross-compiler byte-identity is the property that was actually
+  broken and is the direct test of this fix; CI's own `catalogue_regen.sh --check --no-build` on ubuntu-latest is
+  the same check through `git diff`.
+- `scripts/mutation_test.sh` on GCC 13 in Docker: its BASELINE gate — the one that previously failed outright, so
+  that not a single mutant was ever tried on GCC — now passes, 54/54 gate tests, 0 failed. The full 44-mutant
+  sweep and the CI verification of this commit are recorded in `docs/RESUME.md` §5 and in the follow-up
+  `docs(resume)` commit, per the convention `d8700e8` set for D58.
+
+No SwapEngine file opened. No `-ffast-math`. No test threshold relaxed, no platform `#ifdef`, and no registry
+regenerated on GCC to paper the difference over: the three assertions that were failing are unchanged.

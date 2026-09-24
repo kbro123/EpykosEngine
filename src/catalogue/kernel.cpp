@@ -1,5 +1,8 @@
 #include "epykos/catalogue/kernel.hpp"
 
+#include <cstddef>
+
+#include "epykos/catalogue/signature.hpp"
 #include "epykos/mutation/mutation.hpp"
 
 namespace epykos::catalogue {
@@ -44,16 +47,26 @@ DomainBinding bind_domain(const ir::Program& program, ir::domain_id d) {
     }
   };
 
-  for (const ir::Step& st : g.steps) {
-    // Mutant catalogue.binding_wrong_operand_order: visits b before a, transposing the operand
-    // tables of every step whose a and b are both Gather (or both Column, or both Literal) — an
-    // asymmetric op (div, sub, ...) then silently computes with its operands swapped.
+  for (std::size_t k = 0; k < g.steps.size(); ++k) {
+    const ir::Step& st = g.steps[k];
+    // A commutative step's operands are bound in the SAME canonical order signature_of put them
+    // in (D61, signature.hpp's file header): the generated kernel reads "the k-th Gather slot in
+    // canonical step order", so this walk must produce exactly that sequence.
+    const bool swap = canonical_swap_ab(st, k);
+    const ir::Slot& first = swap ? st.b : st.a;
+    const ir::Slot& second = swap ? st.a : st.b;
+    // Mutant catalogue.binding_wrong_operand_order: visits the second operand before the first,
+    // transposing the operand tables of every step whose a and b are both Gather (or both
+    // Column, or both Literal) — an asymmetric op (div, sub, ...) then silently computes with
+    // its operands swapped. (A commutative step is unaffected by construction: swapping the
+    // operands of `+` or `*` is the same IEEE-754 result, which is exactly why canonicalising
+    // them above is E0-safe.)
     if (epykos::mutant("catalogue.binding_wrong_operand_order")) {
-      visit(st.b);
-      visit(st.a);
+      visit(second);
+      visit(first);
     } else {
-      visit(st.a);
-      visit(st.b);
+      visit(first);
+      visit(second);
     }
     visit(st.c);
     visit(st.konst);

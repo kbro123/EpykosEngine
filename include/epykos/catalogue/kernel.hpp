@@ -14,7 +14,9 @@
 // One kernel per Signature (signature.hpp); a domain dispatches to it once its own binding — the
 // specific Program-table pointers its op sequence's Literal / Column / Gather / Segment slots
 // resolve to, in this domain's own instance — is built. `bind_domain` builds that binding by
-// walking the domain's steps in the same order `signature_of` did, appending ONE array entry per
+// walking the domain's steps in the same order `signature_of` did — which, for a commutative
+// step, is the CANONICAL operand order `catalogue::canonical_swap_ab` defines and not necessarily
+// the recorded `a`, `b` order (D61) — appending ONE array entry per
 // OCCURRENCE of a Literal / Column / Gather slot (never deduplicated by which Program-global
 // table entry two occurrences happen to share — a Signature cannot see that, so a generated
 // kernel and bind_domain must not either, or two same-signature domains could hand one kernel

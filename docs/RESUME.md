@@ -829,6 +829,7 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
 2026-09-24  M4-gate (run 1)  done (D56; independent re-verification, fresh worktree; two real, previously-unknown defects found: fma-contraction's declared E1 tolerance unsound under cancellation, and no gate ever compared an extracted program against its true unrewritten original)  2c99023928aea3f6cf2ded4ee8936703d91d4dee
 2026-09-24  M4-fix  landed (D57; all three M4-gate-1 findings confirmed and fixed with regression tests, including re-pricing the Stage A "cross-stage win" under the fingerprint's real fitted cost model instead of the synthetic default -- it turns out to be noise, not a win)  5d4ae2a4775dfd3632d1e434c6e9aa2fa386e822
 2026-09-24  M4-gate-2 (run 2)  done (D58; independent re-verification on a fresh worktree, every number re-measured; confirms D57's fix; ci_green false, citing the pre-existing GCC-only catalogue-coverage gap task_919ea449, unrelated to this package's own docs/bench-results-only diff)  a49ad344da2c06b0aeead82d3b4cdccae8bd88bf
+2026-09-24  M4/c1-fix  landed (D61; `task_919ea449` fixed at its root -- the GCC-only catalogue-coverage shortfall was neither a value nor a netting-set defect but a compiler-dependent COMMUTATIVE OPERAND ORDER: unsequenced operand evaluation puts the same 517,036 Stage A nodes on the tape in a different order under GCC 13 and Apple clang, `ir::infer`'s `Class::emit_swapped` then hands nine domains `mul(lit,gat)` on one and `mul(gat,lit)` on the other, and `catalogue::Signature` -- which claims to be canonical -- called those different shapes. `signature_of` and `bind_domain` now order a commutative step's operands canonically; registry regenerated (22 signatures, was 23); new gate `catalogue_signature_commutative_e0_test` and new mutant `catalogue.signature_ignores_commutativity`. 66/66 and 28/28 groups, 0 on/off mismatches, and a byte-identical `scripts/catalogue_regen.sh --check` on BOTH GCC 13 and Apple clang; `ctest` 108/108 release and reference on both; 44/44 mutants caught on GCC)  see D61
 
 ### M4 result (2026-09-24)
 
@@ -907,7 +908,8 @@ R-b → R-a → EG integration → C1 catalogue → M4-gate (run 1) → M4-fix �
   flagged rather than hidden: `EGraph::saturate`'s unbounded growth with no redundancy check (D54 point 4); the cost
   model's >25% error and its two known, opposite-cancelling AD-mode formula gaps; `plan_bridge.hpp`'s unpriced
   group/emitted terms tying every extraction to the greedy default; `ExpMode::poly` silently disabled under the
-  catalogue's own production default (`task_f7b9c87d`); the GCC-only catalogue-coverage shortfall (`task_919ea449`);
+  catalogue's own production default (`task_f7b9c87d`); the GCC-only catalogue-coverage shortfall (`task_919ea449`,
+  **fixed after M4 close, D61**);
   one live, reproducible `adjoint::` crash on a real R2 split shape (D52 point 4, `src/adjoint/`, unowned by any M4
   package). This package changed no engine, maths, rewrite, adjoint, catalogue or optimise file — docs only (D59).
   Full per-package findings, rejected findings and process notes are in `docs/DECISIONS.md` D47-D59 and the

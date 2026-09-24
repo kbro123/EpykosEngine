@@ -82,6 +82,7 @@ const std::vector<std::string> documented = {
     "eg.block_jacobian_wrong_coefficient_index",
     "catalogue.binding_wrong_operand_order",
     "catalogue.signature_ignores_konst",
+    "catalogue.signature_ignores_commutativity",
 };
 
 std::vector<std::string> registry_names() {

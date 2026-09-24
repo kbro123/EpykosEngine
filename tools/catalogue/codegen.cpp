@@ -64,7 +64,10 @@ const char* slotshape_enum_name(SlotShape s) {
 // Builds one operand's read expression, consuming (and advancing) the running Literal / Column /
 // Gather occurrence counters exactly as src/catalogue/kernel.cpp's bind_domain does: one array
 // slot per OCCURRENCE, in the same a/b/c/konst-per-step, step-in-order traversal. `k` is the
-// current step index (for a Step-shaped operand's back-reference).
+// current step index (for a Step-shaped operand's back-reference). Nothing here needs to know
+// about D61's commutative canonicalisation: this walks a `Signature`, whose `a` / `b` are ALREADY
+// in canonical order, and bind_domain applies the same order to the ir::Step it binds — so the
+// k-th Gather this emits is the k-th one the binding supplies, as before.
 struct Cursor {
   int lit = 0, col = 0, gat = 0;
 

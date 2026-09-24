@@ -432,10 +432,15 @@ batching/chord sharing; forward's formula
 understates a wide `Dual<N>` pass); (4) E1 EXTRACTION is informational only, same root cause as
 (1).
 
-**As built (M4/C1, D55):** §7 tier 1's catalogue is `include/epykos/catalogue/` (`Signature`: the
+**As built (M4/C1, D55; `Signature` made canonical under commutativity by D61):** §7 tier 1's
+catalogue is `include/epykos/catalogue/` (`Signature`: the
 op at each step plus each operand slot's KIND — Step/Literal/Column/Gather/Segment — and, for a
 Step operand, how many steps back it points; no row count, no table index, no literal/column/
-gather value; `Kernel`, `bind_domain`, `registry.hpp`'s hash-then-full-equality lookup) plus
+gather value, and (D61) no dependence on WHICH ORDER a commutative step's two operands are in —
+`ir::infer` already treats `a op b` and `b op a` as one isomorphism class, but which order the
+emitted Step carries is the first recorded instance's, and tape order is compiler-dependent
+because C++ leaves a binary operator's operands unsequenced, so `signature_of` and `bind_domain`
+order them canonically; `Kernel`, `bind_domain`, `registry.hpp`'s hash-then-full-equality lookup) plus
 `tools/catalogue/`'s generator (`scripts/catalogue_regen.sh`), which walks the Stage A tape and
 the M1 book straight out of `ir::infer` (no R1-R7 rewrite or EG extraction first — either is a
 Program a caller supplies, not what a default `Interpreter`/`Adjoint` construction runs today; a
@@ -447,7 +452,8 @@ inlining a producer, not itself inlined, not a scan — its own three optimisati
 / catalogue work (M4)"), dispatches unconditionally for every catalogue-eligible domain, scan
 included. Measured coverage and its one real limit (a per-netting-set fixed-arity Sum's exact
 arity depends on the trade-to-netting-set draw, so a Stage A instance other than the two reference
-workloads reaches ~87-93%, not 100%, of candidate domains) are in D55 and `docs/RESUME.md` §5.
+workloads reaches ~87-93%, not 100%, of candidate domains — unchanged by D61, which only made
+those same numbers the same on every compiler) are in D55, D61 and `docs/RESUME.md` §5.
 
 **As built (M4-close, D59): the search, cost model and catalogue, verdict fail.** All four §7 mechanisms described
 above shipped — the `rewrite::Rule` interface and planner-as-rules (D47), the fitted per-domain cost model (D48), the

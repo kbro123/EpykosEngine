@@ -5,7 +5,7 @@
 // (the Stage A tape and the M1 book, run through record -> ir::infer -> a rewrite pipeline) hit,
 // sorted by Signature::hash() ascending, so lookup() is a binary search followed by a full
 // Signature comparison over the (practically always singleton) run of same-hash entries — a hash
-// collision never dispatches the wrong kernel (catalogue.hash_collision_returns_wrong_kernel).
+// collision never dispatches the wrong kernel (signature.hpp's `hash()` comment, D61).
 #pragma once
 
 #include <cstddef>

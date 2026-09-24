@@ -73,6 +73,7 @@ inline constexpr std::string_view registry[] = {
     "eg.block_jacobian_wrong_coefficient_index", // adjoint::block_jacobian (ClosedFormAffine): reads a row's coefficient one member off (tests/rewrite/ad_mode_rule_e0_test.cpp)
     "catalogue.binding_wrong_operand_order",  // catalogue::bind_domain: a step's operand tables are built visiting b before a, silently transposing the operands of every asymmetric two-input catalogued op (div, sub, ...) (M4/C1's own catalogue on/off e0 gates)
     "catalogue.signature_ignores_konst",      // catalogue::signature_of: a step's konst slot contributes no shape (or back-reference) to its Signature, so two domains differing only in konst's kind collide onto one signature and the catalogue silently stops matching one of them (M4/C1's own catalogue on/off e0 gates, which require full coverage of their fixtures' candidate domains)
+    "catalogue.signature_ignores_commutativity", // catalogue::canonical_swap_ab: a commutative step's operands are fingerprinted in their recorded order instead of the canonical one, so mul(gat,lit) and mul(lit,gat) -- one isomorphism class to ir::infer, and whichever order the first recorded instance took is compiler-dependent -- become two Signatures and the registry stops matching one of them (D61; M4/C1's own catalogue on/off e0 gates and tests/catalogue/signature_commutative_e0_test.cpp)
 };
 inline constexpr std::size_t registry_size = sizeof(registry) / sizeof(registry[0]);
 

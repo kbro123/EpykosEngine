@@ -15,18 +15,44 @@
 // Program or in two different ones from two different problem instances (HARD RULE 9: this
 // package's rules are keyed on IR structure, never on an instance count or a magic constant —
 // the gate "a second seed of the Stage A problem hits the same kernels" is exactly this property,
-// checked directly in tests/catalogue/signature_independence_test.cpp).
+// checked directly in tests/exec/interpreter_catalogue_e0_test.cpp's
+// DifferentStageAInstanceHitsTheSameCatalogueAndIsMostlyCovered and
+// tests/adjoint/adjoint_catalogue_e0_test.cpp's SmallStageAIncludingScanDomains; the
+// platform-independence half of it, added by D61, is
+// tests/catalogue/signature_commutative_e0_test.cpp).
 //
 // What is deliberately NOT part of a Signature: `ir::Domain::rows` (row count), any
 // `ir::Program::literals` / `columns` / `gathers` VALUE, which literal/column/gather/segment
-// TABLE ENTRY a slot names (only its KIND), the domain's id, name or level, and whether the
+// TABLE ENTRY a slot names (only its KIND), the domain's id, name or level, whether the
 // domain happens to be a scan (`ir::Domain::recurrent` / `scan_class`) — a scan's carry is
 // recorded as an ordinary Gather slot like any other; row-order sequencing is a property of HOW
 // a kernel is CALLED (one row at a time, in ascending row order — kernel.hpp), not of the group's
 // shape, so it does not belong in the fingerprint the generator and the two engines' dispatch
-// both key on.
+// both key on — and, since D61, the ORDER OF A COMMUTATIVE STEP'S TWO OPERANDS.
+//
+// Commutative canonicalisation (D61). `ir::infer`'s own signature pass already treats `a op b`
+// and `b op a` as ONE isomorphism class for a commutative op (`op_is_commutative`: Add, Mul,
+// CmpEq — its class hash sorts the two operand tokens, ir/signature.cpp `hash_all` /
+// `extract_tree`). Which of the two orders the emitted `ir::Step` then carries is NOT canonical:
+// `Class::emit_swapped` reproduces "the first instance's recorded operand order", i.e. whichever
+// order the FIRST tape node of that class happened to be recorded in. Tape order is not stable
+// across compilers — C++ leaves the evaluation order of a binary operator's operands unsequenced,
+// so two sibling subexpressions of one recorded statement are appended to the tape in whichever
+// order the compiler chose (D25 saw the same thing break `tape_replay_e0_test`). Measured on the
+// default Stage A tape: GCC 13 and Apple clang record the SAME 517,036 nodes with the same
+// per-node operand slots, in a different order, and `ir::infer` therefore emits nine domains as
+// `mul(lit, gat)` / `mul(col, gat)` under one compiler and `mul(gat, lit)` / `mul(gat, col)`
+// under the other. A fingerprint that called those different shapes made the catalogue
+// compiler-dependent (63/66 groups on GCC vs 66/66 on clang; D61). `signature_of` therefore
+// orders a commutative step's `a` / `b` by (SlotShape, back) — `canonical_swap_ab` below — and
+// `bind_domain` (kernel.cpp) and the generator (tools/catalogue/codegen.cpp) walk the same
+// canonical order, so the one generated kernel serves both recordings. E0: IEEE-754 `+` and `*`
+// are exactly commutative, so evaluating the canonical order is bit-for-bit the generic path's
+// result. A fixed-arity `Sum` is NOT touched: `op_is_commutative(Op::Sum)` is false and its fold
+// is a left fold whose reassociation would change rounding (DESIGN.md §5.6).
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -52,7 +78,8 @@ enum class SlotShape : std::uint8_t {
 const char* to_string(SlotShape s) noexcept;
 
 // One step's shape: the op, plus its operand slots' kinds (a, b, c, konst — ir::Step's own
-// field order). A fixed-arity Sum (`ir::is_fixed_sum`, scan groups: a Sum whose members are
+// field order, except that a commutative step's a and b are presented in canonical order; see
+// the file header and `canonical_swap_ab`). A fixed-arity Sum (`ir::is_fixed_sum`, scan groups: a Sum whose members are
 // ordinary operands, not a Segment — DESIGN.md §5.6) reports its members' true kinds (Step,
 // Literal, Column or Gather), exactly like any other 2- or 3-ary op: it IS one, this fingerprint
 // does not special-case it. A segment-fold Sum or Affine (the group's LAST step only,
@@ -92,8 +119,12 @@ struct Signature {
 
   // A 64-bit content hash (FNV-1a over the step shapes), used by the registry to order its table
   // for lookup. Never trusted alone: registry::lookup compares the full Signature on every
-  // candidate a hash match names (a collision must never dispatch the wrong kernel —
-  // catalogue.hash_collision_returns_wrong_kernel, tests/catalogue/registry_test.cpp).
+  // candidate a hash match names, so a collision can never dispatch the wrong kernel. (D55's own
+  // header named a mutant `catalogue.hash_collision_returns_wrong_kernel` and a
+  // tests/catalogue/registry_test.cpp for this; neither was ever written — corrected here rather
+  // than left standing, D61. The generator's own collection map, tools/catalogue/
+  // generate_main.cpp, keys on this hash ALONE without a full-equality re-check, so a collision
+  // there would silently drop one of the two signatures: lost coverage, never a wrong kernel.)
   std::uint64_t hash() const noexcept;
 
   // A short, deterministic, human-readable rendering, e.g. "neg(gat);mul(step,lit);exp(step)" —
@@ -115,6 +146,15 @@ struct Signature {
 // and excludes its own already-optimised whole-segment kernel; adjoint::Adjoint has no further
 // restriction — see each header for why).
 bool is_cataloguable(const ir::Program& program, ir::domain_id d) noexcept;
+
+// Whether the canonical form of `step` (step index `k` of its group) presents `b` before `a`
+// (D61, file header). True only for a commutative op (`op_is_commutative`: Add, Mul, CmpEq) with
+// both operands present whose `b` slot sorts before its `a` slot on the key (SlotShape, steps
+// back) — a purely structural key, never a table index or a value. Every consumer that walks a
+// step's operand slots in first-use order must use it, or the k-th Literal / Column / Gather
+// OCCURRENCE a generated kernel reads would not be the k-th one `bind_domain` bound: that is
+// `signature_of` (below), `bind_domain` (kernel.hpp) and `tools/catalogue/codegen.cpp`.
+bool canonical_swap_ab(const ir::Step& step, std::size_t k);
 
 // The signature of domain `d`. Precondition: is_cataloguable(program, d) (checked with an
 // assertion in debug builds; UB-free but meaningless otherwise — a caller that has not checked

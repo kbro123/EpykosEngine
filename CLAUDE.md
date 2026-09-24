@@ -27,9 +27,11 @@ benchmarks, 0 regressions, catalogue coverage giving a real 1.11–1.16× win on
 target at 1.0277×/1.0427×; the one cross-stage optimisation found, re-priced under this fingerprint's real fitted
 cost model, is 0.999716× — noise, not a win, so `cross_stage_wins` = 0). The Rule/e-graph/cost-model/catalogue
 framework (D47–D49, D54–D55) and rules R1–R7 plus fma-contraction all landed with their exactness class,
-differential test and mutation test (43/43 mutants caught); the cost model's mean relative error (84.4%) misses its
-<25% target, `EGraph::saturate` has no redundancy check and grows unboundedly past a small bound, and CI is red on
-GCC-only (ubuntu-latest) for a pre-existing catalogue-coverage gap unrelated to this verdict (`task_919ea449`). M5
+differential test and mutation test (44/44 mutants caught); the cost model's mean relative error (84.4%) misses its
+<25% target and `EGraph::saturate` has no redundancy check and grows unboundedly past a small bound. The GCC-only
+catalogue-coverage gap that held CI red on ubuntu-latest throughout M4 (`task_919ea449`) is **fixed 2026-09-24**
+(D61): `catalogue::Signature` is now canonical under a commutative step's operand order, which unsequenced operand
+evaluation had made compiler-dependent; CI green on all four jobs. M5
 onward awaits the owner's decision on this failed exit gate. Nothing merges to `main` without the owner.
 
 ## Rules

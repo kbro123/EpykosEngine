@@ -1,7 +1,7 @@
 #include "epykos/rewrite/r3_elide_trivial_maps.hpp"
 
 #include "epykos/mutation/mutation.hpp"
-#include "epykos/rewrite/ir_edit.hpp"
+#include "epykos/rewrite/bucket_split_edit.hpp"
 
 namespace epykos::rewrite {
 

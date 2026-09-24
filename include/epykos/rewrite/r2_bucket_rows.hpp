@@ -28,7 +28,7 @@
 // or a level-split scan-candidate domain never matches.
 //
 // A split with any run of exactly one row is ALSO rejected (r2_bucket_rows.cpp's own comment on
-// run_buckets has the full account, D49): a one-row run is not a "kind's batch" this rule's own
+// run_buckets has the full account, D52): a one-row run is not a "kind's batch" this rule's own
 // point is to form, and a large singleton-heavy split has been measured to crash building the
 // rewritten program's adjoint::Adjoint on the Stage A tape specifically (not the M1 book, which
 // has no scan domain and handles the identical shape correctly) -- a fault inside src/adjoint/

@@ -251,6 +251,24 @@ the Stage A tape's shared-Input-domain linmap domain splits into 5 (rows `[7456,
 tape). Not landed: R7's own DESIGN.md text also names exposing a linmap's Jacobian as `AdMode::ClosedFormAffine`
 for the IFT — scoped out because `ir::PlanAnnotations::JacobianBlockPlan::mode` has no consumer yet (D47), so
 nothing could gate a rule that populated it (D49 point 5).
+**As built (M4/R-a, D52):** R1-R3 against the M4/R0 Rule interface (`rewrite::R1FoldUniformColumns`,
+`R2BucketRows`, `R3ElideTrivialMaps`). R1 never fires on a Program straight out of `ir::infer` -- the signature
+pass's own column classification (§5.5) already performs R1's fold at construction time -- but IS needed after a
+rewrite that introduces a fresh Column without classifying it, which R2 does by construction (a bucket's
+signature columns are uniform within it by definition). R2 buckets by MAXIMAL CONTIGUOUS RUNS of matching
+signature, not a sort (a sort would need renumbering every downstream reader of the domain, program-wide); it
+also rejects any split with a singleton run, both because a singleton is not a "kind's batch" (this rule's own
+point) and because, measured directly, a large singleton-heavy split crashes building the rewritten program's
+`adjoint::Adjoint` on the Stage A tape specifically (not the M1 book, which has no scan domain and handles the
+same shape correctly) -- a fault in `src/adjoint/` this package's own budget did not extend to chasing down; see
+D52. Consequence: at this landing, R1, R2 and R3 all verify correct (bit-identical interpreter and adjoint) on
+their own synthetic tests, and R2 additionally verifies correct on the M1 book and the Stage A tape WITHOUT its
+safety gate (a diagnostic build, not what ships) but does not currently fire on either real fixture WITH it; R1
+and R3 do not fire on either real fixture regardless. `rewrite::detail` (`bucket_split_edit.hpp`) holds the
+editing primitives this package's three rules share (`drop_owned_entries`, `shift_domain_ids`, `eliminate_domain`)
+-- renumbering domain ids after a domain is split or removed, and redirecting every reference to an eliminated
+domain's rows to the value it now equals; `recompute_reads` itself is M4/R-b's own `ir_edit.hpp` (landed the same
+function, same contract, for R4a/R4b/R5's domain insert/merge edits), reused here rather than duplicated.
 
 **As built (M4/R-b, D51):** R4a (`include/epykos/rewrite/r4a_push_unary_through_gathers.hpp`), R4b
 (`r4b_shared_reciprocal.hpp`), R5 (`r5_group_formation.hpp`) and a fourth rewrite this table does

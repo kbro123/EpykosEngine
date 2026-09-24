@@ -102,7 +102,7 @@ TEST(R1FoldUniformColumns, SyntheticDomainFoldsOnlyTheUniformColumnAndCatchesBot
 // own classification -- concretely, R2 bucket rows, whose own point is that every column of a
 // freshly-split bucket domain is uniform by construction (r2_bucket_rows.hpp's own header; this
 // file's synthetic test above exercises R1's own fold directly, not that pairing -- R2's own
-// safety gate, D49, currently keeps it from firing on either real fixture too, so the pairing is
+// safety gate, D52, currently keeps it from firing on either real fixture too, so the pairing is
 // not currently observable end to end on either).
 TEST(R1FoldUniformColumns, MatchesAndVerifiesOnTheM1Book) {
   const fixtures::Book book = fixtures::make_m1_book();

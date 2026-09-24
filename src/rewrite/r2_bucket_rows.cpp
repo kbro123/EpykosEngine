@@ -5,7 +5,8 @@
 #include <utility>
 
 #include "epykos/mutation/mutation.hpp"
-#include "epykos/rewrite/ir_edit.hpp"
+#include "epykos/rewrite/bucket_split_edit.hpp"
+#include "epykos/rewrite/ir_edit.hpp"  // M4/R-b's recompute_reads (epykos::rewrite::detail), reused directly
 
 namespace epykos::rewrite {
 

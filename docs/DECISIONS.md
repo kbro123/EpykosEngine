@@ -1333,3 +1333,73 @@ No SwapEngine file opened. Verification (fingerprint d448afd70180): `ctest --pre
 ones edited in place rather than added, `rewrite_rule_framework_test` and `mutation_registry_test`);
 `scripts/mutation_test.sh` green, all 32 registered mutants caught (D50's own 24 plus this
 package's own 8; see `docs/RESUME.md` §5's landing entry for the exact run).
+## D52 — M4/R-a: R1 fold uniform columns, R2 bucket rows, R3 elide trivial maps (2026-09-24)
+Implements DESIGN.md §6's R1-R3 against the M4/R0 Rule interface (D47): `rewrite::R1FoldUniformColumns`,
+`R2BucketRows`, `R3ElideTrivialMaps` (`include/epykos/rewrite/r{1,2,3}_*.hpp`, `src/rewrite/r{1,2,3}_*.cpp`), a
+shared low-level editing helper (`rewrite::detail`, `include/epykos/rewrite/bucket_split_edit.hpp`,
+`src/rewrite/bucket_split_edit.cpp`: `all_bit_identical`, `drop_owned_entries`, `shift_domain_ids`,
+`eliminate_domain` -- named apart from M4/R-b's own `ir_edit.hpp`, which this file's `.cpp` includes for its
+`recompute_reads` rather than duplicating it: both packages independently built a domain-editing helper of that
+name, from the same base, for their own rules, and landed within hours of each other), six new
+mutants (`r1.ignores_last_row`, `r1.wrong_slot`, `r2.wrong_run_boundary`, `r2.column_slice_uses_wrong_bucket`,
+`r3.off_by_one_member`, `r3.treats_length_two_as_trivial`; `docs/WORKLOADS.md` §M2), and per-rule differential
+tests (`tests/rewrite/r{1,2,3}_*_e0_test.cpp`). All three E0. Findings, reported per CLAUDE.md rather than hidden:
+
+1. **R1 never fires on a Program straight out of `ir::infer`.** DESIGN.md §5.5's own column classification
+   ("identical across instances -> literal (folded); varying -> data column") is already performed by the
+   signature pass itself (`src/ir/signature.cpp`'s `const_slot`: bit-pattern uniform -> Literal, else Column) --
+   so no domain the signature pass produces can have a uniform Column left for R1 to fold. Measured: 0 of 10 M1
+   book domains, 0 of 67 Stage A domains. R1 is not dead code: it exists for a Program a REWRITE has since
+   changed underneath the signature pass's own classification, concretely R2 (below), whose own point is that a
+   freshly-split bucket domain's signature columns become uniform by construction, ready for a LATER R1 pass.
+   R1's own synthetic test (a hand-built domain with one uniform and one non-uniform column) exercises the fold
+   directly and both mutants.
+2. **R2 buckets by MAXIMAL CONTIGUOUS RUNS of matching signature, never a sort.** A sort-based partition (group
+   ALL same-signature rows together regardless of original position) would need every downstream gather/segment
+   that reads one of the domain's rows to be renumbered, program-wide, to the row's new position -- a much bigger
+   change than DESIGN.md's own framing of R2 as row-local bucketing. A contiguous-run split needs none of that:
+   the value-id space stays exactly as it was (`Program::domains` just gets more, smaller entries covering the
+   same range), so only DOMAIN ids shift, a far smaller edit (`shift_domain_ids`). The consequence, reported
+   rather than hidden: R2 fires only where the ORIGINAL RECORDING ORDER already groups same-signature rows
+   contiguously, which is not guaranteed and this landing does not sort to arrange.
+3. **R2's OWN entries are expanded IN PLACE in `Program::columns` / `gathers` / `segments`, never compacted away
+   and appended at the tail.** The first implementation did the latter (simpler) and passed every forward and
+   round-trip gate, but FAILED the adjoint gate by 36-68 ulps on 2 of the M1 book's 5 matching domains despite
+   bit-identical forward values: `adjoint::build_plan` (`src/adjoint/plan.cpp`) builds each value's reader list
+   by scanning `Program::gathers` / `segments` in ARRAY ORDER, so a value read by both one of a split domain's
+   gathers and an unrelated one accumulates its adjoint in that scan order; moving the split domain's entries to
+   the tail reorders that floating-point sum (same total, different bits). `expand_owned` (`r2_bucket_rows.cpp`)
+   replaces each owned entry AT ITS OWN ARRAY POSITION with its bucket's entries instead, which fixed the
+   mismatch (re-verified: 0 ulps, all 5 M1 domains, forward and adjoint, at the record point and over the M1
+   ball) -- this is the finding future rewrites that add or split Column/Gather/Segment entries should know
+   about, not just R2's own bookkeeping.
+4. **R2 additionally rejects any split with a singleton run, as a SAFETY gate, not only a quality one.** Measured
+   directly: splitting a 177-row Stage A domain into 168 buckets (159 of them singletons) crashes building the
+   split program's `adjoint::Adjoint` (a heap-corruption-shaped abort some distance past the actual fault, inside
+   `src/adjoint/`, code this package does not own) -- yet the SAME shape (a 16,103-row M1 book domain into 9,152
+   mostly-singleton buckets) builds and runs correctly, bit-exact forward and adjoint, at the record point and
+   over the differential ball. The M1 book has no scan domain; the Stage A tape has five; this package's own time
+   budget did not extend to chasing that difference into `src/adjoint/` to confirm it as the actual cause rather
+   than something else Stage-A-scale-specific. Rather than land a rule that can crash, `run_buckets` closes the
+   whole shape off structurally (every bucket must have at least 2 rows) -- which means R2 does not currently
+   fire on EITHER real fixture (0 of 10 M1 domains, 0 of 67 Stage A domains), only on its own synthetic test. A
+   follow-up owning `src/adjoint/` should chase the crash (reproduction: `r2_bucket_rows.cpp`'s own comment on
+   the gate) and, if it is fixed, this gate can be relaxed back to "no consolidation at all"
+   (`ranges.size() >= rows`), which is verified sufficient for correctness by itself.
+5. **R3 also never fires on either real fixture (0 of 10 M1, 0 of 67 Stage A) at this landing.** Its target (a
+   domain whose entire group is a length-1 Sum over a segment: a pure relabelling with no arithmetic) is a
+   boundary artifact DESIGN.md §5.3 predicts CAN arise (fan-out > 1 giving a trivial value its own domain) but
+   evidently does not on these two fixtures as recorded; R3's own synthetic tests (a length-1-Sum domain feeding
+   a third domain, and a genuine two-member Sum) exercise the fold and both mutants directly. Scope note: only a
+   length-1 SUM is treated as trivial, never a length-1 Affine -- `affine_collapse` (`src/tape/passes.cpp`,
+   mutant `affine.single_term_unscaled`) already reduces a genuinely-identity one-term Affine (coefficient 1,
+   offset 0) to a bare atom before the domain IR exists, so a length-1 Affine surviving into a Program is, by
+   construction, never trivial.
+6. **Verification.** Every site a rule's `match` reports on a real fixture is checked with
+   `rewrite::verify_rule` (interpreter + adjoint, bit-identical) against the untouched original, EXCEPT the
+   Stage A tape's own ball-based checks: its Inputs are quotes an implicit block (D40) calibrates the book's
+   knots from, so a plain `exec::Interpreter`/`verify::make_state_ball` perturbation (valid for the M1 book,
+   which has no implicit block) walks the book off the point the recorded tape is self-consistent at and,
+   measured directly, sometimes into `log`/`sqrt`/`div`'s undefined region entirely. `tests/rewrite/
+   record_point_check.hpp` checks the exact record point only (self-consistent for a plain Interpreter/Adjoint
+   exactly as it is for `solver::ImplicitProgram`) instead, for every rule's Stage A test.

@@ -546,3 +546,47 @@ measured: `589245d424ff45bd53c5e02e8b13527af7600080` (integrate/m1-m5 tip after 
   `r4b.wrong_row_map`, `r5.wrong_step_index`, `r5.drop_last_step`, `fma.wrong_operand`, `fma.drop_remap`). Zero
   build warnings on a from-scratch configure + build of both presets. No SwapEngine file opened.
   (branch `m4/r-b-rules-4-5`)
+2026-09-24  M4/R-a rules R1-R3  landed (D52): `rewrite::R1FoldUniformColumns`, `R2BucketRows`, `R3ElideTrivialMaps`
+  against the M4/R0 Rule interface (`include/epykos/rewrite/r{1,2,3}_*.{hpp,cpp}`), a shared editing helper
+  (`rewrite::detail`, `bucket_split_edit.hpp`/`.cpp`: `drop_owned_entries`, `shift_domain_ids`, `eliminate_domain`
+  -- named apart from M4/R-b's own `ir_edit.hpp`, whose `recompute_reads` this file's `.cpp` reuses rather than
+  duplicating, both packages having independently built one from the same base), six mutants (`r1.ignores_last_row`, `r1.wrong_slot`, `r2.wrong_run_boundary`,
+  `r2.column_slice_uses_wrong_bucket`, `r3.off_by_one_member`, `r3.treats_length_two_as_trivial`;
+  `docs/WORKLOADS.md` §M2) and `tests/rewrite/r{1,2,3}_*_e0_test.cpp`. All three E0, all three verified correct
+  (bit-identical interpreter and adjoint) on their own hand-built synthetic programs, both mutants caught per
+  rule. Findings reported per CLAUDE.md, not hidden (full account: D52):
+  - **R1 never fires on a Program straight out of `ir::infer`** (0/10 M1 domains, 0/67 Stage A domains) — the
+    signature pass's own column classification (DESIGN.md §5.5) already performs the fold at construction time.
+    Exists for a Program a rewrite has since changed underneath that classification — R2's own split domains are
+    the concrete case.
+  - **R2 buckets by maximal CONTIGUOUS RUNS**, never a sort (a sort would need renumbering every downstream
+    reader of the domain, program-wide); fires only where the original recording order already groups
+    same-signature rows contiguously.
+  - **R2's own Column/Gather/Segment entries are expanded IN PLACE**, at the position the original entry held,
+    never compacted away and appended at the tail: `adjoint::build_plan` builds a value's reader list by
+    scanning those arrays in ARRAY ORDER, so appending at the tail reorders a shared value's adjoint
+    accumulation (found via a 36-68 ulp adjoint-only mismatch on 2 of 5 matching M1 book domains despite
+    bit-identical forward values; fixed, re-verified 0 ulps).
+  - **R2 rejects any split with a singleton run**, as a SAFETY gate: measured directly, a large singleton-heavy
+    split (a 177-row Stage A domain into 168 buckets) crashes building the split program's `adjoint::Adjoint` —
+    a fault inside `src/adjoint/` this package does not own and did not have the budget to chase to its root
+    cause, though the SAME shape (a 16,103-row M1 book domain into 9,152 buckets) builds and runs correctly; the
+    M1 book has no scan domain, the Stage A tape has five. Consequence: with the gate, R2 does not currently fire
+    on EITHER real fixture (0/10 M1, 0/67 Stage A) — verified correct on both WITHOUT the gate (a diagnostic
+    build, not what ships). Flagged for whoever owns `src/adjoint/` next; reproduction and the exact gate to
+    relax back are in D52 and in `r2_bucket_rows.cpp`'s own comment.
+  - **R3 also does not fire on either real fixture** at this landing (0/10 M1, 0/67 Stage A); its target (a
+    length-1-Sum "pure relabelling" domain, DESIGN.md §5.3's boundary case) evidently does not arise on either
+    recording as built. Only Sum, never Affine, is treated as a trivial length-1 map — `affine_collapse` already
+    reduces a genuinely-identity one-term Affine before the domain IR exists.
+  - Every Stage A differential check in this package uses the exact record point only
+    (`tests/rewrite/record_point_check.hpp`), not `rewrite::verify_rule`'s own ball perturbation: the tape's
+    Inputs are quotes an implicit block calibrates the book's knots from, so perturbing them without re-solving
+    (what a plain `exec::Interpreter` does) walks the book off the point it is self-consistent at and, measured,
+    sometimes into `log`/`sqrt`/`div`'s undefined region. Worth folding into `rewrite::verify_rule` itself if a
+    later package finds the same trap.
+  `ctest --preset release` (88/88) and `--preset reference` (88/88) pass; `scripts/mutation_test.sh` — 26/26
+  mutants caught, 0 survivors (the 6 above plus the 20 from M2/M3, all against the same 44-test gate set; two of
+  the new ones are caught via a crash rather than a clean assertion failure -- `r1.ignores_last_row` and
+  `r2.wrong_run_boundary` abort inside the mutation build rather than failing gracefully, which the harness
+  treats as caught per its own stated rule but which a follow-up could still tighten to a clean failure).

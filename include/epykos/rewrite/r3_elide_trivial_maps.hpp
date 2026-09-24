@@ -7,7 +7,7 @@
 // (a `Sub` domain that just reads a `DF` row 1:1: its Sum segment's one member IS that DF value id,
 // with nothing else in the group to say otherwise). R3 removes such a domain outright, redirecting
 // every reference anywhere in the program to one of its rows to the member's value id directly
-// (`rewrite::detail::eliminate_domain`, ir_edit.hpp): the indirection disappears, not just its cost
+// (`rewrite::detail::eliminate_domain`, bucket_split_edit.hpp): the indirection disappears, not just its cost
 // -- no Column, Gather or Segment table is left behind for it, unlike R1's folded-but-present
 // column. SwapEngine analogue: `sub_is_identity`.
 //

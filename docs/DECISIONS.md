@@ -3838,3 +3838,193 @@ algorithm, not a flags claim. The Stage A anchor holds this fixture's `double` s
 `price_stage_a_at` (§5) — a guard against measuring the wrong thing, and if it ever fails the fix is to read the
 reference column rather than to force equality. And the cross-TU probe (§2). Each is free, each is a bug detector,
 and each would be relaxed and replaced by a measured error the moment the thing it watches has a reason to move.
+
+## D74 — The telescoping prize, measured end to end before the machinery to find it is built: the 250:1 recorded ratio is 62:1 in surviving tape nodes, 143:1 in the work the calibration solve iterates, and not yet taken on a quiet machine in wall clock (2026-09-25)
+
+A MEASUREMENT SPIKE, not a feature, on `spike/telescoping-prize`. `PRINCIPLES.md` §8 orders the rebuild and puts
+telescoping fourth, "as the worked example — it exercises every part of this contract and is worth 250:1". That
+250:1 is `bench/compare/README.md` §4 item 1 and D71 §6(a), and it is a count of RECORDED observation days — 49,091
+on the `compare_ois` calibration side against 197 telescoped coupon-periods. **Nobody had measured what survives of
+it after common subexpression elimination, dead code elimination, the affine collapse, domain inference and
+planning**, and that README warns in the same paragraph against reading a recorded count as a cost ("the book's are
+then largely shared away by the E0 passes"). This entry is that measurement. It was taken before any rewriting
+machinery exists, so that the machinery is aimed at a number rather than at a hope.
+
+**Nothing in `src/optimise/`, `src/rewrite/`, the cost model or `include/epykos/maths/` was touched. No rewrite rule
+was designed and none was written.**
+
+### 1. What was built, and the constraint it is under
+
+`include/epykos/fixtures/spike_telescoped.hpp` + `src/fixtures/spike_telescoped.cpp` write the compounded OIS coupon
+a SECOND time, by hand, in its telescoped form, as test-only fixture code (D28). **It must never become production
+maths and it is commented to say so at length.** `PRINCIPLES.md` §2 is explicit that the pricing maths declares no
+optimisation opportunity — "a compounded coupon is the product loop of the definition" — and
+`maths/instrument/coupon.hpp` says the same in its own header. The identity here is a general fact about a scan
+whose step multiplies by a ratio of consecutive terms, which §2 names as exactly the kind of fact the engine is
+entitled to hold; when the recurrence rule kind of §2a exists, this fixture becomes redundant and should be deleted
+rather than kept as a fast path.
+
+The new file is deliberately NOT named `*_e0.cpp`, although `src/fixtures/compare_ois_e0.cpp`, the file it
+parallels, is: `PRINCIPLES.md` §4a retires that convention and `CLAUDE.md` says in terms "do not add new files to
+that convention". The consequence is handled rather than ignored — every COUNT this spike reports is structural and
+cannot move under contraction (an implicit block is one tape node and its residual sub-program is recorded once, so
+the tape does not depend on how many Newton steps the record-time solve takes), and every VALUE is compared by
+tolerance.
+
+### 2. The identity, and its precondition — checked, not assumed
+
+For the plain observation method the projected observation days tile the observation period and each day's
+compounding weight w_i is its own forward's accrual tau_rate_i, both being the same calendar-day count over the
+same basis. Then `1 + f_i·w_i = DF(t_rate_i)/DF(t_next_i)` and the product telescopes to
+`DF(t_rate_first)/DF(t_next_last)`. `spike::telescopes()` checks that per coupon on the tables — at least one
+projected day, `weight` bitwise equal to `tau_rate`, and `t_next_i == t_rate_{i+1}` — and a coupon that fails it
+falls back to the engine's own product loop, so a book that does not telescope measures zero prize rather than a
+wrong number.
+
+Measured on the `compare_ois` fixture at sixteen calibration instruments and sixteen book trades (D64): **381
+compounded coupons carrying 94,942 projected observation days, of which 381 satisfy the precondition exactly** —
+none falls back. The calibration side alone is **49,091 observation days across 394 coupons, of which 197 are the
+compounded float coupons D71 counts**; the book is **45,851 observation days**.
+
+**The identity holds at 106 significand bits.** Evaluated through `epykos::Wide` (D72), the naive and telescoped par
+rates of all sixteen calibration instruments agree to a worst **4.654e-30** relative. The hand-written form is the
+same function.
+
+### 3. The harness is neutral, which is what makes the telescoped column mean anything
+
+`spike::record_compare_ois_spike(s, Form::naive)` is `fixtures::record_compare_ois` — the same CurveSet, the same
+discount-factor memo, the same passes. Gated: identical tape node counts recorded and after the passes, and worst
+relative value difference **0** on the knots, the per-trade PVs and the book total (six calibration instruments and
+eight book trades, D64). So the telescoped column below differs from the naive one in the coupon form and in
+nothing else.
+
+**The two forms agree on the outputs** (six calibration instruments, eight book trades, D64): O1 knots
+**4.673e-14**, O2 book PV **6.092e-15** relative to a 1.261e+06 book, O3 ladder **1.228e-15** relative to its own
+infinity norm. `PRINCIPLES.md` §4's operative contract — verified identities and path-to-path agreement within a
+loose tolerance — is what these are held to; nothing here is bitwise.
+
+### 4. The structural prize, and where the 250:1 goes
+
+Fingerprint `d448afd70180`, `release` (Apple clang 21, `-O3 -march=x86-64-v3 -fno-math-errno`), `compare_ois` at
+sixteen calibration instruments and sixteen book trades (D64). Counts are deterministic and load-independent.
+
+| | naive | telescoped | naive/telescoped |
+|---|---|---|---|
+| observation days recorded (calibration) | 49,091 | 49,091 | 1.000x |
+| observation days recorded (book) | 45,851 | 45,851 | 1.000x |
+| **tape nodes recorded** | **1,020,583** | **6,713** | **152.03x** |
+| **tape nodes after the E0 passes** | **81,321** | **1,313** | **61.94x** |
+| IR values | 50,962 | 806 | 63.23x |
+| IR domains | 30 | 21 | 1.43x |
+| IR scan domains | 3 | 2 | 1.50x |
+| **IR scan rows** | **9,946** | **18** | **552.56x** |
+| IR literals | 3 | 3 | 1.00x |
+| IR columns / column rows | 8 / 20,693 | 5 / 506 | 1.60x / 40.90x |
+| IR gathers / gather rows | 20 / 50,854 | 15 / 949 | 1.33x / 53.59x |
+| IR segments / segment members | 15 / 40,381 | 10 / 667 | 1.50x / 60.54x |
+| **IR steps x rows (the whole program)** | **80,938** | **1,182** | **68.48x** |
+| residual slice values | 50,359 | 387 | 130.13x |
+| residual slice domains | 28 | 20 | 1.40x |
+| **residual slice steps x rows (what the solve iterates)** | **80,319** | **563** | **142.66x** |
+| residual slice scan rows | 9,946 | 18 | 552.56x |
+| record + passes, seconds | 0.93 | 0.010 | ~95x |
+
+**Where the 250:1 goes, in one sentence: about 9.5x of it is already being shared away before the optimiser is ever
+asked, and the rest of it is real.** The 94,942 recorded observation days of the whole fixture collapse to **9,946
+IR scan rows** — because the sixteen calibration instruments sit on ONE annual grid running out to forty years, so
+their daily compounding steps are overwhelmingly the same steps and `cse` merges them (9,946 is about the number of
+distinct business days in forty years, which is the right answer for a fixture whose longest instrument is 40Y).
+The E0 passes therefore take the naive form down 12.5x (1,020,583 to 81,321) and the telescoped form down only 5.1x
+(6,713 to 1,313), which is exactly why the recorded 152x becomes 62x on surviving nodes. **What is left after that
+is not small**: the compounding scan itself collapses 552x, the work the calibration solve iterates collapses
+142.7x, and the whole program's step count collapses 68.5x.
+
+### 4b. Stage A, partially: what the compounding scan is a share of, and what was NOT measured
+
+The brief asked for Stage A "if it is cheap to extend". Recording Stage A TWICE is not cheap: `record_stage_a` is
+one monolithic function that prices four curves, deposits, SR3 futures and a multi-currency book, and a second copy
+of it is a bigger change than a spike should make. So Stage A is recorded ONCE, as the engine writes it, and
+`tests/spike/telescoping_stage_a_test.cpp` reports how much of the resulting program IS the daily compounding.
+**The Stage A end-to-end prize is therefore NOT measured and is not claimed.**
+
+Measured (fingerprint `d448afd70180`, `release`), Stage A at two hundred book trades and one scenario lane (D64) —
+a reduced book on purpose, because the compounding is overwhelmingly on the calibration side and does not shrink
+with the book:
+
+* 70 quotes across 4 curves; the calibration instruments carry **62,022 projected observation days across 1,487
+  coupons, 258 of them compounded**; the book carries **191,707 more**; **220,820 tape nodes after the E0 passes**.
+* whole program: **149,056 IR values, 211,553 steps x rows, of which 54,847 (25.93%) are the 5 scan domains' 54,847
+  rows**.
+* residual slices (what the four calibration solves iterate): **156,399 steps x rows, of which 15,880 (10.15%) are
+  the 8 scan domains' 15,880 rows**.
+
+**Read those shares as a floor, not as the prize.** On `compare_ois` the scan is 9,946 of 80,938 steps x rows —
+12.29% — and telescoping still takes the whole program from 80,938 to 1,182, because the discount factors, gathers,
+columns and segments that existed only to feed the scan go with it. The scan's own share understated the measured
+prize there by about a factor of eight. Whether that multiplier transfers to Stage A is exactly what is not
+measured: Stage A's non-compounding content (deposits, futures, term-rate and averaged coupons, four curves, a
+multi-currency book) is a much larger fraction of it than `compare_ois`'s is, and an averaged RFR coupon **does not
+telescope at all** (`maths/instrument/tables.hpp` says so: "it does not telescope: one forward per day"). The
+honest statement is: on Stage A, at least a quarter of the whole-program interpreter's work and at least a tenth of
+the calibration solves' work is literally the compounding scan, and the true figure is larger by an unmeasured
+amount.
+
+### 5. Wall clock — the number that was actually asked for
+
+**Not taken at the time this entry was first written**, and D9 is why: the machine was under two other
+sessions' test and mutation sweeps throughout (1-minute load 7.3 to 14.7 against `bench/run.sh`'s refusal bar of
+cores/2 = 8.0, with four to six other EpykosEngine processes at 100% CPU), and a contended number is worthless.
+`bench/spike/telescoping_bench.cpp` is the instrument: BM_Evaluate, BM_Calibrate, BM_LadderChord / Warm / Cold,
+BM_Build and BM_Record, registered once per coupon form on the same fixture, at sixteen and sixty-four book trades.
+A follow-up commit on this branch fills this section in.
+
+
+### 6. Accuracy: the telescoped form is the more accurate one, by about 40x to 53x
+
+`PRINCIPLES.md` §4 demotes `epykos::Wide` to a diagnostic and keeps it for exactly this question — two
+algebraically equal forms, and which is closer to truth. Both forms are evaluated at the SAME fixed generating
+curve (no solve, so only the coupon arithmetic differs), in one translation unit under one set of flags, so the
+comparison between the forms is fair; the absolute figures are properties of those flags (`release`, Apple clang
+21, `-O3 -march=x86-64-v3 -fno-math-errno`, contraction at the compiler's default) and are quoted with them.
+Fixture: `compare_ois` at sixteen calibration instruments and sixteen book trades (D64).
+
+| quantity | naive, worst relative | telescoped, worst relative | naive/telescoped | closer to truth |
+|---|---|---|---|---|
+| calibration par rate | 1.035e-13 | 2.606e-15 | **39.7x** | telescoped 16 of 16 |
+| per-trade book PV | 1.107e-11 | 2.070e-13 | **53.5x** | telescoped 16 of 16 |
+| book PV total | 9.255e-14 | 2.539e-15 | **36.4x** | telescoped |
+
+This is the first measurement in this repository of a rewrite being MORE accurate than the maths it replaces, and
+it is the case `PRINCIPLES.md` §6 point 4 named as a defect of the old contract ("the oracle is the naive `double`
+path, so a rewrite that is MORE accurate fails the gate"). Under the retired bitwise contract, telescoping would
+have been rejected for being right.
+
+### 7. What this says about the rebuild
+
+1. **The prize is real and it is large, and it is NOT 250x.** State it as measured: 62x in surviving tape nodes,
+   68x in whole-program interpreter work, 143x in the work the calibration solve iterates, and the wall-clock
+   figures of §5. Anyone quoting 250:1 from here on is quoting a recorded count.
+2. **It is concentrated where `PRINCIPLES.md` §6 points 5 and 6 say the cost model cannot see.** The whole-program
+   `exec::Interpreter` is the one thing the cost model does model, and on this fixture it is the SMALLER half of
+   the prize; the residual slice the Newton solve iterates — which `estimate_program` does not price — is where the
+   142.7x sits.
+3. **The rule this needs is the recurrence rule kind of §2a, not a term rewrite.** 9,946 scan rows cannot be
+   collapsed by applying a cancellation identity 9,945 times, and the scan detection that would feed such a rule
+   already exists (D41). The IR already labels the thing: three scan domains, 9,946 rows.
+4. **Nothing in this entry licenses landing the hand-written form.** It is a measuring instrument and is named
+   `spike` in every file it occupies.
+
+### 8. What is gated in CI
+
+`tests/spike/telescoping_prize_test.cpp` (ctest `spike_telescoping_prize_test`, 5 tests, ~2.5 s): the precondition
+holds on every compounded coupon of the fixture; the spike's naive column reproduces `record_compare_ois`; the two
+forms agree on O1, O2 and O3; the identity holds at 106 bits and the telescoped form is not materially less
+accurate than the naive one; and the structural table is printed with a floor assertion that the compounding scan
+actually collapsed. `tests/spike/telescoping_stage_a_test.cpp` (ctest `spike_telescoping_stage_a_test`, 1 test,
+~3.2 s) prints §4b's shares. `bench/spike/telescoping_bench.cpp` is built and never run by CI, and is deliberately
+given no `bench/results/` baseline — a spike's hand-written maths has no business gating the engine's performance
+(D34).
+
+**This branch also carries merges of `mx/head-to-head` (D71) and `p0/oracle` (D72)**, because the `compare_ois`
+fixture and `epykos::Wide` live there and the spike needs both. Neither is modified. The only conflicts were the
+two documents' append points.

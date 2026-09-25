@@ -234,3 +234,33 @@ use on this path is not established and should be checked in the window before a
 quoted.
 
 Then the ratio — and §4 items 1, 3 and 5 go in front of it, not after it.
+
+## 7. Addendum: §4 item 1's "about 250:1" has now been measured, and it is not 250:1 (D74)
+
+Item 1 above says the ratio of work on the compounded coupon is "about 250:1 on the calibration side", and warns in
+the same breath that the book's 45,851 recorded days are "largely shared away by the E0 passes". Both halves were
+right, and the warning applies to the calibration side too. `spike/telescoping-prize` recorded this same fixture
+TWICE — once as the engine writes the coupon, once with the coupon hand-telescoped as test-only fixture code — and
+measured the difference end to end. D74 has the full table; the summary, at sixteen calibration instruments and
+sixteen book trades (D64), fingerprint `d448afd70180`:
+
+| | naive | telescoped | ratio |
+|---|---|---|---|
+| tape nodes recorded | 1,020,583 | 6,713 | 152.03x |
+| tape nodes after the E0 passes | 81,321 | 1,313 | **61.94x** |
+| IR steps x rows, whole program | 80,938 | 1,182 | **68.48x** |
+| IR steps x rows, the residual slice the solve iterates | 80,319 | 563 | **142.66x** |
+| IR scan rows (the compounding itself) | 9,946 | 18 | 552.56x |
+
+The 250:1 loses about 9.5x before any optimiser is involved: the fixture's 94,942 recorded observation days are
+already only 9,946 distinct IR scan rows, because sixteen instruments on one annual grid out to forty years share
+their daily steps and `cse` merges them. What is left is still large. **Quote the measured figures, not 250:1.**
+
+The other engine's side of the ratio is unaffected — it is still given 197 telescoped coupon-periods, and item 1's
+asymmetry still runs against this engine. What has changed is the size of it.
+
+One thing the comparison could not have shown, and this measurement did: against ground truth at 106 significand
+bits (`epykos::Wide`, D72), **the telescoped form is 39.7x to 53.5x MORE accurate than the daily product loop** on
+this fixture, closer to truth on 16 of 16 calibration par rates and 16 of 16 trade PVs. The two engines agreeing to
+2.7e-13 on the ladder (§5) is therefore not two equally good answers: it is one path carrying about fifty times the
+rounding of the other.

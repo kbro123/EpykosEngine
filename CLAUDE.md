@@ -58,7 +58,9 @@ protocol it is 1.0196x on both the wall clock and the profile-table sum), and th
 (the per-block residual solves inside it do build their own, from hardcoded local options no caller can reach,
 on slice programs no rule is applied to). Multiply by the share and the programme is over: the whole-program
 `exec::Interpreter` is 5.20% of an O4 scenario-lane batch and **2.513% of the whole Stage A problem**, so a
-PERFECT plan-level cost model is worth **0.080% of Stage A's wall clock**. The search is also
+PERFECT plan-level cost model is worth **0.166% of an O4 batch** (measured x measured) and an estimated
+**0.080% of Stage A's wall clock** (the whole-problem split scales measured 64-lane batches linearly, so it is
+arithmetic on a measurement, not a measurement). The search is also
 blind to the 24.66% of the problem that is the reverse ladder, because `estimate_program` models the interpreter
 and nothing else. D68's recommendation, for the owner: **stop fitting; change the gate.** **D52's open
 `adjoint::` crash is closed

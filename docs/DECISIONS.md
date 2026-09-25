@@ -3130,16 +3130,24 @@ interpreters of §2 are counted in the solve cost, where they belong, because no
   * The whole-program interpreter's share of one O4 scenario-lane batch — `BM_Evaluate` over `BM_Run`, the
     interpreter alone over the whole lane including its block solves — is **8.91%** at B=1, **5.15%** at B=8 and
     **5.20%** at B=64. The other ~95% is the calibration solves, which no M4 rule touches.
-  * Its share of the O3 reverse risk ladder is **0%** (§2).
-  * Over the whole Stage A problem as `PROBLEM.md` §4 defines it — 1,000 O4 scenario lanes, a 2,043-output O3
-    ladder, one record and build — the split is O4 15,789.6 ms (48.36%), O3 reverse ladder 8,052.6 ms (24.66%),
+  * Its share of the O3 reverse risk ladder is **0%** (§2). Those three bullets are measured ratios of committed
+    benchmark medians, nothing else.
+  * **Estimated, and labelled as an estimate per CLAUDE.md**, because the committed benchmarks measure 64-lane
+    batches and `PROBLEM.md` §4's Stage A is bigger than one batch: scaling each measured batch linearly to the
+    problem's own size — 1,000 O4 scenario lanes, a 2,043-output O3 ladder (`RESUME.md` §5's own count for the
+    full ladder), one record and build — gives O4 15,789.6 ms (48.36%), O3 reverse ladder 8,052.6 ms (24.66%),
     record plus build 8,807.0 ms (26.97%), total 32,649.2 ms, of which the whole-program `exec::Interpreter` is
-    **820.6 ms, or 2.513%**.
+    **820.6 ms, or 2.513%**. Linear is the right scaling for how both are actually driven — `fixtures::run_lanes`
+    and `fixtures::ladder` both chunk by `max_batch` and repeat the same work per chunk — but it is arithmetic on
+    top of a measurement, not a measurement, and the true figures will be a few percent higher because the last
+    chunk of each is partial (16 chunks of O4 rather than 15.6, 32 of the ladder rather than 31.9).
 
-Multiply the ceiling by the share. The plan stage is worth 3.195% of `exec::Interpreter`'s own time at Stage A
-B=64 lane_tile 8 (the 1.0330x of §3, expressed as a saving). That is **0.166% of one O4 lane batch** and
-**0.080% of the whole Stage A problem's wall clock**. A perfect plan-level cost model — zero error, not the
-<25% target, zero — buys eight hundredths of one percent of this problem.
+Multiply the ceiling by the share. The plan stage is worth 3.195% of the whole-program interpreter's own time at
+Stage A B=64 lane_tile 8 (the 1.0330x of §3, expressed as a saving). That is **0.166% of one O4 lane batch** —
+two measured quantities multiplied, no extrapolation anywhere in it — and, on the estimated whole-problem split
+above, **about 0.080% of the whole Stage A problem's wall clock**. A perfect plan-level cost model — zero error,
+not the <25% target, zero — buys two tenths of one percent of an O4 batch and under a tenth of one percent of
+the problem. Nothing in the recommendation below turns on the second figure's precision: the first is enough.
 
 **Correction to a number that has been circulating.** The brief that commissioned this work read D55's 9.56% as
 "`exec::Interpreter` is 9.56% of Stage A's wall clock". It is not that quantity.

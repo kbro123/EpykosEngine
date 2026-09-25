@@ -729,15 +729,19 @@
    "O3_reverse_ladder_2043_outputs": 8052.564861091014,
    "record_plus_build": 8806.977832573466,
    "total": 32649.176217701097,
-   "exec_Interpreter_within_it": 820.6011920265155
+   "exec_Interpreter_within_it": 820.6011920265155,
+   "ESTIMATE": "Labelled an estimate per CLAUDE.md. The committed benchmarks measure 64-lane batches; these figures scale each linearly to PROBLEM.md section 4's own size (1,000 O4 lanes, 2,043 ladder outputs). Linear is right for how run_lanes and ladder chunk by max_batch, but the true totals are a few percent higher because the last chunk of each is partial (16 O4 chunks not 15.6, 32 ladder chunks not 31.9)."
   },
-  "exec_interpreter_share_of_the_whole_stage_a_problem": 0.02513390189555894
+  "exec_interpreter_share_of_the_whole_stage_a_problem": 0.02513390189555894,
+  "exec_interpreter_share_note": "'exec::Interpreter' here is the WHOLE-PROGRAM one (ImplicitProgram's im.interp): the object the three plan knobs configure and the only one optimise::estimate_program models. The per-block residual solves build their own exec::Interpreter (solver::ResidualProgram::interp_) from local hardcoded options no caller reaches, on slice programs no rule touches; they are counted in the solve cost."
  },
  "ceiling_multiplied_out": {
   "stage_a_plan_dynamic_range_B64_L8": 1.033,
   "saving_as_a_fraction_of_exec_Interpreter_own_time": 0.031945788964181876,
   "as_a_fraction_of_one_O4_lane_batch": 0.0016602508515684254,
-  "as_a_fraction_of_the_whole_stage_a_problem": 0.0008029223258019767
+  "as_a_fraction_of_the_whole_stage_a_problem": 0.0008029223258019767,
+  "as_a_fraction_of_one_O4_lane_batch_NOTE": "Two measured quantities multiplied; no extrapolation.",
+  "as_a_fraction_of_the_whole_stage_a_problem_NOTE": "Rests on the extrapolated whole-problem split above; an estimate."
  },
  "d63_reconciliation": {
   "note": "D63 section 3 recorded Stage A fuse_reductions off at 1.066x (1583.5 -> 1687.5 us). Re-run here with D63's own protocol -- `profile` preset, one process per setting, 2 repetitions, alternating -- both quantities read out of the same processes.",

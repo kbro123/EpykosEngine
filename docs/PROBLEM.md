@@ -136,8 +136,10 @@ not reproduce), and **exactly 1.000x on the adjoint path, by construction** — 
 fuse/inline knob and `solver::ImplicitProgram::adjoint` calls `im.adj->run` and never `im.interp->run`, so the O3
 risk ladder never runs the whole-program `exec::Interpreter` (its per-block residual solves build their own, from
 hardcoded local options, on slice programs no rule touches). That whole-program `exec::Interpreter` is 5.20% of
-one O4 scenario-lane batch and **2.513% of the whole Stage A problem**, so a cost model with ZERO error is worth
-**0.080% of Stage A's wall clock**. Separately,
+one O4 scenario-lane batch and an estimated **2.513% of the whole Stage A problem** (that split scales measured
+64-lane batches linearly to §4's own size, so it is labelled an estimate), which puts a cost model with ZERO
+error at **0.166% of an O4 batch** — two measured quantities multiplied — and about **0.080% of Stage A's wall
+clock**. Separately,
 `optimise::estimate_program` models the interpreter and nothing else, so the search cannot see the **24.66%** of
 the problem that is the reverse ladder — the one part where a real win (the catalogue's 1.11x-1.16x, D55) has
 already been measured. **The cross-stage-win clause above, as written, asks the search for something this tape

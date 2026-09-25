@@ -583,6 +583,18 @@ Correctness gates:
   preset and selected one per process by `EPYKOS_MUTANT`; `scripts/mutation_test.sh` runs the gates above once per
   registered mutant and fails if any survives — a survivor is a gap in the gates, never a job for a mutant-specific
   test (D32); the adjoint's mutants are caught by the adjoint gates, which are part of the harness's gate set (D33);
+- **error against truth** (P0/oracle, D72; `PRINCIPLES.md` §4): the gates above compare one `double` evaluation with
+  another, which says nothing about how far either is from the recorded expression's true value. `verify/oracle.hpp`
+  compares a `double` path with the SAME templated maths instantiated on `epykos::Wide` (`scalar/wide.hpp`), an
+  in-repo double-double carrying 106 significand bits against `double`'s 53 — an instantiation, never a second copy
+  of the maths (D3). `long double` is NOT the oracle (it is `double` on Apple arm64, one of CI's four jobs) but its
+  witness, skipped loudly where it cannot judge; a `static_assert` on the `Oracle` alias makes the degraded
+  configuration a compile error. Reporting is per output class, because `PRINCIPLES.md` §4 makes tolerances per class
+  and not global, and the harness returns NO verdict: the numbers belong in `PROBLEM.md` and are set from the
+  measurement rather than before it. `oracle_jacobian` is the sensitivity channel, a Richardson-extrapolated central
+  difference taken at 106 bits. Measured on `d448afd70180` (D72 §4): the naive path's valuation error is 1.792e-15 of
+  the D26 leg scale on the M1 book and 7.854e-14 to 1.616e-13 on Stage A, and its SENSITIVITY error is 62x and 656x
+  larger respectively;
 - **external oracles** (QuantLib and others) added per product, test-only.
 
 Performance gates: per machine+toolchain fingerprint; fail on > 1.25× self-regression or an absolute target miss. As

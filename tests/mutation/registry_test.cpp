@@ -89,6 +89,7 @@ const std::vector<std::string> documented = {
     "eg.refire_blocks_self_chain",
     "cost.pairing_unpriced",
     "plan_bridge.discards_group",
+    "oracle.error_in_double",
 };
 
 std::vector<std::string> registry_names() {

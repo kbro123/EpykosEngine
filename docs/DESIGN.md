@@ -219,6 +219,15 @@ the calibration residuals and the book, no discount factor computed twice.
 
 ## 6. Fusion rewrites
 
+> **Superseded in scope by `docs/PRINCIPLES.md` (2026-09-25).** §0 of that document records that all eight rewrites
+> below are *data-movement* rewrites and that not one of them can collapse a product, which is the failure M4's
+> post-mortem exists to prevent. They are **kept and demoted** (PRINCIPLES.md §7): still correct, still tested, worth
+> 1.73×–1.88× on a workload with that structure, no longer what the optimiser *is*. The algebraic layer that replaces
+> them as the optimiser's centre is designed in **`docs/TERM_REWRITING.md` (D73)** — a rewrite that replaces a *term*
+> rather than a whole `ir::Program`, e-classes over terms, an identity set over the existing twenty ops, and the
+> recurrence rule kind of PRINCIPLES.md §2a. That design is an interface only; nothing implements it yet, and the table
+> below is the pipeline as built.
+
 Applied in order. Each has an **exactness class**: *E0* bit-identical, *E1* ≤ 1 ulp per op (tolerance-gated; for a value
 that is a difference of terms, such as a swap PV, the tolerance is relative to the scale of the terms, D26).
 

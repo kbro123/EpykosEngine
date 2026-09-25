@@ -3282,3 +3282,210 @@ project, and they built this TU.
 `fdd07a5` ("fit at the lane width the interpreter really plans with", D63's own (d2) fix) is an ancestor of this
 package's base `581b8e9`, so it was present for every measurement here; the 0.994861 / 0.991029 above are
 post-`Lt`-fix figures and match D63 §4's own amended table, not D67's superseded one. Checked rather than assumed.
+
+## D73 — P1: a rewrite replaces a TERM, not a program; e-classes over terms; the identity set; and the recurrence kind of PRINCIPLES.md §2a turns out not to need any of it (2026-09-25)
+
+Implements `docs/PRINCIPLES.md` §8 items 2 and 3. **This entry records a DESIGN, not an
+implementation**: `docs/TERM_REWRITING.md`, six interface headers
+(`include/epykos/rewrite/{error_model,term,term_rule,recurrence}.hpp`,
+`include/epykos/optimise/{term_egraph,term_extract}.hpp`), one `.cpp` of three `to_string` tables
+(`src/rewrite/term_names.cpp`) so the enumerations are linkable, and one compile-and-shape gate
+(`tests/rewrite/term_interface_test.cpp`). No rule, no cost model and not `src/optimise/egraph.cpp`
+are touched. The point is to review the interface before roughly six thousand lines are written
+against it. `docs/TERM_REWRITING.md` is the document; this entry records the decisions and the
+findings.
+
+**1. What replaces `Proposal`.** A `rewrite::TermRewrite`: an e-class id plus a `TermExpr` — a small
+node arena whose operands may be other arena nodes, **e-classes the match bound** (pattern holes, so
+a rewrite reuses structure instead of copying it), an existing `ir::Slot` verbatim, or **new data**
+(`new_literals` / `new_columns` / `new_gathers` / `new_segments`). A term is defined as the sub-DAG
+rooted at one `Step` of one `Group`, denoting one scalar per ROW of that group's domain; the domain
+is the term's *anchor*, so a term is a row-indexed vector, not a scalar. Two consequences are
+recorded as contract rather than commentary: **a term rewrite applies to every row of its anchor
+domain** (that is what a domain IS), and **a rule can never rewrite a subset of rows** — a rewrite
+valid for only some rows must first split the domain, which is `r2.bucket_rows`' job at the program
+tier. The term layer therefore structurally cannot fragment the domain partition, which is the
+failure D65 measured (R2 without its floor: 10 domains to 19,624). Side conditions are row-universal
+and the IR can usually discharge them EXACTLY, because a Column is a `std::vector<double>` sitting in
+the Program; the price, stated, is that such a proof is about THIS RECORDING.
+
+**2. The `new_*` data vectors are a requirement, not a generality.** Discovered by working
+PRINCIPLES.md §2a through: the arithmetic-series closed form needs a per-row step index, which is a
+Column that does not exist yet. A replacement language that could only rearrange existing nodes could
+express exactly one of §2a's four classes.
+
+**3. E-classes over terms, and which of D62's mechanisms survive.** The anchor domain is PART OF A
+NODE'S IDENTITY (two structurally identical terms in different domains denote different row vectors
+and must not be unioned; `anchors_consistent()` is the gate). Gathers are an explicit index-map
+term-former: congruence handles `Gath(g,t) = Gath(g,t')`, while `Gath(g,f(t)) = f(Gath(g,t))` is a
+RULE (`r4a` generalised) and is the bridge every cross-domain identity crosses. Of D62: the
+**application memo SURVIVES, re-keyed** from (program node, rule, site) to **(e-NODE, rule,
+binding)** — e-nodes are immutable under hash-consing while CLASSES merge, so a class-keyed memo
+would go unsound on the first union; bindings are canonicalised at lookup, so a merge costs redundant
+work, never wrong work; still sound for exactly D62's reason (rule purity, which is why `TermRule` is
+const and the DRIVER interns, not the rule). **Representative-only matching becomes UNNECESSARY**
+(hash-consing leaves no congruent duplicate to skip), and with it D49's flagged per-node plan-tier
+limitation at this tier. **`RefirePolicy::NoFreshCrossRule` becomes UNNECESSARY and should be deleted
+here**: it existed solely to bound D62's cause (B), and the completeness D62 booked away ("any
+genuine optimum that needs two different structural rewrites composed after both have already fired
+once is no longer reachable at all") is RECOVERED, because k independent edits are k choice points,
+O(k) nodes, not 2^k clones. **`PipelineOrderedPlans` survives unchanged in the PLAN tier, which this
+design does not touch** — see finding 11.
+
+**Why this is tractable at all, and it is the headline**: a term e-graph over the Stage A tape is NOT
+517,036 nodes. `ir::infer` already collapses those to 67 domains (80 after R2/R1) of a few Steps
+each, so the term graph is on the order of 10^3 nodes. The 517,036 : 67 collapse IS the sharing and
+it happens before the optimiser is reached. (The collapse is measured, D35/D44/D65; the 10^3 is an
+estimate and is labelled as one.)
+
+**4. The identity set: 32 named axioms (`rewrite::Axiom`), three exactness buckets.** Ten
+unconditionally exact in IEEE-754 (`neg_neg`, `sub_as_add_neg`, `neg_sub`, `mul_one`, `div_one`,
+`select_same_arms`, `select_push_unary`, commutativity of Add/Mul/CmpEq — the last already asserted
+bitwise by `op_is_commutative` and canonicalised by D61 — plus both gather commutations, which are
+exact because a gather RE-INDEXES rather than computes, `r4a`'s own E0 declaration being the
+precedent). Eleven exact only once a row-universal side
+condition is discharged, each naming its obligation — notably **`add(x,0) = x` is NOT unconditionally
+E0**: it fails at x = -0, and the engine can observe the difference through `Recip`, `Div` and
+`Sqrt` (comparisons cannot, which is why it is easy to miss). The rest are identities in R and not in
+float (E1), each carrying an `ErrorTerm`. Two of them — `fma_contract` and `mul_recip_as_div` — are
+faster AND more accurate, i.e. inadmissible under the M1-M4 contract and preferable under
+PRINCIPLES.md §4; `axiom_improves_accuracy` exists, and is gated, so that demotion cannot be quietly
+reverted.
+
+**5. `Op::Sum` and `Op::Affine` get NO associative-commutative matching, and the flag defaults off
+under a test.** Three independent reasons: (i) Sum is a fixed-arity LEFT FOLD in operand order, so
+reordering changes rounding — "AC on Sum" is not one E0 axiom but an unbounded family of E1 rewrites
+with unbounded error; (ii) **D61 decided this already in the other direction**, canonicalising a
+commutative STEP's operands and deliberately not a Sum's member order, and AC matching would silently
+reverse that and reopen `task_919ea449`'s class of defect; (iii) Stage A's leg sums have hundreds of
+members and n! orderings admit no bound. The one Sum rewrite allowed is `sum_factor_common`
+(`Sum(c*x_i) = c*Sum(x_i)`), which removes n multiplies and reorders nothing.
+
+**6. The recurrence kind of §2a is NOT a term rule, and this is a finding.** A scan domain's rows are
+the STEPS of its chains (D41, chain-major); a closed form has one value per CHAIN. Collapsing a
+recurrence therefore deletes rows, changes a row count and re-points gathers — a DOMAIN-level edit,
+the kind `r5`/`r7` make, and exactly what a term rewrite is defined not to do. So it slots into the
+EXISTING `rewrite::Rule` interface, and PRINCIPLES.md §6 item 1's combinatorial objection does not
+apply to it: **one site per scan domain, five scan domains on the whole Stage A tape.** Sequencing
+consequence, for the owner: PRINCIPLES.md §8 puts term rewriting (item 2) before telescoping (item
+4), and item 4 does not depend on item 2. Telescoping can be attempted FIRST, as one rule with a
+classifier, and would then be the evidence that decides whether the term layer earns its six thousand
+lines.
+
+**7. A recurrence match is PROVED by exact checks on tables the Program already holds.** Four
+obligations, every one decidable without sampling or numerics: (P1) step shape; (P2) the INDEX
+CONDITION `gathers[den].index[r] == gathers[num].index[r+1]` inside every chain — an equality of
+`int32_t` VALUE IDS, which proves the two discount factors are literally the same recorded value and
+cancel exactly in R; (P3) the COEFFICIENT CONDITION, a bitwise comparison of the `ObsDay::weight` and
+`ObsDay::tau_rate` Columns; (P4) liveness, that nothing outside the domain reads an intermediate row.
+`RecurrenceProof` carries each as its own boolean plus a written `account`, so D53's "state whether
+your deliverable actually fires" is answerable as "it did not, and here is the obligation that
+failed". (P3) is not a formality: **the two-day-lookback blueprint passes (P2) and fails (P3)**, so a
+matcher checking only index structure would emit a wrong answer (that blueprint is not drawn by the
+Stage A trade mix, so it is a correctness case and the classifier's best negative test rather than a
+share of this book), and **the lockout blueprint
+telescopes on a PREFIX** (the frozen rate dates repeat, breaking (P2) on the tail), which is why
+`prefix_steps` exists. Two closures are emitted: `ChainFinal` (needs (P4); the 250:1 form) and
+`PerRow` (same row count, a divide instead of a multiply, but PARALLEL instead of D41's sequential
+waves) — which pays is the cost model's question, so the rule offers both.
+
+**Also found while checking (P3): `maths/instrument/tables.hpp`'s comment is over-broad.** It says
+"lookback / observation shift / lockout: the span and the weight differ, and it does not [telescope]".
+Reading `src/conventions/rfr.cpp`, `ObservationShift` shifts `obs_start` and `obs_end` TOGETHER and
+the loop then takes both the weight and the rate's own span from the same shifted business days, so
+`w_k == tau_k` still holds and it DOES telescope; it is `Lookback` that breaks it, moving the rate
+date independently of the accrual day. Worth 10 points of Stage A's trade mix that a reader of the
+comment would write off. Recorded as a code-reading claim, not a measurement; the check is finding 14
+(a). The comment is left unedited — this package changes no maths.
+
+**8. Error: ulps do not compose; adjoint-weighted absolute perturbations do.** An ulp is not a scale,
+and even relative error is amplified without bound by cancellation — Stage A's own recorded forward
+rate is `(DF_s/DF_e - 1)/tau` with the ratio within ~1e-4 of 1, so that subtraction multiplies
+incoming error by ~1e4. The model adopted: each rewrite injects an absolute perturbation at its term,
+and `d(output) = sum |d(o)/d(t)| * |dt|`, which composes because it is linear and is nearly free HERE
+because `d(o)/d(t)` is what the mechanical adjoint already computes (M2, D31). Stated as sharply as
+possible in both the header and the document: **this is an ESTIMATE and the SEARCH heuristic; the
+GATE is PRINCIPLES.md §4's oracle, run once on the extracted candidate.** Two known invalidities are
+handled explicitly rather than hoped away (across a `Select`, where the first-order effect is zero
+and the real effect is the arm difference; and where a term's value can vanish, so relative error is
+undefined). Tolerances are per output class (`Valuation`/`Sensitivity`/`Diagnostic`), so extraction is
+**constrained single objective** — minimise cost subject to error <= budget — not a Pareto search;
+`ErrorBudget::exact_only()` is the default and reproduces the M1-M4 contract exactly, which is how
+this can land without invalidating M1-M3. Extraction prices the WHOLE lowered, DCE'd program, not the
+term, because a telescope's large win is a dead-code consequence in a different domain (about 88 of
+91 discount factors die, and `exp` was 54% of the M1 book's B=64 time, D27).
+
+**9. Saturation bounds, and what completeness they cost, in D62's style.** Four mechanisms replace
+`RefirePolicy` at this tier: no AC on Sum/Affine (gives up pairwise/Kahan re-summation, a real
+accuracy improvement now unreachable); bounded pattern depth 4 (a deeper rule must be split in two);
+per-rule banning with exponential backoff, egg's mechanism (**this is what D65's R2 needed and did not
+have** — at 10,111 sites it would have been banned in round 1 with a logged reason instead of running
+700 s and blowing the bound; gives up confluence, mitigated by logging every ban so "found nothing"
+and "was banned from looking" stay distinguishable); and per-group scoping with a quarantined,
+single-reader-only cross-domain phase (gives up identities spanning three domains through shared
+gathers — and since CSE shares discount factors by construction, this **may block the very shape the
+telescope needs**, which is a second independent reason finding 6 matters).
+
+**10. Migration: the seven layout rules are WRAPPED, not ported.** Three tiers — TERM (new), PROGRAM
+(kept, for domain-restructuring rules), PLAN (kept, untouched) — with the term tier as a SUB-SOLVER
+that extracts once per error tier and contributes O(tiers) program nodes, not O(matches). R1, R2,
+R4b, R5 and R7 stay on `rewrite::Rule` (they change the domain partition, which is not a term
+rewrite); R6 stays in the plan tier; R3 and R4a ARE term rewrites and should move later. Cost of
+wrapping, stated: R3/R4a exist twice until they move (harmless — the program tier hash-conses on
+`ir::serialize` — but wasteful and a confusing log, so the driver should disable the program-tier
+copy), and the program tier keeps `NoFreshCrossRule` and its completeness loss for the demoted layout
+rules, which is the right trade for rules PRINCIPLES.md §7 has demoted.
+
+**11. What this design does NOT fix, recorded so it is deliberate.** The plan tier is still a
+whole-`PlanAnnotations`-valued e-graph with D62's 2^k lattice (105,977 plan nodes / 10.5 GiB on 60
+trades), and term-level rewriting does nothing for it because a plan is not a term. Given D68 (the
+whole plan stage is 1.027x-1.042x on Stage A and a PERFECT plan-level cost model is worth ~0.08% of
+its wall clock), the recommendation is not to fix it.
+
+**12. THE LARGEST FINDING: the 250:1 lives where no rule is applied.** Measured in this repository,
+this session. `src/solver/residual.cpp:73-77` builds `program_ = ir::infer(slice_.tape)` and
+constructs an `exec::Interpreter` and an `adjoint::Adjoint` on it DIRECTLY — no rewrite pipeline, no
+e-graph, no cost model, no plan. D68 says the same from the other end ("slice programs no rule is
+applied to"). The calibration solve is ~48% of Stage A (PRINCIPLES.md §6 item 6), its instruments are
+OIS swaps whose residuals are exactly the compounded-coupon product loops, and PRINCIPLES.md §0 puts
+telescoping at "about 250:1 **on the calibration side**". So **the 250:1 cannot be realised by any
+amount of term-rewriting work, because the programs it would apply to never pass through the
+optimiser.** The fix is small (`ResidualProgram`'s constructor takes an optional optimisation pass)
+and is IN SCOPE under PRINCIPLES.md §3, which excludes solver POLICY — Jacobian policy, iteration
+strategy, convergence criteria — and explicitly includes "the arithmetic the engine was handed":
+rewriting the residual's EXPRESSION is arithmetic, not policy, and leaves the iterates and the
+convergence criterion untouched.
+
+**13. What PRINCIPLES.md §2's discover-only stance over a FROZEN op set costs, plainly, as asked.**
+It works, for the thing that matters: the telescope needs only `Div`, its proof is exact index
+arithmetic, and it is a general fact about scans with no instrument knowledge in it — §2's
+form/declaration boundary holds cleanly and (P2)/(P3) are that boundary made mechanical. The bill:
+**three of §2a's four recurrence classes lose their asymptotic win.** Geometric and
+linear-constant-coefficient need `r^n`, which must be spelled `exp(n*log r)` — legal, but E1, needing
+a positivity proof, and trading n multiplies for one `exp` and one `log`, which on the measured libm
+cost breaks even near n = 10 and is a small constant factor beyond it. A handful of identities are
+inexpressible for want of `Abs` (`sqrt(x*x)`) and `Log1p` (the `(DF_s/DF_e - 1)` cancellation, tier 2
+anyway). Twenty-eight of the thirty-two axioms need no op the engine lacks. If the owner ever
+reconsiders, the single highest-value addition is `Pow`, which would move the two exp/log classes
+from constant-factor to asymptotic. Noted for a future decision; not requested here.
+
+**14. The cheapest experiments, ranked, because this package deliberately measures nothing.** (a) One
+afternoon, existing tooling: over Stage A's five scan domains, print `shape_string`, check (P2)'s
+index equality and report the longest prefix it holds on, bitwise-compare the coefficient columns,
+scan for reads of non-final rows, and report each domain's share of measured wall clock from the
+existing `EPYKOS_EXEC_PROFILE` table. Four booleans and a number per domain, and it answers — before
+any interface is written — whether PRINCIPLES.md §8 item 4's worked example is available at all and
+whether it is worth anything on this fixture. (b) Hours: `ir::to_string` one `ResidualProgram`'s
+`program_` for the USD SOFR block and confirm finding 12. (c) Hand-construct the telescoped program
+once by editing the tape, price it with `estimate_program`, then run it — two numbers that separate
+"the cost model cannot see the win" from "the plumbing of finding 12 is the blocker". Doing (a) and
+(b) before implementing anything is this package's own recommendation.
+
+**Gates.** `tests/rewrite/term_interface_test.cpp`: every header compiles under every preset and both
+compilers (D46's lesson applies to headers nobody has instantiated as much as to any other); every
+`Axiom` and `RecurrenceClass` has a distinct name, so the enum and `TERM_REWRITING.md` §3's table
+cannot drift apart silently; the exactness buckets partition; `axiom_improves_accuracy` is non-empty
+(if it ever empties, §4's demotion of bit-identity has been reverted); the default budget is
+exact-only, `ac_matching_on_sum` is off and `max_pattern_depth <= 4`. No mutant is registered: there
+is no behaviour to mutate, and CLAUDE.md's mutation requirement attaches to a rewrite, which this
+package does not ship.

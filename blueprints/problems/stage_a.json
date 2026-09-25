@@ -1,0 +1,90 @@
+{
+  "meta": {
+    "title": "Stage A of the desk problem: USD + EUR, one tape producing O1-O4 and O6 (PROBLEM.md section 4 Stage A, section 5; D35, D36)",
+    "description": "DEFINITIONS ONLY (D36): which curves are calibrated and in which slot order, the scheme variants the SOFR curve is also recorded on, the plausible levels the synthetic quotes and fixings are generated around, the trade-type mix and proportions of the book, the tenor and notional distributions, the seasoned fraction, the netting-set count, and the scenario families of the grid. Everything that is a number of the fixture (a quote, a fixing, a trade, a scenario lane) is generated in code from the seed by include/epykos/fixtures/stage_a.hpp and is SYNTHETIC: nothing here is market data. Curve definitions and their calibration instrument sets are blueprints/curves/{usd,eur}.json; instrument blueprints blueprints/instruments/stage_a.json; conventions blueprints/conventions/*.json (docs/G4_BUNDLE.md holds the citations).",
+    "sources": [
+      "docs/PROBLEM.md sections 2 (outputs O1-O6), 4 (Stage A: curves, book, outputs), 5 (one tape), 9 (owner choices: USD + EUR, futures without convexity, 1,000 fully recalibrated scenarios, ~2,000 trades)",
+      "docs/G4_BUNDLE.md sections USD.3-USD.5, EUR.3-EUR.6 (the conventions and tenor sets the curve definitions and blueprints cite) and section 7 (this problem definition: what is synthetic and why the levels are where they are)"
+    ],
+    "notes": [
+      "Quote levels are synthetic and only plausible: an upward-sloping USD SOFR curve near 3.8-4.3%, EUR OIS near 1.95-2.65%, EURIBOR 3M / 6M above it by a tenor basis of about 10 / 18 bp. They are stated here so the fixture is reproducible and reviewable, not because they are observed.",
+      "Stage A has no FX (PROBLEM.md section 4): the USD conversion of EUR values is a structure placeholder of 1.0 applied as a recorded product (fx.placeholder); Stage B replaces it with an FX spot input.",
+      "The scheme sweep: the SOFR curve is calibrated on the base definition (linear zero) in the one tape; the variants (log-DF, monotone cubic, composite) are the same problem recorded again with the USD curve on that definition (fixtures/stage_a.hpp StageAOptions::usd_curve), each its own tape."
+    ]
+  },
+  "problem": {
+    "name": "stage_a",
+    "valuation": "2026-09-23",
+    "seed": 20260923,
+    "currencies": ["USD", "EUR"],
+    "reporting_currency": "USD",
+    "fx": [
+      {"currency": "USD", "placeholder": 1.0},
+      {"currency": "EUR", "placeholder": 1.0}
+    ],
+    "curves": [
+      {"definition": "USD-SOFR", "variants": ["USD-SOFR-LOGDF", "USD-SOFR-MONOTONE", "USD-SOFR-COMPOSITE"],
+       "generating": {"short": 0.0380, "long": 0.0430, "reversion_years": 3.0}},
+      {"definition": "EUR-ESTR", "variants": [],
+       "generating": {"short": 0.0195, "long": 0.0265, "reversion_years": 3.0}},
+      {"definition": "EUR-EURIBOR-3M", "variants": [],
+       "generating": {"short": 0.0205, "long": 0.0275, "reversion_years": 3.0}},
+      {"definition": "EUR-EURIBOR-6M", "variants": [],
+       "generating": {"short": 0.0213, "long": 0.0283, "reversion_years": 3.0}}
+    ],
+    "quotes": {
+      "description": "Each curve's quotes are the par quotes of the generating curves (linear zero rate on the definition's knots, z(t) = long + (short - long) * (1 - exp(-t/tau)) / (t/tau)) plus uniform noise of +/- noise_bp on every rate quote and +/- futures_noise_price on every futures price, so the calibration is a fit and not an identity; noise 0 gives the par quotes exactly (the O1 recovery gate).",
+      "noise_bp": 1.0,
+      "futures_noise_price": 0.01
+    },
+    "fixings": {
+      "description": "SYNTHETIC histories (conventions/fixings.hpp synthetic_fixings): one rate per fixing business day from `from` to the day before the valuation date, a mean-reverting walk around the level, seed = problem seed + slot.",
+      "from": "2024-01-01",
+      "daily_vol": 0.0001,
+      "reversion": 0.02,
+      "levels": [
+        {"index": "USD-SOFR", "level": 0.0385},
+        {"index": "EUR-ESTR", "level": 0.0195},
+        {"index": "EUR-EURIBOR-3M", "level": 0.0205},
+        {"index": "EUR-EURIBOR-6M", "level": 0.0213}
+      ]
+    },
+    "book": {
+      "description": "PROBLEM.md section 4 Stage A: SOFR OIS compounded (plain with the 2-day payment delay, observation shift, shift + lockout), SOFR averaging swaps, ESTR OIS, EURIBOR swaps fixing in advance, 3s6s basis swaps; about 20% seasoned with realised fixings. Trade i draws, in this order, from Philox sub-stream book_substream + i: the blueprint (by mix weight), the tenor (by weight), the notional (log-uniform), the side, the seasoned flag, the age in days when seasoned (uniform in [age_min, min(age_max, tenor - 30 days)]), the netting set (uniform), and the moneyness epsilon (uniform in +/- rate_moneyness, relative to the par rate / par spread at the record point).",
+      "trades": 2000,
+      "mix": [
+        {"blueprint": "USD-SOFR-OIS", "weight": 25},
+        {"blueprint": "USD-SOFR-OIS-SHIFT2", "weight": 10},
+        {"blueprint": "USD-SOFR-OIS-SHIFT2-LOCKOUT2", "weight": 10},
+        {"blueprint": "USD-SOFR-AVG-SWAP", "weight": 10},
+        {"blueprint": "EUR-ESTR-OIS", "weight": 15},
+        {"blueprint": "EUR-EURIBOR-6M-IRS", "weight": 12},
+        {"blueprint": "EUR-EURIBOR-3M-IRS", "weight": 8},
+        {"blueprint": "EUR-3S6S-BASIS", "weight": 10}
+      ],
+      "tenors": [
+        {"tenor": "1Y", "weight": 10}, {"tenor": "2Y", "weight": 14}, {"tenor": "3Y", "weight": 14},
+        {"tenor": "4Y", "weight": 8}, {"tenor": "5Y", "weight": 16}, {"tenor": "7Y", "weight": 10},
+        {"tenor": "10Y", "weight": 14}, {"tenor": "12Y", "weight": 3}, {"tenor": "15Y", "weight": 4},
+        {"tenor": "20Y", "weight": 3}, {"tenor": "25Y", "weight": 1}, {"tenor": "30Y", "weight": 3}
+      ],
+      "notional": {"min": 1000000, "max": 200000000, "distribution": "log_uniform"},
+      "seasoned_fraction": 0.2,
+      "seasoned_age_days": {"min": 30, "max": 1500},
+      "netting_sets": 40,
+      "rate_moneyness": 0.15
+    },
+    "scenarios": {
+      "description": "PROBLEM.md O4: S quote scenarios as batch lanes, each a full recalibration of every curve and a repricing. A scenario shocks every quote of the selected curves by a rate shift s(t) at the instrument's maturity t (a futures price moves by -100 * s(t)). Scenario lane l of a family draws its size from Philox sub-stream scenario_substream + l; lane 0 of the parallel family has size 0 (the unshocked base). parallel: s(t) = size; twist: s(t) = size * (t - pivot) / (t_max - pivot) (t_max = 30); butterfly: s(t) = size * (2 x^2 - 1), x = ln(t / pivot) / ln(t_max / pivot) clipped to [-1, 1] (wings up, belly down); per_curve: a parallel shift of one curve drawn uniformly from the curves. Sizes are uniform in +/- size_bp.",
+      "count": 1000,
+      "families": [
+        {"name": "parallel", "count": 250, "size_bp": 100.0, "pivot_years": 0.0},
+        {"name": "twist", "count": 250, "size_bp": 100.0, "pivot_years": 5.0},
+        {"name": "butterfly", "count": 250, "size_bp": 50.0, "pivot_years": 5.0},
+        {"name": "per_curve", "count": 250, "size_bp": 100.0, "pivot_years": 0.0}
+      ],
+      "t_max_years": 30.0,
+      "solver": {"jacobian": "chord", "warm_start": false}
+    }
+  }
+}

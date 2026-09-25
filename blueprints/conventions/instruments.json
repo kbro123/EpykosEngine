@@ -1,0 +1,426 @@
+{
+  "meta": {
+    "title": "Instrument conventions: SOFR OIS (and its shifted / lookback / locked-out variants), SOFR averaging swaps, SOFR futures, €STR OIS (and its 1-business-day payment-lag variant), EURIBOR 3M / 6M swaps, 3s6s basis, EURIBOR futures, front-end deposits",
+    "description": "Keyed by name. Legs, frequencies, day counts, roll, spot lag, payment delay, observation shift / lookback / lockout, stub rule and end-of-month flag are data read by include/epykos/conventions/registry.hpp; the mechanics (schedule.hpp, rfr.hpp, imm.hpp) are code. Every value cites its source as in docs/G4_BUNDLE.md sections USD.3-USD.5 and EUR.3-EUR.6; a value the research could not source is marked UNVERIFIED in its citation.",
+    "sources": [
+      "CFTC, Swaps Made Available To Trade (chart as of 2023-07-07): USD SOFR OIS and EUR EURIBOR fixed-float terms and tenors",
+      "OpenGamma Strata StandardFixedOvernightSwapConventions.java (USD_FIXED_1Y_SOFR_OIS, USD_FIXED_TERM_SOFR_OIS, EUR_FIXED_1Y_ESTR_OIS, EUR_FIXED_TERM_ESTR_OIS) and StandardFixedIborSwapConventions.java (EUR_FIXED_1Y_EURIBOR_3M / 6M)",
+      "ISDA, Market Practice Note: Effective Dates for SOFR swaps (2022-04-08); ISDA, Guidance regarding the publication of SOFR on Good Friday, April 3, 2026 (footnote 8: two business day payment delay)",
+      "ARRC, A User's Guide to SOFR (2021): payment delay 'T+2' of standard SOFR OIS; lookback with / without observation shift; lockout",
+      "TP ICAP, IRP MET template EUR Overnight Index Swap (2021 ISDA Definitions): A/360 annual fixed, EUR-EuroSTR-OIS Compound, payment lag one business day, Modified Following, Target, T+2",
+      "Bloomberg SEF EUR EURIBOR swap submission (2013-09-30): fixed annual 30/360, float ACT/360 quarterly / semi-annual, Target, Modified Following, T+2, first fixing 2 TARGET days before the effective date",
+      "CME SR3 / SR1 contract specifications (via CME education pages and rulebook chapters 460 / 461); Eurex Three-Month EURIBOR Futures (FEU3) contract specifications",
+      "Bianchetti & Carlicchi, Markets Evolution After the Credit Crunch (arXiv 1301.7078): 'a positive spread must be added to the 3M floating leg to equate the value of the 6M floating leg'"
+    ],
+    "imported_from": {
+      "imported_from": "SwapEngine/conventions/conventions.json (D37 data import), products.USD-SOFR-OIS, EUR-ESTR-OIS, EUR-EURIBOR-3M-IRS, EUR-EURIBOR-6M-IRS, EUR-3S6S-BASIS, USD-SOFR-1M-FUTURE, USD-SOFR-3M-FUTURE",
+      "imported_on": "2026-09-23",
+      "cross_check": "partial",
+      "notes": [
+        "DISAGREEMENT (recorded, not resolved by import): EUR EURIBOR IRS fixed-leg day count - SwapEngine says 30E/360 (Eurobond basis); CFTC MAT chart, Bloomberg SEF and OpenGamma Strata (THIRTY_U_360) say 30/360 (ISDA 'Bond Basis'). The registry takes 30/360; G4_BUNDLE.md EUR.4 records both.",
+        "DISAGREEMENT (recorded): €STR OIS payment lag - SwapEngine (2, 'desk-confirmed') and OpenGamma Strata (2) versus TP ICAP MET template (one business day) and LCH 2019 eligibility (1 day, EONIA-era). The registry takes 2; G4_BUNDLE.md EUR.3 records both.",
+        "The 'observation shift' / 'lockout' OIS variants and the SOFR averaging swap are not in SwapEngine (cross_check: not_in_source / own_research)."
+      ]
+    }
+  },
+  "instruments": {
+    "USD-SOFR-OIS": {
+      "type": "ois",
+      "description": "USD fixed vs SOFR OIS (USD-SOFR-OIS Compound, 2021 ISDA Definitions). Annual / annual for tenors over one year, one period up to one year.",
+      "currency": "USD",
+      "calendar": "USD-SOFR-SWAP",
+      "spot_lag": 2,
+      "payment_lag": 2,
+      "bdc": "ModifiedFollowing",
+      "eom": true,
+      "stub": "ShortFront",
+      "legs": [
+        {"role": "fixed", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360"},
+        {"role": "float", "index": "USD-SOFR", "compounding": "compounded", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360",
+         "observation": {"method": "plain", "lookback_days": 0, "lockout_days": 0}}
+      ],
+      "discount_index": "USD-SOFR",
+      "tenors": ["1W", "2W", "3W", "1M", "2M", "3M", "4M", "5M", "6M", "7M", "8M", "9M", "10M", "11M", "1Y", "18M", "2Y", "3Y", "4Y", "5Y", "6Y", "7Y", "8Y", "9Y", "10Y", "12Y", "15Y", "20Y", "25Y", "30Y", "40Y", "50Y"],
+      "sources": {
+        "fixed_leg": "CFTC MAT chart 2023-07-07, USD SOFR OIS: fixed leg payment frequency Annual, day count ACT/360; Strata USD_FIXED_1Y_SOFR_OIS: 'Both legs pay annually and use day count Act/360'",
+        "float_leg": "CFTC MAT chart: floating leg payment/reset frequency Annual, ACT/360; ISDA Good Friday 2026 guidance section 3: 'USD-SOFR-OIS Compound'",
+        "term_up_to": "Strata USD_FIXED_TERM_SOFR_OIS: 'for terms less than or equal to one year ... Both legs pay' once (TERM)",
+        "spot_lag": "ISDA MPN 2022-04-08: 'Market convention for SOFR swaps is for the Effective Date to be the day that is two business days following the Trade Date' on both USGS and New York business days; CFTC MAT: Spot Starting (T+2); Strata: 'The spot date offset is 2 days'",
+        "payment_lag": "ISDA Good Friday 2026 guidance fn 8: 'Market convention for SOFR swaps is to apply a two business day payment delay at the end of the Calculation Period'; CFTC MAT: Payment Lag 2 Days on both legs; ARRC User's Guide: standard SOFR OIS 'use a payment delay to settle 2 days after the end of the interest period (T+2)'; Strata: 'the payment date offset is 2 days'",
+        "calendar": "ISDA MPN 2022-04-08 (spot on USGS and NY business days; payments on New York Business Days); CFTC MAT: business calendars New York/USNY, fixing calendar US Government Securities/USGS, fixing offset 0 days",
+        "observation": "CFTC MAT: Fixing Offset 0 Days; ISDA 'USD-SOFR-OIS Compound' is plain compounding in arrears (no lookback, no shift, no lockout) - the OIS compounding formula of the 2021 Definitions section 7.3",
+        "bdc": "SwapEngine meta note 'Business-day convention is ModifiedFollowing throughout'; Strata (modified following) - UNVERIFIED against a primary source for SOFR OIS specifically",
+        "eom": "end-of-month roll when the effective date is the last day of its month (2006 ISDA Definitions 4.11 'EOM'; Bloomberg SWPM default) - UNVERIFIED by fetch, own research",
+        "stub": "short front stub as the default stub rule - own research, UNVERIFIED by fetch",
+        "tenors": "CFTC MAT chart: 2, 3, 4, 5, 6, 7, 10, 12, 15, 20, 30 years made available to trade; the front end 1W-18M and 8Y, 9Y, 25Y, 40Y, 50Y are the commonly quoted set (Bloomberg USOSFR curve) - UNVERIFIED by fetch"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json products.USD-SOFR-OIS", "imported_on": "2026-09-23", "imported_key": "products.USD-SOFR-OIS", "cross_check": "agree",
+        "notes": ["SwapEngine has no tenor list, eom or stub fields; those are own research (see sources)"]}
+    },
+    "USD-SOFR-OIS-SHIFT2": {
+      "type": "ois",
+      "description": "USD fixed vs SOFR compounded in arrears with a two business day backward-shifted observation period (the ARRC FRN convention), as a customised swap. A Stage A trade-population variant, not the interdealer standard.",
+      "currency": "USD",
+      "calendar": "USD-SOFR-SWAP",
+      "spot_lag": 2,
+      "payment_lag": 2,
+      "bdc": "ModifiedFollowing",
+      "eom": true,
+      "stub": "ShortFront",
+      "legs": [
+        {"role": "fixed", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360"},
+        {"role": "float", "index": "USD-SOFR", "compounding": "compounded", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360",
+         "observation": {"method": "observation_shift", "lookback_days": 2, "lockout_days": 0}}
+      ],
+      "discount_index": "USD-SOFR",
+      "tenors": ["1Y", "2Y", "3Y", "5Y", "7Y", "10Y"],
+      "sources": {
+        "observation": "ARRC User's Guide to SOFR (2021): 'A lookback with observation shift is one of the conventions that has been recommended by the ARRC for FRNs' ('Two-Day Backward Shifted Observation Period and No Lockouts'); ISDA 2021 Definitions 'OIS Compounding with Observation Period Shift' (ISDA Good Friday 2026 guidance fn 7)",
+        "other_fields": "as USD-SOFR-OIS",
+        "status": "own research: a customised convention for the seeded book (ARRC: 'dealers may be able to offer customized over-the-counter derivatives ... to facilitate client hedging')"
+      },
+      "provenance": {"imported_from": "none", "imported_on": "2026-09-23", "cross_check": "own_research"}
+    },
+    "USD-SOFR-OIS-SHIFT2-LOCKOUT2": {
+      "type": "ois",
+      "description": "USD fixed vs SOFR compounded in arrears with a two business day observation shift AND a two business day lockout, as a customised swap (the mechanism fixture of PROBLEM.md section 3). Not the interdealer standard.",
+      "currency": "USD",
+      "calendar": "USD-SOFR-SWAP",
+      "spot_lag": 2,
+      "payment_lag": 2,
+      "bdc": "ModifiedFollowing",
+      "eom": true,
+      "stub": "ShortFront",
+      "legs": [
+        {"role": "fixed", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360"},
+        {"role": "float", "index": "USD-SOFR", "compounding": "compounded", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360",
+         "observation": {"method": "observation_shift", "lookback_days": 2, "lockout_days": 2}}
+      ],
+      "discount_index": "USD-SOFR",
+      "tenors": ["1Y", "2Y", "3Y", "5Y", "7Y", "10Y"],
+      "sources": {
+        "observation": "ARRC User's Guide (2021): lockout - 'the SOFR rate applied for the last k days of the interest period is frozen at the rate observed k days before the period ends'; 'A 2-5 day lockout has been used in some SOFR FRNs'; ISDA 2021 Definitions 'OIS Compounding with Lockout' (ISDA Good Friday 2026 guidance fn 7)",
+        "other_fields": "as USD-SOFR-OIS",
+        "status": "own research: a customised convention for the seeded book"
+      },
+      "provenance": {"imported_from": "none", "imported_on": "2026-09-23", "cross_check": "own_research"}
+    },
+    "USD-SOFR-OIS-LOOKBACK2": {
+      "type": "ois",
+      "description": "USD fixed vs SOFR compounded in arrears with a two business day lookback and NO observation shift (ARRC: 'lookback without observation shift' - same accrual period and weights as plain compounding, but the rate applied on each accrual day is the rate published two business days earlier), as a customised swap. Not the interdealer standard. Added (M3-fix) so the lookback-only method has an instrument and a PV-level test: it previously existed only as an ObservationMethod value exercised by a conventions-layer date-list test, never by a priced trade (PROBLEM.md section 3 requires every realism-checklist item, including observation shift / lookback, be exercised by at least one instrument).",
+      "currency": "USD",
+      "calendar": "USD-SOFR-SWAP",
+      "spot_lag": 2,
+      "payment_lag": 2,
+      "bdc": "ModifiedFollowing",
+      "eom": true,
+      "stub": "ShortFront",
+      "legs": [
+        {"role": "fixed", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360"},
+        {"role": "float", "index": "USD-SOFR", "compounding": "compounded", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360",
+         "observation": {"method": "lookback", "lookback_days": 2, "lockout_days": 0}}
+      ],
+      "discount_index": "USD-SOFR",
+      "tenors": ["1Y", "2Y", "3Y", "5Y", "7Y", "10Y"],
+      "sources": {
+        "observation": "ARRC User's Guide to SOFR (2021): 'lookback without observation shift' - 'the observation date is k business days prior to the interest date... all other elements of the calculation are kept the same' (the accrual period and weights of plain compounding, section 3 of docs/G4_BUNDLE.md USD.3); ISDA 2021 Definitions 'Lookback' compounding method (ISDA Good Friday 2026 guidance fn 7, as for the SHIFT2 / SHIFT2-LOCKOUT2 variants)",
+        "other_fields": "as USD-SOFR-OIS",
+        "status": "own research: a customised convention for the seeded book, mirroring USD-SOFR-OIS-SHIFT2's provenance"
+      },
+      "provenance": {"imported_from": "none", "imported_on": "2026-09-23", "cross_check": "own_research",
+        "notes": ["M3-fix: closes the coverage gap of the M3 review finding that method=\"lookback\" was never wired into any blueprint"]}
+    },
+    "USD-SOFR-AVG-SWAP": {
+      "type": "ois",
+      "description": "USD fixed vs SOFR arithmetic average ('Overnight Averaging' of the 2021 ISDA Definitions; USD-SOFR Average FROs): the SOFR averaging swap of PROBLEM.md section 3, which does not telescope.",
+      "currency": "USD",
+      "calendar": "USD-SOFR-SWAP",
+      "spot_lag": 2,
+      "payment_lag": 2,
+      "bdc": "ModifiedFollowing",
+      "eom": true,
+      "stub": "ShortFront",
+      "legs": [
+        {"role": "fixed", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360"},
+        {"role": "float", "index": "USD-SOFR", "compounding": "averaged", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360",
+         "observation": {"method": "plain", "lookback_days": 0, "lockout_days": 0}}
+      ],
+      "discount_index": "USD-SOFR",
+      "tenors": ["1Y", "2Y", "3Y", "5Y", "7Y", "10Y"],
+      "sources": {
+        "averaging": "FRBNY Additional Information: SOFR Averages 'daily compounding'; ISDA 2021 Definitions Overnight Averaging / 'USD-SOFR Average 30D / 90D / 180D' FROs (ISDA Good Friday 2026 guidance section 2); the arithmetic average is calendar-day weighted, ACT/360 (CME SR1: 'arithmetic average of daily SOFR values during the contract delivery month')",
+        "frequencies_and_lags": "by analogy with USD-SOFR-OIS (annual, ACT/360, T+2, 2-day payment delay) - the interdealer standard for SOFR averaging swaps is UNVERIFIED (ISDA product table lists FF-style averaging swaps quarterly)",
+        "status": "own research"
+      },
+      "provenance": {"imported_from": "none", "imported_on": "2026-09-23", "cross_check": "own_research",
+        "notes": ["SwapEngine's USD-FF-SOFR-BASIS averages Fed Funds quarterly (H.15 arithmetic average) against compounded SOFR; the SOFR-averaging fixed-float swap is a different product"]}
+    },
+    "USD-SOFR-ON-DEPOSIT": {
+      "type": "deposit",
+      "description": "The overnight SOFR fixing as the first calibration instrument (a T+0 one-day deposit at the published rate).",
+      "currency": "USD",
+      "calendar": "USD-SOFR",
+      "spot_lag": 0,
+      "payment_lag": 0,
+      "bdc": "Following",
+      "index": "USD-SOFR",
+      "day_count": "ACT/360",
+      "tenors": ["1D"],
+      "sources": {
+        "definition": "FRBNY: SOFR is an overnight rate for the value date, published T+1; its use as the front-end 'deposit / fixing' instrument is the curve-construction practice of PROBLEM.md section 3 (own research)"
+      },
+      "provenance": {"imported_from": "none", "imported_on": "2026-09-23", "cross_check": "own_research"}
+    },
+    "USD-SOFR-3M-FUTURE": {
+      "type": "future",
+      "description": "CME Three-Month SOFR futures (SR3): 100 minus the compounded daily SOFR over the IMM reference quarter, ACT/360. Convexity adjustment: zero and stated as a simplification (PROBLEM.md section 9).",
+      "currency": "USD",
+      "calendar": "USD-SOFR",
+      "spot_lag": 0,
+      "bdc": "Following",
+      "index": "USD-SOFR",
+      "accrual": "compounded",
+      "day_count": "ACT/360",
+      "period": "imm_quarter",
+      "quote": "100 - rate",
+      "contracts": 8,
+      "sources": {
+        "reference_quarter": "CME, A Practitioner's Guide to Three-Month SOFR Futures: 'the interval from the 3rd Wednesday of the 3rd month preceding the delivery month to, but not including, the 3rd Wednesday of the delivery month'",
+        "settlement": "CME Understanding SOFR Futures: 'cash settled and based on a business-day compounded SOFR per annum during contract Reference Quarter'; SR3 specs: 'At final settlement ... 100 minus the compounded SOFR rate over the contract reference period'",
+        "day_count": "FRBNY SOFR Averages / Index methodology: each SOFR value 'multiplied by the number of calendar days it covers, divided by 360' (the same compounding as the SR3 settlement)",
+        "listing": "SR3 specs (metrotrade summary of CME): 'The nearest 39 March-quarterly contracts are listed'; contract unit $2,500 x IMM Index; cash-settled",
+        "last_trading_day": "the exchange business day preceding the third Wednesday that ends the reference quarter - UNVERIFIED by fetch (CME pages timed out); the reference quarter end is the authoritative field",
+        "contracts": "the front two years (8 quarterlies) are the calibration set of PROBLEM.md section 4 ('futures on the front year' with convexity 0) - a curve-definition matter, own research"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json products.USD-SOFR-3M-FUTURE", "imported_on": "2026-09-23", "imported_key": "products.USD-SOFR-3M-FUTURE", "cross_check": "agree",
+        "notes": ["SwapEngine: 'Convexity is a user input on the quote'; here it is zero and stated (D35 owner choice)"]}
+    },
+    "USD-SOFR-1M-FUTURE": {
+      "type": "future",
+      "description": "CME One-Month SOFR futures (SR1): 100 minus the arithmetic average of daily SOFR over the calendar month, ACT/360. Convexity zero, stated.",
+      "currency": "USD",
+      "calendar": "USD-SOFR",
+      "spot_lag": 0,
+      "bdc": "Following",
+      "index": "USD-SOFR",
+      "accrual": "averaged",
+      "day_count": "ACT/360",
+      "period": "calendar_month",
+      "quote": "100 - rate",
+      "contracts": 6,
+      "sources": {
+        "settlement": "CME One-Month SOFR futures specs (rulebook chapter 461): 'cash settled and based on the arithmetic average of daily SOFR values during the contract delivery month ... 100.0000 minus average daily SOFR', 'rounded to the nearest 1/10 of one bp'",
+        "last_trading_day": "CME chapter 461: 'the last business day of the contract delivery month'; final settlement computed on the first business day following the delivery month",
+        "day_count": "calendar-day weighted average over the delivery month, 360-day year (as SOFR Averages) - the weighting of non-business days is UNVERIFIED by fetch"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json products.USD-SOFR-1M-FUTURE", "imported_on": "2026-09-23", "imported_key": "products.USD-SOFR-1M-FUTURE", "cross_check": "agree"}
+    },
+    "EUR-ESTR-OIS": {
+      "type": "ois",
+      "description": "EUR fixed vs €STR OIS (EUR-EuroSTR-OIS Compound, 2021 ISDA Definitions). Annual / annual over one year, one period up to one year.",
+      "currency": "EUR",
+      "calendar": "EUR-TARGET",
+      "spot_lag": 2,
+      "payment_lag": 2,
+      "bdc": "ModifiedFollowing",
+      "eom": true,
+      "stub": "ShortFront",
+      "legs": [
+        {"role": "fixed", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360"},
+        {"role": "float", "index": "EUR-ESTR", "compounding": "compounded", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360",
+         "observation": {"method": "plain", "lookback_days": 0, "lockout_days": 0}}
+      ],
+      "discount_index": "EUR-ESTR",
+      "tenors": ["1W", "2W", "3W", "1M", "2M", "3M", "4M", "5M", "6M", "7M", "8M", "9M", "10M", "11M", "1Y", "18M", "2Y", "3Y", "4Y", "5Y", "6Y", "7Y", "8Y", "9Y", "10Y", "12Y", "15Y", "20Y", "25Y", "30Y", "40Y", "50Y"],
+      "sources": {
+        "fixed_leg": "TP ICAP EUR OIS MET template: fixed 'Payment Frequency: Annually', 'Fixed Rate Day Count Fraction: A/360', 'Modified Following', 'Target'; Strata EUR_FIXED_1Y_ESTR_OIS: 'Both legs pay annually and use day count Act/360'",
+        "float_leg": "TP ICAP template: 'Floating Rate Option: EUR-EuroSTR-OIS Compound', 'Payment Frequency: Annually', 'ACT/360', reset 'Annually/The last Business Day of each Calculation Period'",
+        "term_up_to": "Strata EUR_FIXED_TERM_ESTR_OIS: 'for terms less than or equal to one year ... Both legs pay once at the end'",
+        "spot_lag": "TP ICAP template: 'Market standard is Trade Date plus two Business Days'; Strata: 'The spot date offset is 2 days'",
+        "payment_lag": "DISAGREEMENT: 2 business days per SwapEngine ('desk-confirmed; EONIA legacy was 1 BD') and Strata EUR_FIXED_1Y_ESTR_OIS ('the payment date offset is 2 days'; EONIA: 1 day); ONE business day per TP ICAP MET template ('Payment Lag: One Business Day', 2021 Definitions) and LCH Product Eligibility EUR 2019 ('Payment lag 1 day' for €STR swaps). Registry value 2; recorded in G4_BUNDLE.md EUR.3",
+        "calendar": "TP ICAP template: 'Calc Period Business Days: Target', 'Payment Business Days: Target'",
+        "bdc": "TP ICAP template: 'Modified Following' on calculation period end dates, termination and payment dates",
+        "eom": "as USD-SOFR-OIS (UNVERIFIED, own research)",
+        "stub": "as USD-SOFR-OIS (UNVERIFIED, own research); LCH 2019: front and back stubs eligible",
+        "tenors": "LCH 2019: €STR swaps 7 days to 51 years; the quoted set mirrors USD-SOFR-OIS (Bloomberg EESWE curve) - UNVERIFIED by fetch"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json products.EUR-ESTR-OIS", "imported_on": "2026-09-23", "imported_key": "products.EUR-ESTR-OIS", "cross_check": "partial",
+        "notes": ["payment_lag 2 agrees with SwapEngine but disagrees with the TP ICAP template and LCH 2019 (1 BD): recorded, not resolved"]}
+    },
+    "EUR-ESTR-OIS-LAG1": {
+      "type": "ois",
+      "description": "EUR fixed vs €STR OIS, identical to EUR-ESTR-OIS except a ONE business day payment lag. Added (M3-fix) as a named variant of the disputed payment_lag field (the same pattern as USD-SOFR-OIS-SHIFT2 / SHIFT2-LOCKOUT2 for a customised parameter), because a further research pass (M3-fix) could not settle the disagreement between Strata / SwapEngine (2 days) and the TP ICAP MET template / LCH 2019 Product Eligibility EUR document (1 day) with a clearly-dated current (2024+) primary or CCP source: CME's EUR-ESTR-OIS PDF still blocks automated fetch, the CFTC-filed LCH EUR-ESTR clearing submission (2022-01-06) and the Tradeweb SEF rulebook chapter 9 still do not state a payment-lag figure, and LCH's Product Specific Contract Terms and Eligibility Criteria Manual (effective 2025-01-01) lists EUR-EuroSTR-OIS Compound as an eligible product but is an eligibility table (currency, floating rate index, tenor and notional limits) with no payment-lag column. Registry default for EUR-ESTR-OIS stays 2 (unchanged); this variant exposes 1 so Stage A's EUR-side PVs and risk can be sanity-checked under both conventions (docs/G4_BUNDLE.md EUR.3).",
+      "currency": "EUR",
+      "calendar": "EUR-TARGET",
+      "spot_lag": 2,
+      "payment_lag": 1,
+      "bdc": "ModifiedFollowing",
+      "eom": true,
+      "stub": "ShortFront",
+      "legs": [
+        {"role": "fixed", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360"},
+        {"role": "float", "index": "EUR-ESTR", "compounding": "compounded", "frequency": "1Y", "term_up_to": "1Y", "day_count": "ACT/360",
+         "observation": {"method": "plain", "lookback_days": 0, "lockout_days": 0}}
+      ],
+      "discount_index": "EUR-ESTR",
+      "tenors": ["1W", "2W", "3W", "1M", "2M", "3M", "4M", "5M", "6M", "7M", "8M", "9M", "10M", "11M", "1Y", "18M", "2Y", "3Y", "4Y", "5Y", "6Y", "7Y", "8Y", "9Y", "10Y", "12Y", "15Y", "20Y", "25Y", "30Y", "40Y", "50Y"],
+      "sources": {
+        "payment_lag": "TP ICAP IRP MET template EUR Overnight Index Swap (2021 ISDA Definitions): 'Payment Lag: One Business Day'; LCH Product Eligibility EUR (October 2019): 'Payment lag 1 day' for €STR swaps - the disagreeing side of the EUR-ESTR-OIS DISAGREEMENT (docs/G4_BUNDLE.md EUR.3)",
+        "other_fields": "as EUR-ESTR-OIS",
+        "status": "own research (M3-fix): a named variant exposing the disputed value, not a resolution of the disagreement"
+      },
+      "provenance": {"imported_from": "none", "imported_on": "2026-09-23", "cross_check": "own_research",
+        "notes": ["M3-fix: closes the M3 review finding that the payment-lag disagreement had no alternate variant exposed, unlike SHIFT2 / LOCKOUT2"]}
+    },
+    "EUR-ESTR-ON-DEPOSIT": {
+      "type": "deposit",
+      "description": "The overnight €STR fixing as the first calibration instrument (a T+0 one-day deposit at the published rate).",
+      "currency": "EUR",
+      "calendar": "EUR-TARGET",
+      "spot_lag": 0,
+      "payment_lag": 0,
+      "bdc": "Following",
+      "index": "EUR-ESTR",
+      "day_count": "ACT/360",
+      "tenors": ["1D"],
+      "sources": {"definition": "ECB: €STR is an overnight rate for the previous TARGET2 business day; its use as the front-end instrument is curve-construction practice (own research)"},
+      "provenance": {"imported_from": "none", "imported_on": "2026-09-23", "cross_check": "own_research"}
+    },
+    "EUR-EURIBOR-3M-DEPOSIT": {
+      "type": "deposit",
+      "description": "The 3M EURIBOR fixing as a spot-starting 3-month deposit (the first instrument of the 3M projection curve).",
+      "currency": "EUR",
+      "calendar": "EUR-TARGET",
+      "spot_lag": 2,
+      "payment_lag": 0,
+      "bdc": "ModifiedFollowing",
+      "eom": true,
+      "index": "EUR-EURIBOR-3M",
+      "day_count": "ACT/360",
+      "tenors": ["3M"],
+      "sources": {
+        "spot_lag": "Bloomberg SEF submission: 'Euribor is quoted for spot value' (T+2 TARGET); LCH 2019: fixing T-2",
+        "day_count": "EMMI 2018-11-28: Act/360",
+        "bdc": "Modified Following on the maturity date - money-market standard, UNVERIFIED by fetch"
+      },
+      "provenance": {"imported_from": "none", "imported_on": "2026-09-23", "cross_check": "own_research"}
+    },
+    "EUR-EURIBOR-6M-DEPOSIT": {
+      "type": "deposit",
+      "description": "The 6M EURIBOR fixing as a spot-starting 6-month deposit (the first instrument of the 6M projection curve).",
+      "currency": "EUR",
+      "calendar": "EUR-TARGET",
+      "spot_lag": 2,
+      "payment_lag": 0,
+      "bdc": "ModifiedFollowing",
+      "eom": true,
+      "index": "EUR-EURIBOR-6M",
+      "day_count": "ACT/360",
+      "tenors": ["6M"],
+      "sources": {"all": "as EUR-EURIBOR-3M-DEPOSIT"},
+      "provenance": {"imported_from": "none", "imported_on": "2026-09-23", "cross_check": "own_research"}
+    },
+    "EUR-EURIBOR-3M-IRS": {
+      "type": "irs",
+      "description": "EUR vanilla fixed vs 3M EURIBOR: fixed annual 30/360, float quarterly ACT/360 fixing in advance (2 TARGET days), T+2, no payment delay.",
+      "currency": "EUR",
+      "calendar": "EUR-TARGET",
+      "spot_lag": 2,
+      "payment_lag": 0,
+      "bdc": "ModifiedFollowing",
+      "eom": true,
+      "stub": "ShortFront",
+      "legs": [
+        {"role": "fixed", "frequency": "1Y", "day_count": "30/360"},
+        {"role": "float", "index": "EUR-EURIBOR-3M", "frequency": "3M", "day_count": "ACT/360"}
+      ],
+      "discount_index": "EUR-ESTR",
+      "tenors": ["1Y", "18M", "2Y", "3Y", "4Y", "5Y", "6Y", "7Y", "8Y", "9Y", "10Y", "12Y", "15Y", "20Y", "25Y", "30Y"],
+      "sources": {
+        "fixed_leg": "CFTC MAT chart (EUR fixed-to-floating, EURIBOR 3M/6M): fixed leg 'Annual', '30/360' (fn 2: 4Y and 6Y limited to 'Annual and 30/360'); Bloomberg SEF: 'Fixed Leg Payment: Annual, Day Count Conventions: 30/360, Holiday Calendar: Target, Business Day Conventions: Modified Following'; Strata EUR_FIXED_1Y_EURIBOR_3M: 'The fixed leg pays yearly with day count 30U/360'. DISAGREEMENT with SwapEngine (30E/360) recorded in G4_BUNDLE.md EUR.4",
+        "float_leg": "CFTC MAT: 'Quarterly (3M EURIBOR)', 'Actual/360'; Bloomberg SEF: 'Payment/Resets: Semi-Annual, Quarterly', 'ACT/360', 'Fixing Calendar: Target'",
+        "fixing": "Bloomberg SEF: 'The first Euribor Fixing Date is 2 Target business days prior to the Effective Date' (index EUR-EURIBOR-3M fixing_lag 2)",
+        "spot_lag": "CFTC MAT: 'Spot Starting (T+2)'; Bloomberg SEF: 'Effective Date is T+2 from the trade date'",
+        "payment_lag": "0: no payment delay on EUR IRS (Bloomberg SEF template lists none; SwapEngine 0) - UNVERIFIED against ISDA text",
+        "calendar_bdc": "CFTC MAT: 'TARGET', 'Following, Modified Following' (Modified Following the standard per fn 2); Bloomberg SEF: Target, Modified Following",
+        "eom_stub": "as USD-SOFR-OIS (UNVERIFIED, own research); LCH 2019: front and back stubs eligible",
+        "tenors": "CFTC MAT: 2, 3, 4, 5, 6, 7, 10, 15, 20, 30 years; 1Y, 18M, 8Y, 9Y, 12Y, 25Y commonly quoted - UNVERIFIED by fetch"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json products.EUR-EURIBOR-3M-IRS", "imported_on": "2026-09-23", "imported_key": "products.EUR-EURIBOR-3M-IRS", "cross_check": "disagree",
+        "notes": ["fixed-leg day count: SwapEngine 30E/360 vs 30/360 (CFTC MAT, Bloomberg SEF, Strata); registry 30/360"]}
+    },
+    "EUR-EURIBOR-6M-IRS": {
+      "type": "irs",
+      "description": "EUR vanilla fixed vs 6M EURIBOR: fixed annual 30/360, float semi-annual ACT/360 fixing in advance (2 TARGET days), T+2, no payment delay.",
+      "currency": "EUR",
+      "calendar": "EUR-TARGET",
+      "spot_lag": 2,
+      "payment_lag": 0,
+      "bdc": "ModifiedFollowing",
+      "eom": true,
+      "stub": "ShortFront",
+      "legs": [
+        {"role": "fixed", "frequency": "1Y", "day_count": "30/360"},
+        {"role": "float", "index": "EUR-EURIBOR-6M", "frequency": "6M", "day_count": "ACT/360"}
+      ],
+      "discount_index": "EUR-ESTR",
+      "tenors": ["1Y", "18M", "2Y", "3Y", "4Y", "5Y", "6Y", "7Y", "8Y", "9Y", "10Y", "12Y", "15Y", "20Y", "25Y", "30Y", "40Y", "50Y"],
+      "sources": {
+        "fixed_leg": "as EUR-EURIBOR-3M-IRS (CFTC MAT, Bloomberg SEF, Strata EUR_FIXED_1Y_EURIBOR_6M '30U/360')",
+        "float_leg": "CFTC MAT: 'Semi-Annual (... 6M EURIBOR)', 'Actual/360'; Bloomberg SEF: Semi-Annual, ACT/360",
+        "other_fields": "as EUR-EURIBOR-3M-IRS",
+        "tenors": "CFTC MAT: 2, 3, 4, 5, 6, 7, 10, 15, 20, 30 years; the rest commonly quoted - UNVERIFIED by fetch"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json products.EUR-EURIBOR-6M-IRS", "imported_on": "2026-09-23", "imported_key": "products.EUR-EURIBOR-6M-IRS", "cross_check": "disagree",
+        "notes": ["fixed-leg day count as EUR-EURIBOR-3M-IRS"]}
+    },
+    "EUR-3S6S-BASIS": {
+      "type": "basis",
+      "description": "EUR tenor basis swap: 3M EURIBOR + spread (quarterly, ACT/360) versus 6M EURIBOR flat (semi-annual, ACT/360); the spread is quoted on the shorter (3M) leg; €STR-discounted.",
+      "currency": "EUR",
+      "calendar": "EUR-TARGET",
+      "spot_lag": 2,
+      "payment_lag": 0,
+      "bdc": "ModifiedFollowing",
+      "eom": true,
+      "stub": "ShortFront",
+      "legs": [
+        {"role": "float", "index": "EUR-EURIBOR-3M", "frequency": "3M", "day_count": "ACT/360", "spread": true},
+        {"role": "float", "index": "EUR-EURIBOR-6M", "frequency": "6M", "day_count": "ACT/360", "spread": false}
+      ],
+      "discount_index": "EUR-ESTR",
+      "tenors": ["1Y", "2Y", "3Y", "4Y", "5Y", "6Y", "7Y", "8Y", "9Y", "10Y", "12Y", "15Y", "20Y", "25Y", "30Y"],
+      "sources": {
+        "spread_leg": "Bianchetti & Carlicchi (arXiv 1301.7078) section 3: 'a positive spread must be added to the 3M floating leg to equate the value of the 6M floating leg'; SwapEngine: 'Spread on the SHORTER (3M) leg'",
+        "legs": "each leg as the corresponding EURIBOR IRS float leg (CFTC MAT / Bloomberg SEF: quarterly 3M, semi-annual 6M, ACT/360, Target, Modified Following)",
+        "spot_lag": "T+2 as EUR IRS (CFTC MAT)",
+        "tenors": "own research (Bloomberg EUBS curve 1Y-30Y) - UNVERIFIED by fetch",
+        "spread_compounding": "the spread is paid simple on the 3M leg (no compounding of the spread on a term-rate leg: the leg pays each quarter) - own statement"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json products.EUR-3S6S-BASIS", "imported_on": "2026-09-23", "imported_key": "products.EUR-3S6S-BASIS", "cross_check": "agree"}
+    },
+    "EUR-EURIBOR-3M-FUTURE": {
+      "type": "future",
+      "description": "Eurex Three-Month EURIBOR Futures (FEU3): 100 minus the 3M EURIBOR fixing of the last trading day (two exchange days before the third Wednesday of the delivery month); the underlying deposit runs from the third Wednesday for three months. Convexity zero, stated.",
+      "currency": "EUR",
+      "calendar": "EUR-TARGET",
+      "spot_lag": 2,
+      "bdc": "ModifiedFollowing",
+      "index": "EUR-EURIBOR-3M",
+      "accrual": "fixing",
+      "day_count": "ACT/360",
+      "period": "imm_quarter_deposit",
+      "quote": "100 - rate",
+      "contracts": 8,
+      "sources": {
+        "last_trading_day": "Eurex FEU3 contract specifications: 'two exchange days prior to the third Wednesday of the respective maturity month' provided EMMI has determined the 3M EURIBOR on that day; final settlement day = last trading day",
+        "settlement": "Eurex FEU3: 'The numerical value of the EURIBOR rate is rounded to three decimal places and then subtracted from 100'; price 'on an index basis of 100 less the numerical value of the interest rate traded'",
+        "contract_months": "Eurex FEU3: up to 72 months: six consecutive calendar months plus 22 quarterly months of the March, June, September, December cycle; contract value EUR 2,500 per index point",
+        "deposit_period": "value date = third Wednesday (spot of the fixing, 2 TARGET days) to three months later, Modified Following on TARGET - own derivation from the EURIBOR spot convention",
+        "contracts": "8 quarterlies = the front two years (curve-definition matter, own research)"
+      },
+      "provenance": {"imported_from": "none", "imported_on": "2026-09-23", "cross_check": "own_research",
+        "notes": ["SwapEngine has no Euribor futures product"]}
+    }
+  }
+}

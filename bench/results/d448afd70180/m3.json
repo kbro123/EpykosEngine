@@ -1,0 +1,424 @@
+{
+ "format": "epykos-m3-gate 1",
+ "package": "M3/G6 (m3-gate-2)",
+ "engine_commit": "cc23459ea940d4653261ca27157717a4700f8b8d",
+ "fingerprint": {
+  "id": "d448afd70180",
+  "cpu": "Intel(R) Xeon(R) W-3223 CPU @ 3.50GHz",
+  "cores_physical": 8,
+  "cores_logical": 16,
+  "compiler": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+  "flags": "-O3 -march=x86-64-v3 -fno-math-errno",
+  "os": "Darwin",
+  "arch": "x86_64",
+  "flags_source": "/Users/kevinbroughton/Desktop/Claude Projects/EpykosEngine/.worktrees/m3-gate-2/build/release/epykos_flags.txt"
+ },
+ "bench_run": {
+  "file": "stage_a_stage_a.json",
+  "date": "2026-09-23T22:28:40+01:00",
+  "load": {
+   "before": 4.8,
+   "after": 2.84,
+   "cores_logical": 16,
+   "threshold": 8.0,
+   "within_threshold": true,
+   "check_enforced": true,
+   "rule": "docs/WORKLOADS.md M1 Measurement: 1-minute load average <= cores/2 before and after, cores = logical CPUs"
+  },
+  "git": {
+   "commit": "cc23459ea940d4653261ca27157717a4700f8b8d",
+   "commit_short": "cc23459",
+   "branch": "m3/m3-gate-2",
+   "dirty": false
+  },
+  "args": [
+   "--benchmark_repetitions=20",
+   "--benchmark_min_time=0.2s",
+   "--benchmark_report_aggregates_only=false",
+   "--benchmark_out_format=json"
+  ],
+  "note": "the run bench/run.sh derives from the binary (D34); compared against baseline.json (accepted at m3-gate-1, d448afd70180): 17/17 rows ok, 0 regressions (scripts/perf_gate.py, verdict PASS)"
+ },
+ "gates": {
+  "release": {
+   "differential_e0": {
+    "ok": 1,
+    "draws": 64,
+    "batch": 8,
+    "outputs": 8191,
+    "mismatches": 0,
+    "max_ulps": 0
+   },
+   "differential_e0_single_lane": {
+    "ok": 1,
+    "draws": 16,
+    "batch": 1,
+    "outputs": 8191,
+    "mismatches": 0,
+    "max_ulps": 0
+   },
+   "adjoint_o2_vs_fd": {
+    "ok": 1,
+    "worst": 9.65184e-10,
+    "at_output": 240,
+    "knot": 6,
+    "h": 1e-06,
+    "gate": 1e-06,
+    "entries": 2030
+   },
+   "adjoint_o2_vs_dual": {
+    "ok": 1,
+    "worst": 2.7901e-15,
+    "at_output": 8189,
+    "knot": 38,
+    "gate": 1e-12,
+    "entries": 2030
+   },
+   "ift_vs_dual_sample": {
+    "ok": 1,
+    "worst": 2.30115e-15,
+    "at_output": 1811,
+    "quote": 15,
+    "gate": 1e-12,
+    "entries": 3570,
+    "rows": 51
+   },
+   "ift_vs_dual_full_ladder": {
+    "ok": 1,
+    "worst": 5.7548e-15,
+    "at_trade": 524,
+    "quote": 38,
+    "gate": 1e-12,
+    "entries": 140000
+   },
+   "ift_vs_bump": {
+    "ok": 1,
+    "worst": 5.09301e-08,
+    "at_output": 8190,
+    "quote": 39,
+    "gate": 1e-06,
+    "entries": 120,
+    "below_floor": 5,
+    "pairs": 50
+   },
+   "scenario_lanes": {
+    "ok": 1,
+    "lanes": 32,
+    "output_mismatches": 0,
+    "state_mismatches": 0,
+    "first_mismatching_lane": -1
+   },
+   "optimality_lanes": {
+    "ok": 1,
+    "worst": 1.23544e-13,
+    "gate": 1e-12,
+    "lanes": 32,
+    "blocks": 4
+   },
+   "optimality": {
+    "ok": 1,
+    "worst": 1.23544e-13,
+    "gate": 1e-12,
+    "blocks": 4
+   },
+   "recovery": {
+    "ok": 1,
+    "worst": 4.56267e-14,
+    "gate": 1e-12
+   },
+   "one_tape": {
+    "ok": 1,
+    "outputs": 8191,
+    "groups": 3,
+    "block_outputs": 78,
+    "o1_outputs": 70,
+    "o2_outputs": 8043,
+    "inputs": 148,
+    "free": 70,
+    "blocks": 4,
+    "nodes": 517036
+   },
+   "sharing": {
+    "ok": 1,
+    "df_domains": 2,
+    "shared": 2,
+    "partial": 0,
+    "unshared": 0,
+    "duplicates_exp": 0
+   },
+   "roundtrip_identity": {
+    "ok": 1,
+    "mismatches": 0
+   },
+   "o4_whole_grid": {
+    "ok": 1,
+    "lanes": 1000,
+    "not_converged": 0,
+    "worst_jtr": 1.23544e-13,
+    "gate": 1e-12,
+    "block_solves": 3448,
+    "residual_evaluations": 33003
+   }
+  },
+  "reference": {
+   "differential_e0": {
+    "ok": 1,
+    "draws": 64,
+    "batch": 8,
+    "outputs": 8191,
+    "mismatches": 0,
+    "max_ulps": 0
+   },
+   "adjoint_o2_vs_fd": {
+    "ok": 1,
+    "worst": 9.65184e-10,
+    "at_output": 240,
+    "knot": 6,
+    "h": 1e-06,
+    "gate": 1e-06,
+    "entries": 2030
+   },
+   "adjoint_o2_vs_dual": {
+    "ok": 1,
+    "worst": 2.24916e-15,
+    "at_output": 2042,
+    "knot": 14,
+    "gate": 1e-12,
+    "entries": 2030
+   },
+   "ift_vs_dual_sample": {
+    "ok": 1,
+    "worst": 3.03433e-15,
+    "at_output": 1153,
+    "quote": 19,
+    "gate": 1e-12,
+    "entries": 3570,
+    "rows": 51
+   },
+   "ift_vs_bump": {
+    "ok": 1,
+    "worst": 5.09301e-08,
+    "at_output": 8190,
+    "quote": 39,
+    "gate": 1e-06,
+    "entries": 120,
+    "below_floor": 5,
+    "pairs": 50
+   },
+   "scenario_lanes": {
+    "ok": 1,
+    "lanes": 32,
+    "output_mismatches": 0,
+    "state_mismatches": 0,
+    "first_mismatching_lane": -1
+   },
+   "optimality_lanes": {
+    "ok": 1,
+    "worst": 1.23544e-13,
+    "gate": 1e-12,
+    "lanes": 32,
+    "blocks": 4
+   },
+   "optimality": {
+    "ok": 1,
+    "worst": 1.23544e-13,
+    "gate": 1e-12,
+    "blocks": 4
+   },
+   "recovery": {
+    "ok": 1,
+    "worst": 4.56267e-14,
+    "gate": 1e-12
+   },
+   "one_tape": {
+    "ok": 1,
+    "outputs": 8191,
+    "groups": 3,
+    "block_outputs": 78,
+    "o1_outputs": 70,
+    "o2_outputs": 8043,
+    "inputs": 148,
+    "free": 70,
+    "blocks": 4,
+    "nodes": 517036
+   }
+  }
+ },
+ "suites": {
+  "ctest_release": {
+   "passed": 80,
+   "total": 80,
+   "failed": 0,
+   "total_seconds": 127.34
+  },
+  "ctest_reference": {
+   "passed": 80,
+   "total": 80,
+   "failed": 0,
+   "total_seconds": 140.81
+  },
+  "mutation_test": {
+   "mutants_total": 20,
+   "mutants_caught": 20,
+   "gates": 40,
+   "exit_code": 0
+  },
+  "conventions_tests": {
+   "passed": 52,
+   "total": 52,
+   "executables": 8
+  },
+  "instrument_tests": {
+   "passed": 27,
+   "total": 27,
+   "executables": 7
+  }
+ },
+ "structure": {
+  "tape_nodes_raw": 27459283,
+  "tape_nodes_after_passes": 517036,
+  "ir_domains": 67,
+  "ir_domains_exp_ended": 2,
+  "ir_domains_select_ended": 0,
+  "scan_domains": 5,
+  "scan_chains": 1107,
+  "scan_rows": 255959,
+  "values": 423235,
+  "columns": 97841,
+  "gathers": 678234,
+  "segment_members": 172446,
+  "literals": 6
+ },
+ "timings_ms": {
+  "note": "bench/run.sh, release preset, 20 repetitions x >=0.2s min_time, medians; quiet machine (load 4.8 -> 2.84 of 16, threshold 8.0)",
+  "BM_Record": {
+   "min": 7734.981,
+   "median": 7806.801,
+   "p90": 7908.204
+  },
+  "BM_Build": {
+   "min": 1004.017,
+   "median": 1016.398,
+   "p90": 1024.057
+  },
+  "BM_Calibrate_chord_policy1": {
+   "min": 14.86,
+   "median": 14.933,
+   "p90": 14.992
+  },
+  "BM_Calibrate_per_iteration_policy0": {
+   "min": 54.27,
+   "median": 54.695,
+   "p90": 55.062
+  },
+  "BM_Evaluate_B1_L8": {
+   "min": 1.507,
+   "median": 1.53,
+   "p90": 1.548
+  },
+  "BM_Evaluate_B1_L1": {
+   "min": 1.483,
+   "median": 1.525,
+   "p90": 1.629
+  },
+  "BM_Evaluate_B8_L8": {
+   "min": 6.435,
+   "median": 6.525,
+   "p90": 6.568
+  },
+  "BM_Evaluate_B64_L8": {
+   "min": 51.804,
+   "median": 52.268,
+   "p90": 52.591
+  },
+  "BM_Evaluate_B64_L32": {
+   "min": 51.048,
+   "median": 51.377,
+   "p90": 51.8
+  },
+  "BM_Evaluate_B64_L64": {
+   "min": 56.379,
+   "median": 57.039,
+   "p90": 57.265
+  },
+  "BM_Run_1": {
+   "min": 17.664,
+   "median": 17.872,
+   "p90": 18.024
+  },
+  "BM_Run_8": {
+   "min": 127.907,
+   "median": 129.185,
+   "p90": 130.343
+  },
+  "BM_Run_64": {
+   "min": 1027.53,
+   "median": 1030.925,
+   "p90": 1035.556
+  },
+  "BM_Adjoint_1": {
+   "min": 31.921,
+   "median": 32.63,
+   "p90": 33.13
+  },
+  "BM_Adjoint_8": {
+   "min": 47.357,
+   "median": 48.118,
+   "p90": 48.702
+  },
+  "BM_Adjoint_64": {
+   "min": 276.016,
+   "median": 278.355,
+   "p90": 279.974
+  },
+  "BM_ForwardLadder": {
+   "min": 1356.993,
+   "median": 1373.389,
+   "p90": 1381.031
+  }
+ },
+ "derived": {
+  "o2_evaluation_ms_B1_L8": 1.53,
+  "o3_reverse_ms_per_output_lane_B64": 4.349296875,
+  "o4_ms_per_scenario_B64": 16.108203125,
+  "one_calibration_chord_ms": 14.933,
+  "record_ms": 7806.801
+ },
+ "perf_gate": {
+  "baseline_id": "d448afd70180",
+  "compared": 17,
+  "ok": 17,
+  "regression": 0,
+  "faster": 0,
+  "verdict": "PASS"
+ },
+ "fusion_coverage": {
+  "note": "scripts/exec_coverage.py joining Interpreter::describe() plans (stage_a_plan*.txt), the IR facts (stage_a_domains.csv) and a -DEPYKOS_EXEC_PROFILE build's per-domain timers (100+ run average; build/profile, not a gated preset)",
+  "B1_L8": {
+   "reduction_pct": 11.6,
+   "fused_pct": 0.4,
+   "scan_pct": 76.6,
+   "plain_pct": 11.0,
+   "output_copy_pct": 0.4,
+   "profile_runs": 116
+  },
+  "B64_L8": {
+   "reduction_pct": 9.1,
+   "fused_pct": 0.2,
+   "scan_pct": 68.8,
+   "plain_pct": 20.6,
+   "output_copy_pct": 1.4,
+   "profile_runs": 116
+  },
+  "B64_L32": {
+   "reduction_pct": 8.8,
+   "fused_pct": 0.1,
+   "inlined_pct": 0.0,
+   "scan_pct": 67.4,
+   "plain_pct": 22.4,
+   "output_copy_pct": 1.3,
+   "profile_runs": 116
+  }
+ },
+ "notes": "M3-gate run 2: fresh worktree cut from origin/integrate/m1-m5 at cc23459 (includes the M3-fix lookback/payment-lag commits landed after m3-gate-1). All PROBLEM.md section 6 gates re-verified, numerically consistent with the m3-gate-1 run (fingerprint unchanged: d448afd70180, same machine; the differential_e0/one_tape/sharing/scenario_lanes/optimality/recovery gates are bitwise or exactly reproduced; the two vs-Dual worst values differ in the last few digits as expected between release and reference contraction). conventions_* is 52/52 GTest cases across 8 executables and instrument_* is 27/27 across 7 executables on this tree, each counted and verified directly by running every executable and reading its own '[==========] N tests ... ran' / '[  PASSED  ]' summary. These counts (52, 27) differ from the 64/64 and 25/25 figures m3-gate-1's report stated; this run does not reconcile that discrepancy, it only reports what is actually on this tree today, all passing. Mutation harness (EPYKOS_MUTATION_JOBS=8): 20/20 mutants caught against the same 40-gate set as gate-1, exit 0. Fusion-coverage profile build (build/profile, CMAKE_CXX_FLAGS=-DEPYKOS_EXEC_PROFILE, an ad hoc directory outside CMakePresets.json rather than a dedicated preset -- labelled simplification) matches gate-1's shares closely (B64/L32 identical to 1 decimal place; B1/L8 and B64/L8 within ~1-2 points, expected run-to-run timing noise on an instrumented build)."
+}

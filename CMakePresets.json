@@ -1,0 +1,81 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "release: -O3 -march=x86-64-v3 -fno-math-errno (D13)",
+      "description": "Gated optimised build. No -ffast-math. The ISA flag is dropped on non-x86-64 hosts.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "EPYKOS_REFERENCE": "OFF"
+      }
+    },
+    {
+      "name": "reference",
+      "displayName": "reference: release flags + -ffp-contract=off",
+      "description": "Bit-identity (E0) reference build: every TU compiled without FMA contraction (D8).",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "EPYKOS_REFERENCE": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "debug: -O0 -g",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "EPYKOS_REFERENCE": "OFF"
+      }
+    },
+    {
+      "name": "mutation",
+      "displayName": "mutation: reference flags + EPYKOS_MUTATIONS=ON (scripts/mutation_test.sh)",
+      "description": "The reference build with the registered mutants compiled in; EPYKOS_MUTANT=<name> selects one at run time (D32). Never a gated or measured build.",
+      "inherits": "reference",
+      "cacheVariables": {
+        "EPYKOS_MUTATIONS": "ON"
+      }
+    },
+    {
+      "name": "profile",
+      "displayName": "profile: release flags + EPYKOS_EXEC_PROFILE=ON (tools/costmodel/)",
+      "description": "The release build with exec::Interpreter's per-domain -DEPYKOS_EXEC_PROFILE timers compiled in (D45 named this 'ad hoc, not a checked-in preset' for M3; M4/CM makes it one). Never a gated or measured-for-perf-gate build: the instrumentation adds overhead to every run().",
+      "inherits": "release",
+      "cacheVariables": {
+        "EPYKOS_EXEC_PROFILE": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "release",   "configurePreset": "release" },
+    { "name": "reference", "configurePreset": "reference" },
+    { "name": "debug",     "configurePreset": "debug" },
+    { "name": "mutation",  "configurePreset": "mutation" },
+    { "name": "profile",   "configurePreset": "profile" }
+  ],
+  "testPresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    },
+    { "name": "release",   "inherits": "base", "configurePreset": "release" },
+    { "name": "reference", "inherits": "base", "configurePreset": "reference" },
+    { "name": "debug",     "inherits": "base", "configurePreset": "debug" },
+    { "name": "mutation",  "inherits": "base", "configurePreset": "mutation" }
+  ]
+}

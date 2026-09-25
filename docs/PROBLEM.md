@@ -117,6 +117,16 @@ not a win, once D57 corrected the synthetic-cost-model pricing bug that had made
 extracted program does pass §6 at its declared class, and the self-regression gate against the M3 baseline (D9)
 passes (17/17 benchmarks). Full account: `docs/RESUME.md` §5 "M4 result", `docs/DECISIONS.md` D59.
 
+**Post-M4 correction to the first of those two misses (D63, 2026-09-25).** The rediscovery clause now PASSES on
+measured wall clock — 1.0164x at B=1 and 0.9985x at B=64 against the M1 greedy default, against the 1.02x target
+D59 recorded as missed at 1.0277x/1.0427x — because the cost model had been pricing `exec::Interpreter`'s step
+pairing at exactly zero, so every fusion candidate tied with its unfused twin and extraction's tie-break kept the
+unfused one. Read D63 before quoting that pass: it is met BY IDENTITY (the extracted candidate is the default
+plan's own execution, not something better than it), and the OTHER miss is unchanged — the search's best Stage A
+candidate improved from 0.999055x to 0.991029x on the full tape, which is still noise against the cost model's
+own error, and `cross_stage_wins` is still 0. The model's prediction error improved from 84.4%/69.3% to
+58.6%/49.7% and still misses this section's <25% target by about a factor of two.
+
 ## 8. Milestones (D35; supersedes ROADMAP M3–M5 as first written)
 
 - **M3 — groundwork and the Stage A tape**: conventions layer with sources, real instruments, all schemes and

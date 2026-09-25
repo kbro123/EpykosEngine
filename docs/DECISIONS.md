@@ -3455,8 +3455,9 @@ Side by side with the templated `double` path in the same run: swap PV 1.792e-15
 1.040e-15. They coincide because `tests/verify/m1_differential_e0_test.cpp` holds them bitwise equal; the book-PV
 difference is the contraction one, and note that the interpreter's 1.079e-15 is exactly the templated path's
 `reference`-preset figure in §6 — which is what it should be, since the interpreter's kernels are `_e0`-pinned and
-therefore contraction-free under `release` too. Two independent routes to the same number is a cheap consistency
-check and it holds. **The value of measuring the execution path against TRUTH rather than against the templated path
+therefore contraction-free under `release` too. Run under `reference`, where the templated path is contraction-free
+as well, the two agree exactly: **1.792e-15 and 1.079e-15 for both**, and the interpreter's own pair is unchanged
+from its `release` run. Three independent routes to the same two numbers, and they hold. **The value of measuring the execution path against TRUTH rather than against the templated path
 is that it says which one moved**, which is exactly why §4 prefers it; a path-against-path comparison of two figures
 that agree tells you nothing about either.
 
@@ -3515,7 +3516,7 @@ rather than a reimplementation. Only `exp` is reached on a Scalar anywhere in ei
 (`maths/curve/linear.hpp:35`, `curve.hpp:147`, `composite.hpp:216`, all unqualified after a `using std::exp;` and so
 ADL-friendly); no `log`, `sqrt`, `pow`, `fma` or `recip` is. `Wide` nevertheless supplies Dual's whole surface, so
 "the maths instantiates at the oracle type" is checkable rather than incidental
-(`WideE0.OperatorSurfaceMatchesDualAndDouble`).
+(`WideScalar.OperatorSurfaceMatchesDualAndDouble`).
 
 **What does NOT instantiate, reported and not worked around** (the brief's "a required `double` conversion or a
 hidden comparison is a finding"):
@@ -3681,8 +3682,9 @@ Three consequences for what landed here, and none of them invalidates a number a
    name leaves D33's mutation gate set as a result; it catches no mutant, so nothing is lost.
 
 **The bitwise assertions this package does make are §4's "test of convenience", not contracts**, and §4 explicitly
-permits them: "where two paths happen to agree exactly and the exactness costs nothing to assert, asserting it is a
-good bug detector and is allowed — it is a test of convenience, never a constraint." There are three. The
+permits them: "Where two paths happen to agree exactly and the exactness costs nothing to assert, asserting it is a
+good bug detector and is allowed... It is a test of convenience, never a constraint. The moment a kernel wants to
+reorder for speed, the assertion is relaxed there and the error measured." There are three. The
 error-free transformations are exact against 128-bit integers (§2) — that one is a mathematical fact about the
 algorithm, not a flags claim. The Stage A anchor holds this fixture's `double` side bitwise equal to
 `price_stage_a_at` (§5) — a guard against measuring the wrong thing, and if it ever fails the fix is to read the

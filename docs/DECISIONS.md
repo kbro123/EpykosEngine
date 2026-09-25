@@ -4098,3 +4098,55 @@ given no `bench/results/` baseline — a spike's hand-written maths has no busin
 **This branch also carries merges of `mx/head-to-head` (D71) and `p0/oracle` (D72)**, because the `compare_ois`
 fixture and `epykos::Wide` live there and the spike needs both. Neither is modified. The only conflicts were the
 two documents' append points.
+
+## D77 — The telescoped ladder measured directly against the other engine: 2.8x FASTER, where the naive form is 42x slower (2026-09-26)
+
+Closes the loop D76 left open. D76 measured the naive form against the other engine and inferred what telescoping
+would do by dividing our number by D74's ratio, across two runs taken hours apart at different loads. That is an
+inference, not a measurement, and the same kind of cross-run arithmetic understated the other engine by a factor
+of two earlier in D76. This entry measures it.
+
+**Measured on an idle box** — 1-minute load 2.45 before, 2.77 after, nothing above 25% CPU except the window
+server — `release`, Apple clang 21, fingerprint `d448afd70180`, Google Benchmark 20 repetitions, medians, both
+forms as a parameter on the SAME cases in ONE process so the contrast crosses no process boundary and no load
+change (the failure mode D63 §2(f) recorded, where twelve minutes of drift between two processes reversed a
+contrast).
+
+| 64-trade book, risk ladder | median |
+|---|---|
+| ours, naive, warm | 6,936.1 us |
+| **ours, telescoped, warm** | **58.9 us** |
+| ours, telescoped, chord | 59.5 us |
+| the other engine, median of 15 samples | 166.0 us |
+
+**Ratio: 2.82x in our favour.** D76's inference predicted 58 us from cross-run arithmetic; the direct measurement
+is 58.9 us, so that inference happened to hold. It is replaced by this measurement regardless, because it was not
+entitled to.
+
+Evaluation at 64 trades telescopes to 4.11 us from 141.3 us naive.
+
+**The two asymmetries now point in opposite directions, and both remain.**
+
+*In their favour, unchanged:* the counters on every row above read `jacobians=1 solves=1 residual_evals=1`. We
+still rebuild the 16x16 calibration Jacobian on every ladder call; they run on a curve already calibrated and
+reuse their factorisation. `BM_LadderChord` asks for the chord policy to close this and does not — 59.5 us
+against warm's 58.9 us.
+
+*In our favour:* their `risk_us` is one cold sample per process, ours is a warm in-process median. A like-for-like
+warm measurement of theirs would be faster, so 2.82x is an UPPER bound on our lead. Their fastest of fifteen
+samples was 150.1 us, so even their best cold number leaves us ahead; how much of the gap survives a warm
+comparison is unmeasured and should not be guessed.
+
+**What this does and does not establish.** It does not say the engine is faster than a hand-optimised specialist
+in general. The `compare_ois` fixture is entirely fixed-versus-compounded-SOFR OIS, which is the best possible
+case for this rewrite, and D74 measures the prize diluting with book size as fixed legs add work with nothing to
+collapse. Stage A's averaged RFR coupons do not telescope at all.
+
+What it does establish is the thesis of `PRINCIPLES.md` §0, now on both sides of a real comparison: **one
+algebraic collapse that the engine could not express is worth more than the entire space the optimiser spent M4
+searching.** The whole plan-level dynamic range on Stage A is 1.027x-1.042x (D68). This is 118x on the same
+quantity, and it turns a 42x deficit against a specialist into a 2.8x lead.
+
+No SwapEngine source file was opened. Only its built binaries were executed, per D21. The telescoped form remains
+test-only spike code (D74) and must not become production maths: `PRINCIPLES.md` §2 requires the engine to find
+this itself.

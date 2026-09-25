@@ -3426,14 +3426,26 @@ a factor of **23.8×** on the part of the job this entry touches. Cross-check th
 the pre-D70 script: the unmodified script's first 12 mutants on this machine ran at a median of 67.5 s each,
 against `--full`'s 66.7 s.
 
-**Wall clock on CI, GCC 13, ubuntu-latest, `--jobs 2`, the whole job including the build:** recorded in this
-entry's follow-up commit, together with the run id and its four job conclusions, per D46's rule that CI evidence
-is a poll of the package's own SHA and never "a recent green run".
+**Wall clock on CI, GCC 13, ubuntu-latest, `--jobs 2` (so `--outer 2`), the whole job including the build.**
+Polled on this package's own SHA `17f1062`, run `36141374691`, per D46's rule that CI evidence is never "a recent
+green run"; all four jobs green (`ubuntu-latest / mutation` 11m23s, `ubuntu-latest / reference` 11m56s,
+`ubuntu-latest / release` 12m33s, `macos-latest / release` 13m13s). The same step broken out the same way as §1:
 
-Projected from the parts already measured, and labelled as the estimate it is: the build (508.0 s) and the
-baseline (64.9 s) do not change, and the fast path is the only new term, so the job should land near eleven
-minutes and the BUILD becomes its long pole at roughly four fifths of it. That is not addressed here and is a
-separate question — D12 fixes the dependency set, so a compiler cache would need its own decision entry.
+| phase | before (`36088537149`, `7f22134`) | after (`36141374691`, `17f1062`) |
+|---|---|---|
+| configure + build the `mutation` preset | 508.0 s (13.5%) | 526.0 s (**77.2%**) |
+| baseline: all 57 gates, no mutant selected | 64.9 s (1.7%) | 69.2 s (10.2%) |
+| the 50 mutants | 3,166.2 s (84.4%) | **72.7 s** (10.7%) |
+| the step | 3,748.8 s = 62.5 min | **681.1 s = 11.35 min** |
+
+**5.5× on the job, 43.6× on the part of it this entry touches.** The three sibling jobs, which this entry does
+not touch, came in at 11m56s, 12m33s and 13m13s, so the mutation job is no longer the long pole of a push: it is
+now the FASTEST of the four.
+
+What it is instead is a build. At 526.0 s the build is 77.2% of the job, and the remaining 141.9 s of testing is
+close to the floor — the baseline cannot be shortened without giving up the property §3 rests on, and the fast
+path is already one gate per mutant. Anything further has to come from the build, which is out of this entry's
+scope and would need its own: D12 fixes the dependency set, so a compiler cache is a decision, not a tweak.
 
 **The verdict is unchanged, which is the claim that actually matters.** Fifty mutants over 57 gate tests, all 50
 caught, 0 survivors, in every one of these: the `--full` cross-product under Apple clang; the fast path under
@@ -3441,7 +3453,10 @@ Apple clang at each of the four `--jobs`/`--outer` pairs above; the fast path un
 a `gcc:13` container into a container-local copy of the tree (`50 mutant(s) caught by their recorded gate, 0
 needed the full 57-gate fallback`, `every mutant caught`, exit 0); and, as the pre-change reference on that same
 compiler, CI run `36088537149`'s own table at `7f22134`. The 50 mutant names and their caught/survived verdicts
-are identical across all of them.
+are identical across all of them. The cleanest single statement of that is the two GCC CI tables, pre-change and
+post-change, compared mutant by mutant: **same 50 names, same verdict for every one, on the same compiler and the
+same runner image** — and post-change, all 50 were caught by their recorded gate with **0 needing the fallback**,
+so the committed map is not merely correct on GCC but complete for it.
 
 **Every gate the Apple clang `--full` run chose also catches under GCC 13**, checked entry by entry against that
 CI run's table, so the committed map costs no fallbacks on the compiler CI actually uses. The two compilers
@@ -3483,6 +3498,7 @@ returns 404 "Branch not protected"; `gh api .../rulesets` returns `[]`), so no s
 today and either pattern would have been safe.
 
 One consequence of the fast path worth stating plainly, since it cuts against the dropped half: a docs-only
-commit still runs the mutation job. It no longer costs 62.6 minutes to do it, which is what made the filter
-urgent; the filter would take the remainder to nearly zero, but it is no longer the difference between an agent
-blocked for an hour and an unblocked one.
+commit still runs the mutation job. It no longer costs 62.6 minutes to do it — it costs 11m23s, which is less
+than any of the three jobs that would still have run under the filter — so the filter would now save a docs-only
+push nothing at all in wall clock, only runner minutes. That is a real but much smaller argument than the one it
+was commissioned under, and it is worth re-deciding on rather than inheriting.

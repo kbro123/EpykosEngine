@@ -46,7 +46,7 @@ tools/compare/compare_ois        builds fixtures::compare_ois, records ONE tape,
 scripts/compare_swapengine.py    feeds the exchange file to the other engine's public JSON CLI
                                  and diffs the two answer sets. Exit 1 = they disagree.
 bench/compare/ois_ladder_bench   our side's timing: BM_LadderChord / BM_LadderWarm /
-                                 BM_LadderCold / BM_Evaluate / BM_Build.
+                                 BM_LadderCold / BM_Evaluate / BM_Calibrate / BM_Build.
 tests/compare/ois_test           our side alone: the fixture calibrates, the ladder agrees with
                                  bump-and-recalibrate. Runs in CI; needs no other engine.
 ```
@@ -193,8 +193,22 @@ book size; and the flags each side was built with — ours from `build/release/e
 theirs from its own build's CMake cache, which are **not** the same toolchain and must be stated
 as such rather than presented as one fingerprint (D9, D13).
 
+**On curve build, which was the brief's second target: the ladder is the only quantity for which
+both engines self-report a comparable in-process time.** Their stateless JSON response carries
+`risk_us` and `price_us` but no calibration time (the session verbs have a `last_solve_us`; the
+stateless CLI does not expose it), so a matched curve-build timing cannot be obtained through the
+public interface. `BM_Calibrate` is therefore ours only, reported as context. The curve-build
+*agreement* is already established and needs nothing further: the calibrated discount factors
+match to 5.832e-13 and the model par rates to 3.963e-14 (§4).
+
 Informational rows worth taking in the same window, clearly labelled as **their fixture, not
 ours**, so the ratio below has some context: one run of their `build/bench/risk_bench`
-(`BM_Risk_QuantLib_Bump` and `BM_Risk_Ours_Analytic` on their own 23-knot, 9-swap problem).
+(`BM_Risk_QuantLib_Bump` and `BM_Risk_Ours_Analytic` on their own 23-knot, 9-swap problem) and of
+their `build/bench/curve_build_bench`.
+
+Threads: this engine is single-threaded throughout — there is no `std::thread` and no
+`hardware_concurrency` call anywhere under `src/` or `include/epykos/`. The other engine's thread
+use on this path is not established and should be checked in the window before any ratio is
+quoted.
 
 Then the ratio — and §4 items 1, 3 and 5 go in front of it, not after it.

@@ -20,6 +20,10 @@
 //                     the warm row is hidden by leaving this one out.
 //   BM_Evaluate/T     the whole-program interpreter alone at the solved state, one lane — the
 //                     forward half, for context on where the ladder's time goes.
+//   BM_Calibrate/T    O1 + O2 with no ladder: one full recalibration from the flat start and the
+//                     forward pass. The closest analogue to a "curve build", and OURS ONLY — the
+//                     other engine's stateless response reports no calibration time, so there is
+//                     no matched number to put beside it.
 //   BM_Build/T        solver::ImplicitProgram construction (inference, residual programs,
 //                     interpreter, adjoint): structure time, paid once, never per ladder.
 //
@@ -125,6 +129,30 @@ void BM_Evaluate(benchmark::State& state) {
   state.counters["trades"] = trades;
 }
 
+// O1 + O2 with no ladder: one full recalibration from the block's flat start, then the forward
+// pass. This is the closest analogue to a "curve build", and it is reported for THIS ENGINE ONLY
+// -- the other engine's stateless JSON response carries `risk_us` and `price_us` but no
+// calibration time, so unlike the ladder there is no matched number to put beside it
+// (bench/compare/README.md §6). Context, not a head-to-head row.
+void BM_Calibrate(benchmark::State& state) {
+  const int trades = static_cast<int>(state.range(0));
+  Fixture& f = fixture(trades);
+  solver::ImplicitProgram& prog = *f.cold;
+  const int n_q = prog.n_state(), n_out = prog.n_outputs();
+  std::vector<double> st(static_cast<std::size_t>(n_q)), o(static_cast<std::size_t>(n_out));
+  for (int k = 0; k < n_q; ++k) st[static_cast<std::size_t>(k)] = f.s.quotes[static_cast<std::size_t>(k)];
+  for (auto _ : state) {
+    prog.run(st.data(), 1, o.data());
+    benchmark::DoNotOptimize(o.data());
+    benchmark::ClobberMemory();
+  }
+  const solver::ImplicitProgram::RunStats& r = prog.last_run();
+  state.counters["trades"] = trades;
+  state.counters["solves"] = r.solves;
+  state.counters["residual_evals"] = static_cast<double>(r.residual_evaluations);
+  state.counters["jacobians"] = static_cast<double>(r.jacobians);
+}
+
 void BM_Build(benchmark::State& state) {
   const int trades = static_cast<int>(state.range(0));
   Fixture& f = fixture(trades);
@@ -141,6 +169,7 @@ void register_all() {
     benchmark::RegisterBenchmark("BM_LadderWarm", BM_LadderWarm)->Arg(t)->Unit(benchmark::kMicrosecond);
     benchmark::RegisterBenchmark("BM_LadderCold", BM_LadderCold)->Arg(t)->Unit(benchmark::kMicrosecond);
     benchmark::RegisterBenchmark("BM_Evaluate", BM_Evaluate)->Arg(t)->Unit(benchmark::kMicrosecond);
+    benchmark::RegisterBenchmark("BM_Calibrate", BM_Calibrate)->Arg(t)->Unit(benchmark::kMicrosecond);
   }
   benchmark::RegisterBenchmark("BM_Build", BM_Build)->Arg(kTrades[0])->Unit(benchmark::kMillisecond);
 }

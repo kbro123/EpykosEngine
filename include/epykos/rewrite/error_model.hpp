@@ -1,15 +1,32 @@
 // EpykosEngine — how a rewrite's error is stated, and how errors COMPOSE (P1/term-rewriting
-// DESIGN ONLY; D73; docs/PRINCIPLES.md §4, docs/TERM_REWRITING.md §5).
+// DESIGN ONLY; D73; docs/PRINCIPLES.md §4 as amended 2026-09-25, docs/TERM_REWRITING.md §5).
 //
 // STATUS: an INTERFACE PROPOSAL. Nothing implements it.
+//
+// ---------------------------------------------------------------------------------------------
+// Bit-identity is RETIRED as a contract, so this file is the only admission criterion there is
+// ---------------------------------------------------------------------------------------------
+//
+// PRINCIPLES.md §4 (owner, 2026-09-25: "I genuinely don't think we care about bitwise correctness
+// if we've got deterministic algebraic equivalence") leaves two tiers and a test. STRUCTURAL is
+// exact because it is a graph identity and rounding does not arise. MATHEMATICAL is characterised
+// error against the oracle — and it now covers **every execution path too**, so the interpreter,
+// the catalogue kernels and the adjoint are implementations of the recorded maths like any
+// rewrite and are judged the same way. There is no execution tier and no bit-preserving class.
+//
+// The consequence for this interface is the whole point: **a rewrite is never admissible BECAUSE
+// it preserves bits.** It is admissible when its composed error fits the output class's budget.
+// `rewrite::Exactness` survives only as a BUG DETECTOR — see `ExactnessHint` below — and never
+// as a licence. Anything that reads an E0 declaration and concludes "therefore admit" is wrong
+// under the current contract.
 //
 // ---------------------------------------------------------------------------------------------
 // The problem: a per-op ulp count does not compose
 // ---------------------------------------------------------------------------------------------
 //
-// M1-M4 classified a rewrite as E0 (bit-identical) or E1 ("<= 1 ulp per op", D26/D30). That is
-// adequate for ADMITTING one rewrite and useless for COMPOSING several, for two reasons that are
-// worth stating separately because they have different fixes:
+// M1-M4 classified a rewrite as E0 (bit-identical) or E1 ("<= 1 ulp per op", D26/D30). Even as an
+// admission criterion that was the wrong instrument, and for COMPOSING several rewrites it is
+// useless, for two reasons worth stating separately because they have different fixes:
 //
 //   (a) ULPS ARE NOT A SCALE. An ulp is a property of a representable neighbourhood, so "1 ulp"
 //       at 1e-300 and "1 ulp" at 1e+300 are incomparable quantities. Adding them is meaningless.
@@ -116,13 +133,46 @@ const char* to_string(OutputClass c) noexcept;
 // genuinely two-objective: the accuracy axis is a constraint the owner sets, the speed axis is
 // what the search minimises. docs/TERM_REWRITING.md §5.3 argues why that is the right shape and
 // what it gives up.
+//
+// The numbers live in PROBLEM.md beside the outputs they govern (PRINCIPLES.md §4). There is
+// deliberately NO default budget constant here: a budget is an owner decision, and a library
+// default would become the de-facto contract the way bit-identity did — PRINCIPLES.md §0's
+// "the space the search may explore was never written down" is precisely this failure mode.
+// `no_rewrites()` exists for tests and bisection, is named for what it does rather than for a
+// property it preserves, and is NOT the contract.
 struct ErrorBudget {
   double relative[static_cast<int>(OutputClass::Count_)] = {0.0, 0.0, 0.0};
 
-  // Every rewrite must be E0. Reproduces the M1-M4 contract exactly, so the existing gates keep
-  // meaning and a caller can ask for the old behaviour in one call.
-  static ErrorBudget exact_only() noexcept { return ErrorBudget{}; }
+  // A zero budget everywhere. Admits only rewrites whose predicted error is identically zero,
+  // which in practice means the structural and exactly-representable ones. Useful to bisect a
+  // regression ("does it still happen with the algebra switched off?") and as a test fixture.
+  // It is NOT "the safe setting": a zero budget can REJECT a rewrite that is strictly MORE
+  // accurate than what it replaces (`fma_contract`, `mul_recip_as_div`, the telescope), which is
+  // exactly the failure PRINCIPLES.md §6 item 4 records.
+  static ErrorBudget no_rewrites() noexcept { return ErrorBudget{}; }
 };
+
+// Whether a rewrite HAPPENS to be exact in IEEE-754 double. Advisory, and only ever used two
+// ways, both of them tests rather than gates (PRINCIPLES.md §4: "a test of convenience, never a
+// constraint"):
+//
+//   * as a FREE ASSERTION. Where a rewrite is exact and asserting it costs nothing, assert it —
+//     it is a good bug detector, and it is what caught the GCC operand-order divergence (D61).
+//     The moment the rewrite or a kernel under it wants to reorder for speed, the assertion is
+//     relaxed THERE and the error measured; it does not propagate a constraint outward.
+//   * as a SHORTCUT. A candidate whose every contribution is `Exact` needs no propagator pass,
+//     because its composed error is identically zero.
+//
+// What it must never do is decide admissibility. `Unknown` is the honest default for a rule that
+// has not characterised itself and costs only a propagator call.
+enum class ExactnessHint : std::uint8_t {
+  Unknown = 0,       // not characterised; treat as inexact and measure
+  Exact = 1,         // identical bits for every input, unconditionally
+  ExactGivenCondition = 2,  // identical bits once a row-universal side condition is discharged
+  Inexact = 3,       // a real error, stated in the ErrorTerm
+};
+
+const char* to_string(ExactnessHint h) noexcept;
 
 // Which output class each output ordinal belongs to. Supplied by the caller (the Stage A harness
 // knows its own output layout, D44); the optimiser never guesses.
@@ -183,5 +233,57 @@ double predicted_relative_error(const CandidateError& err, const ErrorPropagator
 // True when every class's predicted error fits its budget. An all-exact candidate fits every
 // budget without consulting the propagator at all.
 bool within_budget(const CandidateError& err, const ErrorPropagator& prop, const ErrorBudget& budget);
+
+// --------------------------------------------------------------------------------------------
+// The slow/fast path agreement test (PRINCIPLES.md §4, owner 2026-09-25)
+// --------------------------------------------------------------------------------------------
+//
+// "We need to test if our slow and fast paths agree to within floating point tolerance."
+// Execution stopped being a tier, so what used to be an E0 equality assertion between the generic
+// interpreter and a catalogued kernel becomes a TOLERANCE comparison, and it belongs here rather
+// than in the verifier because it is the same error vocabulary.
+//
+// The owner's own objection, answered in §4: if the algebraic engine is correct they agree by
+// construction. True in R, false in floating point — two algebraically equivalent expressions are
+// different sequences of roundings — and, more to the point, the test is not testing the algebra.
+// It tests that the CODE implements the algebra, which is a claim about the construction rather
+// than a consequence of it. Two of this week's defects were exactly that gap and neither was an
+// algebra failure (D61's catalogue fingerprint that was canonical by design and was not; D65's
+// harness that sized a buffer from the wrong vector).
+//
+// It also measures CONDITIONING for free, which is why the result carries the number and not just
+// a boolean: agreement at 1e-16 says the expression is well conditioned; agreement at 1e-9 says
+// one path is losing precision and nothing is broken. That number is worth recording per pair
+// over time — it is the cheapest conditioning monitor the engine will ever have.
+enum class PathKind : std::uint8_t {
+  GenericInterpreter = 0,  // exec::Interpreter, no catalogue
+  CatalogueKernel = 1,     // a bound catalogue signature
+  Unfused = 2,             // planner fusion off
+  Fused = 3,               // planner fusion on
+  Adjoint = 4,
+  ForwardDual = 5,
+  Oracle = 6,              // the wide-precision instantiation (PRINCIPLES.md §4)
+};
+
+const char* to_string(PathKind p) noexcept;
+
+struct PathAgreement {
+  PathKind a = PathKind::GenericInterpreter;
+  PathKind b = PathKind::CatalogueKernel;
+  double max_relative = 0.0;   // worst disagreement seen, relative to the output class's scale
+  int worst_output = -1;
+  bool within_tolerance = true;
+  // True when the two paths happened to agree EXACTLY. Recorded, never required: §4 allows
+  // asserting it where it costs nothing, as a bug detector. A pair that has always been exact
+  // and stops being exact is worth a look and is not by itself a failure.
+  bool exact = false;
+};
+
+// PREFER measuring each path against the oracle to comparing two paths with each other, wherever
+// the oracle is affordable: it is the stronger statement and it says WHICH path is wrong rather
+// than merely that they differ (PRINCIPLES.md §4). Path-against-path is the cheap form and
+// belongs where the oracle is too expensive — which, for a 1,000-lane Stage A scenario grid, is
+// most places.
+PathAgreement compare_paths(PathKind a, PathKind b, const ErrorBudget& budget, const OutputClassMap& classes);
 
 }  // namespace epykos::rewrite

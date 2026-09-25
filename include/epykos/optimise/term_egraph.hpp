@@ -98,8 +98,12 @@ struct TermSaturationLimits {
   // ASSOCIATIVE-COMMUTATIVE MATCHING ON Op::Sum AND Op::Affine IS OFF, AND MUST STAY OFF.
   // Three independent reasons, any one of which is sufficient (design doc §3.4 and §6.2):
   //  (i)  Sum is a FIXED-ARITY LEFT FOLD in operand order, `((x_0 + x_1) + x_2) ...`
-  //       (ir/program.hpp's evaluation contract). Reordering its members changes the rounding, so
-  //       AC on Sum is not an E0 axiom at all; it is an unbounded family of E1 rewrites.
+  //       (ir/program.hpp's evaluation contract). Reordering its members changes the rounding by
+  //       an amount that is NOT bounded per rewrite — a sum of mixed-magnitude terms can lose
+  //       everything to cancellation under one order and nothing under another — so it is an
+  //       unbounded family whose error the propagator would have to price one permutation at a
+  //       time. PRINCIPLES.md §4's retirement of bit-identity does NOT relax this: the objection
+  //       was never "it changes bits", it is that the error is unbounded and the family infinite.
   //  (ii) D61 deliberately canonicalised a COMMUTATIVE STEP's two operands and deliberately did
   //       NOT canonicalise a Sum's member order. Introducing AC matching would silently reverse
   //       that decision and reopen `task_919ea449`'s class of compiler-dependent defect.
@@ -206,7 +210,7 @@ class TermEGraph : public rewrite::TermView {
     rewrite::TermClassId site = rewrite::invalid_term_class;
     ir::domain_id anchor = -1;
     std::int32_t step = -1;
-    rewrite::Exactness exactness = rewrite::Exactness::E0;
+    rewrite::ExactnessHint exactness = rewrite::ExactnessHint::Unknown;
     rewrite::ErrorTerm error{};
     std::string rule;
     std::string justification;

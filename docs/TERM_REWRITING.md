@@ -4,6 +4,14 @@ Design package P1, 2026-09-25. Implements `docs/PRINCIPLES.md` §8 item 2 ("Term
 proposal that replaces a sub-term, e-classes over terms") and §8 item 3 (the identity set and the
 recurrence rule kind of §2a). Decision entry: **D73**.
 
+> **Written against `PRINCIPLES.md` §4 as amended at `f8849b4` (2026-09-25), which retires
+> bit-identity as a contract anywhere.** Two tiers and a test, not three: structural is exact
+> because it is a graph identity; mathematical is characterised error against the oracle and now
+> covers every execution path too; execution is not a tier. Nothing in this design admits a rewrite
+> *because* it preserves bits. §3.6 is what that retirement buys, measured. §7.4 is the open
+> question the owner has not answered — whether the layout rules stay in the search or become a
+> post-extraction pass — designed both ways, with a recommendation.
+
 **This is a DESIGN. Nothing here is implemented.** The deliverable is this document plus interface
 headers — `include/epykos/rewrite/{term,term_rule,error_model,recurrence}.hpp` and
 `include/epykos/optimise/{term_egraph,term_extract}.hpp` — so that the shape can be reviewed
@@ -29,7 +37,8 @@ Stage A tape, and can be attempted *before* the term layer rather than after it.
 minimises cost subject to a per-output-class error budget, composing error by the adjoint the engine
 already has, because ulp counts do not compose and adjoint-weighted absolute perturbations do.
 Saturation is bounded by four mechanisms that between them replace D62's `RefirePolicy`, whose
-completeness loss this design recovers. The seven layout rules are wrapped, not ported.
+completeness loss this design recovers. The seven layout rules are wrapped, not ported, and where
+they *run* — inside the search or after it — is designed both ways in §7.4.
 
 And one finding that outranks all of it: **the ~48% of Stage A where the 250:1 telescoping win
 lives is code no rule is applied to.** §8.2.
@@ -210,7 +219,15 @@ Thirty-two axioms, enumerated in `rewrite::Axiom` (term_rule.hpp) so that the li
 place and a test can assert the enum and this table have not drifted apart
 (`tests/rewrite/term_interface_test.cpp`). Three buckets.
 
-### 3.1 Exact in IEEE-754 double, unconditionally (E0)
+**Read the buckets as a statement about floating-point behaviour, not about admissibility.** Since
+`PRINCIPLES.md` §4 retired bit-identity, an axiom in §3.1 has **no privilege** over one in §3.3:
+both are admitted or refused by their composed error against the output class's budget. The split is
+kept because it is true and useful in two narrower ways — the exact ones can be asserted for free as
+bug detectors (§4: "a test of convenience, never a constraint"), and the §3.2 conditions name an
+obligation a rule must discharge *before it may fire at all*, which is a soundness question and not
+a rounding one.
+
+### 3.1 Exact in IEEE-754 double, unconditionally
 
 | axiom | statement | ops | note |
 |---|---|---|---|
@@ -222,13 +239,13 @@ place and a test can assert the enum and this table have not drifted apart
 | `select_same_arms` | `select(p,x,x) = x` | Select | |
 | `select_push_unary` | `f(select(p,a,b)) = select(p, f(a), f(b))` | Select + any unary | exact because `Select` *picks*; D5 records both arms regardless. Can be a pessimisation (two `exp`s) or an optimisation (hoisting) — the cost model decides, which is the point of putting it in an e-graph rather than a greedy pass |
 | `commute_add_mul` | operand order of `Add`, `Mul`, `CmpEq` | | `op_is_commutative` already asserts this bitwise, and D61 already canonicalises it in `catalogue::Signature` |
-| `gather_push_unary` | `gath(g, f(t)) = f(gath(g, t))` | Gather + any unary | exact: a gather *re-indexes*, it does not compute. `r4a` already declares E0 and is the precedent. What differs between the two sides is only how many rows `f` runs on — a cost question, which is exactly why it belongs in an e-graph rather than a greedy pass |
+| `gather_push_unary` | `gath(g, f(t)) = f(gath(g, t))` | Gather + any unary | exact: a gather *re-indexes*, it does not compute. `r4a` already declares this exact and is the precedent. What differs between the two sides is only how many rows `f` runs on — a cost question, which is exactly why it belongs in an e-graph rather than a greedy pass |
 | `gather_push_binary` | `gath(g, f(s,t)) = f(gath(g,s), gath(g,t))` | Gather + binary, **same g both sides** | same argument; the same-gather condition is structural, checked on the table, not a value condition |
 
 ### 3.2 Admissible only once a row-universal side condition is discharged
 
 Exact once discharged, except the five transcendental entries at the foot of the table
-(`log_product`, `log_recip`, `exp_log`, `log_exp`, `sqrt_product`), which are also E1 (§3.3) — the
+(`log_product`, `log_recip`, `exp_log`, `log_exp`, `sqrt_product`), which are also inexact (§3.3) — the
 condition governs whether the axiom may fire at all, the `ErrorTerm` governs what firing costs, and
 the two are independent.
 
@@ -242,13 +259,13 @@ These are the ones a careless implementation gets wrong, and each names its obli
 | `sub_self` | `sub(x,x) = 0` | `provably_finite(x)` | `inf − inf = NaN` |
 | `div_self` | `div(x,x) = 1` | `provably_nonzero` **and** `provably_finite` | `0/0` and `inf/inf` are NaN |
 | `affine_drop_zero_coef` | drop an `Affine` member with `c_i = 0` | `provably_finite` of that member | same reason as `mul_zero` |
-| `log_product` | `log(a·b) = log a + log b` | `provably_positive` on both | E1 as well (see §3.3); the condition is separate from the error |
+| `log_product` | `log(a·b) = log a + log b` | `provably_positive` on both | inexact as well (see §3.3); the condition is separate from the error |
 | `log_recip` | `log(1/a) = −log a` | `provably_positive` | |
 | `exp_log` | `exp(log a) = a` | `provably_positive` | |
 | `log_exp` | `log(exp a) = a` | no overflow in `exp(a)` — a Column/Literal range check | |
 | `sqrt_product` | `sqrt(a)·sqrt(b) = sqrt(a·b)` | both provably non-negative | |
 
-### 3.3 Identities in ℝ, not in float: E1, each carrying an `ErrorTerm`
+### 3.3 Identities in ℝ, not in float: each carrying an `ErrorTerm`
 
 `add_assoc`, `mul_assoc`, `mul_distrib_add` (and the factoring direction, which is the valuable one),
 `div_as_mul_recip` / `mul_recip_as_div`, `fma_contract` / `fma_expand`, `recip_recip`, `exp_product`,
@@ -258,7 +275,7 @@ Two of these deserve calling out because under the M1–M4 contract they were *f
 `PRINCIPLES.md` §4 they are **improvements**:
 
 - **`fma_contract`** (`add(mul(a,b),c) → fma(a,b,c)`): one rounding instead of two. Faster *and*
-  more accurate. Already exists as a rule and was E1-classified, i.e. barely admissible.
+  more accurate. Already exists as a rule and was E1-classified, i.e. barely admissible under the old contract.
 - **`mul_recip_as_div`** (`mul(a, recip(b)) → div(a,b)`): one rounding instead of two. This is R4b's
   trade **run backwards**. R4b exists to share a reciprocal and is measured worth ~175 µs at B=64 on
   the M1 book (D27's profile: "forwards 11%, two IEEE divisions per element"). So the two directions
@@ -278,8 +295,9 @@ there is §8's question, not an assertion here.
 with coefficients. Three independent reasons not to put associative-commutative matching on them,
 any one of which is sufficient:
 
-1. **It is not an E0 axiom at all.** Reordering a Sum's members changes the rounding. "AC on Sum" is
-   not one identity; it is an unbounded family of E1 rewrites with unbounded error, since a sum of
+1. **The error is unbounded and the family is infinite.** Reordering a Sum's members changes the
+   rounding by an amount nothing bounds. "AC on Sum" is not one identity; it is an infinite family of
+   inexact rewrites with unbounded error, since a sum of
    mixed-magnitude terms can lose everything to cancellation under one order and nothing under
    another.
 2. **D61 decided this already, in the other direction.** It canonicalised a *commutative step's* two
@@ -295,8 +313,8 @@ the field is there so that a future package must *change a default* rather than 
 absence*, which is the failure mode `PRINCIPLES.md` §0 exists to prevent.
 
 What *is* allowed on a Sum is the one rewrite that preserves the fold order exactly:
-**`sum_factor_common`**, `Sum(c·x₀, …, c·xₙ) = c · Sum(x₀, …, xₙ)`, removing *n* multiplies. It is E1
-(the products round differently) but it does not reorder anything.
+**`sum_factor_common`**, `Sum(c·x₀, …, c·xₙ) = c · Sum(x₀, …, xₙ)`, removing *n* multiplies. It is inexact
+(the products round differently) but its error is bounded and it reorders nothing.
 
 ### 3.5 What the frozen op set costs, named
 
@@ -307,7 +325,7 @@ here is the bill, which the owner asked to see:
   form involves an absolute value. Workaround: `select(cmpge(x,0), x, neg(x))` — three ops and a
   branch, so the rewrite is usually a pessimisation and will not be selected.
 - **No `Pow`.** This is the expensive one, and §4.4 quantifies it: two of §2a's four recurrence classes
-  need `rⁿ`, which must be spelled `exp(n·log r)` — legal, but E1, requiring `provably_positive(r)`,
+  need `rⁿ`, which must be spelled `exp(n·log r)` — legal, but inexact, requiring `provably_positive(r)`,
   and turning ~*n* multiplies into one `exp` plus one `log`. On the measured libm cost that is a
   small constant-factor win, not an asymptotic one.
 - **No `Log1p`/`Expm1`.** The forward rate's `(DF_s/DF_e − 1)` is a catastrophic cancellation with a
@@ -317,6 +335,71 @@ here is the bill, which the owner asked to see:
 
 None of this blocks the telescope, which needs only `Div` — and that is not a coincidence, it is
 *why* the telescope is the one class with an asymptotic win.
+
+---
+
+### 3.6 What retiring bit-identity buys, audited against the code
+
+`PRINCIPLES.md` §4a costs the retirement at **14 engine sources, 37 test files, ~9,700 lines and 21
+lines of build routing** for the `-ffp-contract=off` / `*_e0` machinery alone. That is the visible
+bill. The invisible one is more interesting, because it is *complexity inside working rules that
+exists for no mathematical reason*. Audited against the code, not recalled:
+
+**1. `r2.bucket_rows` expands its entries in place instead of appending at the tail** — the clearest case, and
+the one D52 already wrote down. D52 finding 3, measured: the first implementation did the
+simpler thing (compact the split domain's `Column`/`Gather`/`Segment` entries away and append the
+bucket's at the tail). It passed every forward and round-trip gate and **failed the adjoint gate by
+36–68 ulps on 2 of the M1 book's 5 matching domains, with bit-identical forward values.** The cause
+is not in R2 at all: `adjoint::build_plan` builds each value's reader list by scanning
+`Program::gathers` / `segments` in **array order**, so a value read by both a split domain's gather
+and an unrelated one accumulates its adjoint in that scan order — move the entries and you reorder a
+floating-point sum. Same total, different bits. `expand_owned` therefore replaces each owned entry
+*at its own array position*, and D52 flags this as "the finding future rewrites that add or split
+Column/Gather/Segment entries should know about". **Under the amended §4 that whole constraint
+evaporates**, and with it a standing tax on every future structural rewrite: `detail::insert_domain_after`
+and `merge_producer_into_consumer` (`ir_edit.hpp`) both document "insertion never drops or reorders a
+gather/segment" as an invariant they preserve. They can stop.
+
+**2. The adjoint's accumulation order is fixed and documented as a contract.** `adjoint.hpp`: "every
+operation is per (row, lane) with no cross-lane or cross-row reduction and no dependence on the tile
+boundaries, so a lane of a batched run is **bitwise** the B = 1 run of that state and every tile /
+lane_tile gives the same bits (the E0 tests assert both)". That is a real constraint on kernel
+design — it forbids any reduction whose order depends on the lane width, which is the natural way to
+vectorise a reduction. Under §4 it becomes a tolerance test between the batched and unbatched paths,
+which is exactly the "slow and fast paths agree" shape. This is the single largest *performance*
+constraint the retirement lifts, and it is unmeasured: nobody has costed what a lane-width-dependent
+reduction order would buy, because it was not allowed.
+
+**3. `bucket_split_edit::all_bit_identical` compares IEEE bit patterns rather than values**,
+"STRICTER than `==` on purpose — `+0.0` and `-0.0` compare equal under `==` but are not the same
+value to fold into one literal, since `1.0 * -0.0` and `1.0 * 0.0` are not the same bits". Under §4
+the fold is admissible and its error is exactly zero except at `-0`, where §3.2's own analysis
+applies. The strict comparison can stay as a cheap conservative test; it no longer has to.
+
+**4. `r4b.shared_reciprocal` is held back by a bit argument, not an error argument.** Its header:
+`a / b` is "not bit-identical to `a * (1/b)` in general — DESIGN.md §12's own residual, two IEEE
+divisions per element". The M1 profile prices that residual at **~175 µs of 1,584 µs at B=64, about
+11%** (D27, "forwards 11%, two IEEE divisions per element"). Under §4 this is an ordinary
+speed/accuracy trade priced by the propagator, and — note the direction — the *reverse* rewrite
+(`mul_recip_as_div`) is an accuracy *improvement*. The search should hold both and let the budget
+choose. That is 11% of the M1 kill-path that was not previously on the table.
+
+**5. `planner_rules.hpp` requires "the default plan must be bit-identical and time-identical to
+M1's".** A pipeline-shape constraint on the planner, inherited from PROBLEM.md §7. Time-identical is
+still worth wanting; bit-identical is not, and it is the clause that forces the planner rules into
+the exact dependency order the old greedy pass ran in.
+
+**6. `rewrite::verifier` derives a bitwise tolerance from an all-E0 history** (`verifier.hpp`: "a
+bound derived from `history`: bitwise (E0) when none of…"). That is the admission criterion §4
+retired, wired into the gate. It becomes the oracle comparison plus a path-agreement check.
+
+**What the retirement does *not* buy, stated so the claim is not overread.** It does not relax
+§3.4's refusal to AC-match `Op::Sum`. The objection there was never "it changes bits" — it is that
+the error is *unbounded* (a sum of mixed magnitudes can lose everything to cancellation under one
+order and nothing under another) and the family infinite (n! orderings). A contract based on
+characterised error refuses that even more firmly than one based on bits, because there is no bound
+to state. It also does not relax the structural tier: `lower(graph, initial) == input` stays exact,
+and costs nothing, because it is a graph identity with no arithmetic in it.
 
 ---
 
@@ -441,7 +524,7 @@ telescope fully, 10 partially, and 40 have no compounding scan at all.
 
 So, stated as plainly as the brief asks: **of §2a's four classes, only the telescope gets an
 asymptotic win over a frozen op set.** Arithmetic collapses honestly but on the cheapest op. The
-other two need `rⁿ` spelled as `exp(n·log r)`, which is E1, needs a positivity proof, and trades *n*
+other two need `rⁿ` spelled as `exp(n·log r)`, which is inexact, needs a positivity proof, and trades *n*
 multiplies for two transcendentals — on the measured libm cost (D27: `exp` at ~5 ns/call amortised,
 845–866 µs for 164k calls) that breaks even around *n* ≈ 10 and is a small constant-factor win
 beyond it, not a 250:1 one.
@@ -541,9 +624,41 @@ slightly more cost is never preferred, because nothing asks for it. That is the 
 the owner sets budgets; the engine does not get to trade the owner's accuracy for speed on its own
 authority — but it does mean the engine will not volunteer accuracy it was not asked for.
 
-`ErrorBudget::exact_only()` is the default and reproduces the M1–M4 contract exactly: only E0
-rewrites selectable, result bit-identical to the recording, every existing gate keeping its meaning.
-That is how this lands without invalidating M1–M3.
+**There is deliberately no default budget**, and that is a design decision rather than an omission.
+A library default becomes the de-facto contract — which is precisely how bit-identity became one
+(`PRINCIPLES.md` §0: "the space the search may explore was never written down, so nobody noticed it
+excluded the only thing worth finding"). The numbers belong in `PROBLEM.md` beside the outputs they
+govern. `ErrorBudget::no_rewrites()` is the zero budget, named for what it does; it is useful for
+bisecting a regression and as a test fixture, and it is **not** "the safe setting" — a zero budget
+rejects `fma_contract`, `mul_recip_as_div` and the telescope, every one of which is strictly *more*
+accurate than what it replaces.
+
+### 5.5 The slow/fast path agreement test
+
+`PRINCIPLES.md` §4 replaces the execution tier with a test, in the owner's words: *"we need to test
+if our slow and fast paths agree to within floating point tolerance."* Generic interpreter against
+catalogued kernel, unfused against fused, batched against unbatched, reference against release.
+`rewrite::PathAgreement` (error_model.hpp) is the shape, and three things about it are deliberate:
+
+- **It carries the number, not a boolean.** §4: the test "measures conditioning for free — agreement
+  at 1e-16 says the expression is well conditioned, agreement at 1e-9 says one path is losing
+  precision and nothing is broken". That number is worth tracking per pair over time; it is the
+  cheapest conditioning monitor the engine will ever have, and it costs nothing extra to record.
+- **Oracle-against-path is preferred to path-against-path wherever the oracle is affordable**, per
+  §4, because it says *which* path is wrong rather than merely that they differ. Path-against-path
+  is the cheap form and belongs where the oracle is not affordable — which, for a 1,000-lane Stage A
+  scenario grid, is most places.
+- **Exact agreement is recorded, never required.** Where two paths happen to agree exactly and
+  asserting it costs nothing, assert it: it is what caught D61's GCC operand-order divergence. The
+  moment a kernel wants to reorder for speed, the assertion is relaxed *there* and the error
+  measured. `PathAgreement::exact` therefore defaults to false — exactness is observed, not assumed.
+
+The owner's own objection is worth repeating because it is the right one: if the algebraic engine is
+correct, the paths agree by construction. True in ℝ and false in floating point — and, more to the
+point, **the test is not testing the algebra, it is testing that the code implements the algebra**,
+which is a claim about the construction rather than a consequence of it. Both of this week's
+relevant defects were in that gap and neither was an algebra failure (D61's catalogue fingerprint,
+canonical by design and not in fact; D65's harness sizing a buffer from the wrong vector).
 
 ### 5.4 Extraction prices the whole program, not the term
 
@@ -672,15 +787,88 @@ tier while the term tier runs beneath each program node. Nothing in `rewrite/` o
 
 ### 7.3 What this design does NOT fix
 
-**The plan tier is still a whole-`PlanAnnotations`-valued e-graph with a 2^k lattice.** D62 measured
-it: 105,977 plan nodes and 10.5 GiB on 60 trades to saturate, which is why
-`PipelineOrderedPlans` exists. Term-level rewriting does nothing for that, because a plan is not a
-term. Fixing it needs the same treatment applied to `PlanAnnotations` — per-domain choice points
-instead of whole-plan clones — and that is a separate package.
+**The plan tier is still a whole-`PlanAnnotations`-valued e-graph with a 2^k lattice**, *if it
+survives at all*. D62 measured it: 105,977 plan nodes and 10.5 GiB on 60 trades to saturate, which is
+why `PipelineOrderedPlans` exists. Term-level rewriting does nothing for that, because a plan is not
+a term. Fixing it *within* the search needs the same treatment applied to `PlanAnnotations` —
+per-domain choice points instead of whole-plan clones — and that is a separate package.
 
-Given D68's measurement (the whole plan stage is worth 1.027×–1.042× on Stage A, and a *perfect*
-plan-level cost model is worth ~0.08% of Stage A's wall clock), the right recommendation is probably
-not to fix it at all. Recorded here so the decision is deliberate.
+§7.4 proposes not fixing it but **deleting it**, which is the open question. Given D68's measurement
+(the whole plan stage is worth 1.027×–1.042× on Stage A, and a *perfect* plan-level cost model is
+worth ~0.08% of Stage A's wall clock), spending a package on a better plan-tier data structure is
+the worst of the three options. Recorded here so the decision is deliberate either way.
+
+---
+
+### 7.4 OPEN: does planning stay in the search, or become a post-extraction pass?
+
+**The owner has not answered this, so it is designed both ways and the interface does not assume
+one.** `optimise::PlanningMode` selects; `TermExtractResult::plan` is populated either way, so
+nothing downstream needs to know which ran. That symmetry is the point — the question can stay open
+without stalling the packages behind it.
+
+**Option A — `InSearch` (D49/D62's shape, unchanged).** Plans are e-graph candidates. Extraction
+scores (program, plan) pairs jointly, so a plan can pay for a program that is worse on its own.
+
+**Option B — `PostExtractionPass`.** Extraction ranks *programs* under the default plan; the winner
+is planned once, deterministically, by `plan_after_extraction(program, model, params)`. The plan
+tier disappears. The pass may hill-climb on the cost model internally — a local search over one
+program, not a dimension of the global one — and that flag is **off by default**.
+
+#### What the record says
+
+| evidence | bearing |
+|---|---|
+| D62: the plan tier is "a pure 2^k subset lattice over the k ≈ 12 independent per-domain deltas", **105,977 plan nodes and 10.5 GiB on 60 trades** to saturate | Option A's cost, measured. It is why `PipelineOrderedPlans` exists, and that policy gives up "every plan that needs one rule applied twice, or two rules out of the caller's declared order" |
+| D62: term-level rewriting dissolves the 2^k problem **in the term tier only** — a plan is not a term, so Option A keeps the lattice | This design does not fix Option A's cost. §7.3 |
+| D68: the whole plan stage is worth **1.027×–1.042×** on Stage A, and a *perfect* plan-level cost model is worth **~0.08% of Stage A's wall clock** | The prize Option A is searching for is very small on the current fixture |
+| D63: rediscovery's 1.02× clause "passes **BY IDENTITY** — the extracted candidate is the default plan's own execution, not something better than it" | The joint search has never actually found a plan better than the default one |
+| D63: the cost model captures **31% of reduction fusion and 11% of inlining** | The instrument Option A searches with cannot rank the decisions it is searching over |
+| `PRINCIPLES.md` §7: the layout rules are worth **1.73×–1.88× on a workload that has that structure** | The prize is not small *in general*, only on Stage A. §5's arithmetic-dominated workload may change this |
+
+#### Recommendation: Option B, with one condition
+
+**Take the post-extraction pass.** The reasoning, in order of weight:
+
+1. **The interpreter needs a plan regardless.** Planning is not optional work the search might skip;
+   it is compilation. Modelling a mandatory, deterministic function of the program as a *search
+   dimension* is a category error, and it is the one that produced a 2^k lattice over twelve
+   independent boolean decisions.
+2. **The joint search has never paid.** D63 is explicit that the rediscovery clause passes by
+   identity. Every measurement in the record is consistent with "the default plan is the answer",
+   and none shows a plan paying for a worse program.
+3. **It removes a completeness loss instead of adding one.** `PipelineOrderedPlans` exists only to
+   bound the plan tier. Delete the tier and the policy goes with it — and a local hill-climb over
+   one program can apply a rule twice or out of order, which is exactly what that policy forbade.
+4. **It makes the cost model's weakness matter less.** A 58.6%/49.7% model ranking twelve interacting
+   decisions is a bad instrument doing a hard job. The same model choosing between a handful of
+   local moves on one fixed program is the same instrument doing an easy one, and if it gets a move
+   wrong the cost is bounded by that move.
+
+**The condition, and it is the real risk:** Option B assumes **the best plan for the best program is
+also the best plan reachable independently of it** — that program choice and plan choice are
+separable. That is not a theorem, and there is one concrete shape where it plausibly fails: a term
+rewrite that makes a domain *fusable* which was not (say, by removing the gather that forced
+materialisation) is worth much more *with* the fusion than without it. Priced under the default
+plan, such a program looks mediocre and loses the extraction. Option A would find it; Option B would
+not.
+
+Two mitigations, both cheap, and I would take the first:
+
+- **Price each candidate under `plan_after_extraction`, not under the default plan** — i.e. run the
+  deterministic pass inside the scoring loop rather than only on the winner. That restores
+  separability by construction (every program is scored under *its own* best plan) at a cost of one
+  planning pass per candidate, and the term tier emits a handful of candidates, not thousands. This
+  is the version I recommend; `TermExtractOptions` already permits it, since `planning` is read by
+  extraction and not only after it.
+- Failing that, keep `InSearch` available behind the enum for the arithmetic-dominated workload of
+  §5, where the layout rules' 1.73×–1.88× may make the joint search worth its cost again. Deleting
+  the code would be premature; defaulting away from it is not.
+
+**How to settle it cheaply** (§8.8): on the existing 60-trade fixture, extract twice — once under
+`InSearch` with `PipelineOrderedPlans`, once under `PostExtractionPass` — and compare the winners
+and their measured wall clock. If they are the same program and the same plan, which every number in
+the record predicts, Option B is free and the 10.5 GiB goes away.
 
 ---
 
@@ -765,9 +953,9 @@ first.
 §5 builds error budgets, an `ErrorPropagator` and a per-tier DP. But the two rewrites we can already
 name that change accuracy (`fma_contract`, `mul_recip_as_div`) are both *faster and more accurate*,
 and so is the telescope. If the Pareto frontier is almost always a single point, all of §5's machinery
-beyond `ErrorBudget::exact_only()` is over-engineering.
+beyond a single scalar tolerance is over-engineering.
 
-**Cheapest experiment:** once the first three E1 axioms exist, extract at `exact_only()` and at a
+**Cheapest experiment:** once the first three inexact axioms exist, extract at `no_rewrites()` and at a
 loose budget and diff the results. If they differ in fewer than a handful of places, ship the budget
 as a scalar and delete the propagator.
 
@@ -798,7 +986,7 @@ conclusion: **it works, and here is the bill.**
   boundary made mechanical: the rule knows nothing about coupons, it knows that consecutive value
   ids cancel.
 - **It costs three of §2a's four recurrence classes their asymptotic win** (§4.4). Geometric and
-  linear-constant-coefficient need `rⁿ`, must spell it `exp(n log r)`, become E1, need a positivity
+  linear-constant-coefficient need `rⁿ`, must spell it `exp(n log r)`, become inexact, need a positivity
   proof, and win a constant factor instead of an order.
 - **It costs a handful of identities entirely** (§3.5): no `Abs`, so no `sqrt(x²)` normal form; no
   `Log1p`, so the `(DF_s/DF_e − 1)` cancellation has no expressible fix (tier 2 anyway).
@@ -814,7 +1002,7 @@ constant-factor to asymptotic. That is a note for a future decision, not a reque
 - **Cross-domain quarantine may block the telescope's own shape** (§6.4). Independent reason to do
   §4.1 first.
 - **First-order error propagation across `Select`** is invalid and handled by a fallback that is
-  conservative but possibly so conservative that no E1 rewrite under a `Select` is ever selectable.
+  conservative but possibly so conservative that no inexact rewrite under a `Select` is ever selectable.
   Unmeasured.
 - **Side conditions are recording-specific** (§1.4), so a compiled program is keyed to its recording.
   Fine today; a trap if anything ever caches compiled programs across books.
@@ -824,9 +1012,32 @@ constant-factor to asymptotic. That is a note for a future decision, not a reque
 
 ---
 
+### 8.8 The planning question, settled in an afternoon
+
+§7.4 is open and does not need to stay open. On the existing 60-trade Stage A fixture — the one D62
+and D54 both measured — extract twice: once with `PlanningMode::InSearch` under
+`PipelineOrderedPlans`, once with `PostExtractionPass`. Compare the winning program, the winning
+plan, and the measured wall clock of each.
+
+Three outcomes and each is decisive. **Same program, same plan** (what every number in the record
+predicts, since D63's rediscovery passes by identity): Option B is free, the plan tier and its 10.5
+GiB go away, and a completeness loss goes with them. **Different plan, same wall clock**: the joint
+search is finding a tie, which is noise — take Option B. **Option A genuinely wins**: the
+separability assumption of §7.4 is false on this fixture, and the *reason* it is false is the most
+valuable thing this whole design could learn, because it names the shape of cross-layer interaction
+the term tier will have to model.
+
+Cost: no new machinery. Both modes run through the same entry point.
+
+---
+
 ## 9. Summary of what is design and what is measured
 
 **Measured, cited:** the domain collapse (517,036 → 67/80, D35/D44/D65); five scan domains on Stage A;
+R2's 36–68-ulp adjoint failure from reordering gather-table entries, and the rest of §3.6's audit of
+what bit-identity was costing (D52 finding 3; `adjoint.hpp`, `bucket_split_edit.hpp`,
+`r4b_shared_reciprocal.hpp`, `planner_rules.hpp`, `verifier.hpp`); §4a's 14 sources / 37 tests /
+~9,700 lines; the plan tier's 105,977 nodes and 10.5 GiB, and D63's rediscovery passing by identity;
 R2's 10,111 sites / 700 s / blown bound (D65); D62's memo, representative-matching and refire policy
 with their costs; `exp` at 54% of M1's B=64 (D27); the cost model's 58.6%/49.7% error and the
 interpreter's 2.513% share (D63/D68); `ResidualProgram` constructing an interpreter with no rewrite
@@ -837,9 +1048,11 @@ pass (`src/solver/residual.cpp:73–77`); the Stage A trade mix and the observat
 part of node identity; gather-commutation as a rule; the thirty-two-axiom set and its three-way
 exactness split; the recurrence proof obligations (P1)–(P4) and the two closures; adjoint-weighted
 error composition; the constrained-single-objective extraction; the four saturation bounds; the
-three-tier migration.
+three-tier migration; the two planning modes and the recommendation in §7.4.
 
 **Assertion, not yet measured:** that the term graph SEEDS at ~10³ nodes (and, more importantly, no
 number at all for what it SATURATES to — §2.3 says so plainly); that the Stage A mix telescopes
 50/10/40; that observation shift telescopes (contra the `tables.hpp` comment); that the cost model
-would register a telescope's magnitude correctly. §8.3 and §8.5 test all four.
+would register a telescope's magnitude correctly; and — the one §7.4 turns on — that program choice
+and plan choice are **separable**, which is a condition of the post-extraction recommendation and
+not a result. §8.3, §8.5 and §8.8 test all five.

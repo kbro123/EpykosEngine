@@ -12,6 +12,7 @@
 // and there is not meant to be one until the interface has been reviewed.
 
 #include "epykos/optimise/term_egraph.hpp"
+#include "epykos/optimise/term_extract.hpp"
 #include "epykos/rewrite/error_model.hpp"
 #include "epykos/rewrite/recurrence.hpp"
 #include "epykos/rewrite/term_rule.hpp"
@@ -24,6 +25,29 @@ const char* to_string(OutputClass c) noexcept {
     case OutputClass::Sensitivity: return "sensitivity";
     case OutputClass::Diagnostic: return "diagnostic";
     case OutputClass::Count_: break;
+  }
+  return "?";
+}
+
+const char* to_string(ExactnessHint h) noexcept {
+  switch (h) {
+    case ExactnessHint::Unknown: return "unknown";
+    case ExactnessHint::Exact: return "exact";
+    case ExactnessHint::ExactGivenCondition: return "exact_given_condition";
+    case ExactnessHint::Inexact: return "inexact";
+  }
+  return "?";
+}
+
+const char* to_string(PathKind p) noexcept {
+  switch (p) {
+    case PathKind::GenericInterpreter: return "generic_interpreter";
+    case PathKind::CatalogueKernel: return "catalogue_kernel";
+    case PathKind::Unfused: return "unfused";
+    case PathKind::Fused: return "fused";
+    case PathKind::Adjoint: return "adjoint";
+    case PathKind::ForwardDual: return "forward_dual";
+    case PathKind::Oracle: return "oracle";
   }
   return "?";
 }
@@ -80,3 +104,15 @@ const char* to_string(Axiom a) noexcept {
 }
 
 }  // namespace epykos::rewrite
+
+namespace epykos::optimise {
+
+const char* to_string(PlanningMode m) noexcept {
+  switch (m) {
+    case PlanningMode::InSearch: return "in_search";
+    case PlanningMode::PostExtractionPass: return "post_extraction_pass";
+  }
+  return "?";
+}
+
+}  // namespace epykos::optimise

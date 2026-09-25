@@ -15,9 +15,11 @@
 //   * SEARCH / BUILD SPLIT. `search` enumerates, `build` constructs exactly one. Same two-phase
 //     shape as match/propose, so the driver's accounting, logging and bounds carry over
 //     unchanged.
-//   * DECLARED EXACTNESS. Still CLAUDE.md's E0/E1, still per rule, still enforced by extraction.
-//     `ErrorTerm` (error_model.hpp) is ADDITIONAL, not a replacement: E0/E1 says whether the rule
-//     may be used at all, `ErrorTerm` says what using it costs.
+//   * A DECLARED ERROR. What is NOT kept is D47's E0/E1 admission class: PRINCIPLES.md §4 retired
+//     bit-identity as a contract on 2026-09-25, so `ErrorTerm` is no longer "additional" to an
+//     exactness class, it REPLACES it. A rule states what it costs; extraction decides whether
+//     that fits. `exactness_hint()` survives as a bug detector and a propagator shortcut, never
+//     as a licence (error_model.hpp).
 //
 // Three fields are new, and each exists to bound the search rather than to describe the rule
 // (`docs/TERM_REWRITING.md` §6):
@@ -77,9 +79,11 @@ class TermRule {
   // "<family>.<rule>", e.g. "alg.mul_assoc", "alg.exp_product", "gather.push_unary".
   virtual const std::string& name() const noexcept = 0;
 
-  // E0: bit-identical for every row. E1: characterised error, stated per application in the
-  // ErrorTerm `build` fills in.
-  virtual Exactness exactness_class() const noexcept = 0;
+  // ADVISORY (error_model.hpp's ExactnessHint; PRINCIPLES.md §4 as amended 2026-09-25). A rule
+  // does NOT earn admission by declaring itself exact — admission is the composed error against
+  // the output class's budget, and nothing else. This is the free-assertion / skip-the-propagator
+  // hint, and `Unknown` is an honest answer.
+  virtual ExactnessHint exactness_hint() const noexcept { return ExactnessHint::Unknown; }
 
   // Maximum depth of the rule's pattern, in e-nodes, counting the site's own node as 1.
   virtual int pattern_depth() const noexcept = 0;
@@ -109,13 +113,20 @@ class TermRule {
 
 // Every axiom the engine holds, as a closed enumeration, so that a reviewer can read the list
 // rather than grep for rules, and so a mutation test can assert that each one is covered.
+//
+// The three-way split below is a statement about FLOATING-POINT BEHAVIOUR, not about
+// admissibility. Since PRINCIPLES.md §4 retired bit-identity, an axiom in the "exact" bucket has
+// no privilege over one in the "inexact" bucket; both are admitted or refused by their composed
+// error. The split is kept because it is TRUE and useful — the exact ones can be asserted for
+// free as bug detectors, and the conditional ones name an obligation a rule must discharge before
+// it may fire at all, which is a soundness question and not a rounding one.
 // `docs/TERM_REWRITING.md` §3 states each axiom's ops, its exactness, and — where an axiom is NOT
 // safe — exactly why. `Op::Sum` and `Op::Affine` are conspicuously almost absent, and that is the
 // deliberate part: they are FIXED-ARITY LEFT FOLDS whose reassociation changes rounding, D61 did
 // not canonicalise their member order, and AC matching over a segment of hundreds of members is
 // how an e-graph dies. §3.4.
 enum class Axiom : std::uint16_t {
-  // --- exact in IEEE-754 double, unconditionally (E0) ---
+  // --- exact in IEEE-754 double, unconditionally (a free assertion, not a licence) ---
   NegNeg,            // neg(neg(x)) = x
   SubAsAddNeg,       // sub(a,b) = add(a, neg(b))
   NegSub,            // neg(sub(a,b)) = sub(b,a)
@@ -125,7 +136,7 @@ enum class Axiom : std::uint16_t {
   SelectPushUnary,   // f(select(p,a,b)) = select(p, f(a), f(b)), f unary; both arms recorded (D5)
   CommuteAddMul,     // add/mul/cmpeq operand order (op_is_commutative already asserts bitwise)
 
-  // --- exact given a side condition TermView can discharge (E0 conditional) ---
+  // --- exact once a side condition TermView can discharge; the condition IS a gate ---
   AddZero,           // add(x,0) = x   REQUIRES provably_not_negative_zero(x)
   SubZero,           // sub(x,0) = x   REQUIRES provably_not_negative_zero(x)
   MulZero,           // mul(x,0) = 0   REQUIRES provably_finite(x)   (inf*0 = NaN)
@@ -133,7 +144,7 @@ enum class Axiom : std::uint16_t {
   DivSelf,           // div(x,x) = 1   REQUIRES provably_nonzero and provably_finite
   AffineDropZeroCoef,// drop a member with c_i = 0  REQUIRES provably_finite of that member
 
-  // --- identities in R, not in float: E1, each carrying an ErrorTerm ---
+  // --- identities in R, not in float: each carries an ErrorTerm, and so may any above ---
   AddAssoc,          // (a+b)+c = a+(b+c)
   MulAssoc,          // (a*b)*c = a*(b*c)
   MulDistribAdd,     // a*(b+c) = a*b + a*c, and the factoring direction, which is the valuable one

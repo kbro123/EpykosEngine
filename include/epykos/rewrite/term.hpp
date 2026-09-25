@@ -175,14 +175,20 @@ struct TermRewrite {
   TermClassId site_class = invalid_term_class;
   TermExpr replacement;
 
-  // CLAUDE.md's declared class. E0 here means bit-identical FOR EVERY ROW OF EVERY LANE, which
-  // over a domain of 16,103 rows is a far stronger claim than over one scalar — an author who is
-  // unsure declares E1 and lets `error` carry the cost.
-  Exactness exactness = Exactness::E0;
+  // ADVISORY ONLY (error_model.hpp's `ExactnessHint`). PRINCIPLES.md §4 retired bit-identity as a
+  // contract on 2026-09-25, so a rewrite is never admissible BECAUSE it preserves bits. This
+  // field buys two things and neither is a licence: a free assertion that is a good bug detector
+  // where exactness costs nothing to check, and a shortcut past the propagator when every
+  // contribution is exact. `Unknown` is the honest default and costs only a propagator call.
+  //
+  // Note what `Exact` would have to mean here even if it were a gate: bit-identical for EVERY ROW
+  // OF EVERY LANE, which over a domain of 16,103 rows is a far stronger claim than over one
+  // scalar. That it was ever the default admission criterion is the thing §4 fixed.
+  ExactnessHint exactness = ExactnessHint::Unknown;
 
-  // The local error this rewrite introduces at its own site (error_model.hpp). Zero when
-  // `exactness == E0`. Extraction composes it; it is NOT a gate. The gate is PRINCIPLES.md §4's
-  // oracle, run once on the extracted candidate.
+  // The local error this rewrite introduces at its own site (error_model.hpp) — the ONLY input to
+  // admissibility. Extraction composes it against the output class's budget. It is not itself a
+  // gate: the gate is PRINCIPLES.md §4's oracle, run once on the extracted candidate.
   ErrorTerm error{};
 
   // Why this rewrite is sound, in a form a reviewer and a test can both read: an axiom name

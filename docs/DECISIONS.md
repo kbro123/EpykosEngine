@@ -3489,3 +3489,89 @@ cannot drift apart silently; the exactness buckets partition; `axiom_improves_ac
 exact-only, `ac_matching_on_sum` is off and `max_pattern_depth <= 4`. No mutant is registered: there
 is no behaviour to mutate, and CLAUDE.md's mutation requirement attaches to a rewrite, which this
 package does not ship.
+
+**AMENDMENT (2026-09-25, same package, before merge): re-cut against `PRINCIPLES.md` §4 at
+`f8849b4`, which retires bit-identity as a contract anywhere.** The owner amended §4 while this
+design was being written: "I genuinely don't think we care about bitwise correctness if we've got
+deterministic algebraic equivalence", and "we need to test if our slow and fast paths agree to
+within floating point tolerance". Two tiers and a test where there were three tiers. Three changes
+to the above, and one addition.
+
+**(a) Nothing is admissible because it preserves bits.** Point 8's error model was already the
+admission criterion; it is now the ONLY one. `rewrite::Exactness` (E0/E1) is removed from the term
+interface and replaced by `rewrite::ExactnessHint` (`Unknown` / `Exact` / `ExactGivenCondition` /
+`Inexact`), which is advisory and does exactly two jobs, both of them tests rather than gates: a
+FREE ASSERTION where exactness costs nothing to check (§4's own "a test of convenience, never a
+constraint" — it is what caught D61), and a SHORTCUT past the propagator when every contribution is
+exact. `Unknown` is the default at every level — rule, rewrite, and recorded application — and a
+gate test pins that, because a default of `Exact` would let a rewrite be admitted for preserving
+bits. `ErrorBudget::exact_only()` is renamed `no_rewrites()` and demoted in the documentation from
+"the default, reproducing the M1-M4 contract" to "the zero budget, useful for bisection, and NOT the
+safe setting" — a zero budget rejects `fma_contract`, `mul_recip_as_div` and the telescope, every one
+of which is strictly MORE accurate than what it replaces. **There is deliberately no default
+budget**: a library default becomes the de-facto contract, which is exactly how bit-identity became
+one (PRINCIPLES.md §0). The identity set's three buckets are kept but reframed as a statement about
+floating-point BEHAVIOUR rather than admissibility; §3.2's side conditions remain real gates,
+because they are soundness obligations and not rounding ones.
+
+**(b) The slow/fast path test is now part of the interface.** `rewrite::PathAgreement` and
+`PathKind` (error_model.hpp), with three deliberate properties: it carries the NUMBER and not a
+boolean, because §4 notes the test measures conditioning for free and that number is the cheapest
+conditioning monitor the engine will have; oracle-against-path is preferred to path-against-path
+wherever the oracle is affordable, because it says WHICH path is wrong; and `exact` defaults to
+false, because exactness is observed and never assumed.
+
+**(c) What the retirement BUYS, audited against the code rather than recalled** — new
+`TERM_REWRITING.md` §3.6, and this is a concrete part of the simplification the design claims. Six
+findings. (1) **`r2.bucket_rows` expands in place instead of appending at the tail** purely to
+preserve bits: D52 finding 3 measured the simpler implementation failing the adjoint gate by
+**36-68 ulps on 2 of the M1 book's 5 matching domains with bit-identical forward values**, because
+`adjoint::build_plan` scans `Program::gathers`/`segments` in ARRAY ORDER and moving entries reorders
+a floating-point sum. D52 flags it as a standing tax on "future rewrites that add or split
+Column/Gather/Segment entries", and `ir_edit.hpp`'s two primitives both document preserving it.
+That tax is now zero. (2) **The adjoint's accumulation order is a documented bitwise contract** —
+`adjoint.hpp`: "a lane of a batched run is bitwise the B = 1 run and every tile / lane_tile gives
+the same bits (the E0 tests assert both)" — which forbids any reduction whose order depends on the
+lane width, i.e. the natural way to vectorise one. This is the largest PERFORMANCE constraint the
+retirement lifts and it is unmeasured, because it was never allowed. (3)
+`bucket_split_edit::all_bit_identical` compares bit patterns rather than values, deliberately, for
+`+0.0`/`-0.0`. (4) **`r4b.shared_reciprocal` is held back by a bit argument, not an error
+argument**, and the M1 profile prices its residual at **~175 us of 1,584 us at B=64, about 11%**
+(D27) — now an ordinary trade the propagator prices, with its reverse (`mul_recip_as_div`) an
+accuracy IMPROVEMENT, so the search should hold both. (5) `planner_rules.hpp` requires the default
+plan to be "bit-identical and time-identical to M1's"; time-identical is still worth wanting.
+(6) `rewrite::verifier` derives a bitwise tolerance from an all-E0 history — the retired criterion,
+wired into the gate. **Stated so the claim is not overread**: the retirement does NOT relax §3.4's
+refusal to AC-match `Op::Sum`, because that objection was never "it changes bits" but that the error
+is unbounded and the family infinite; a characterised-error contract refuses it more firmly, not
+less. Nor does it touch the structural tier, where `lower(graph, initial) == input` stays exact and
+costs nothing because no arithmetic happens.
+
+**(d) NEW, and an open question the owner has not answered: where planning happens.** The proposal
+put to him is that the layout rules leave the search entirely and become a deterministic compilation
+pass after extraction. **Designed both ways rather than assumed either way**: `optimise::PlanningMode`
+(`InSearch` / `PostExtractionPass`) selects, `plan_after_extraction(program, model, params)` is the
+pass, and `TermExtractResult::plan` is populated under both so nothing downstream needs to know
+which ran. **Recommendation: `PostExtractionPass`**, on four grounds — the interpreter needs a plan
+regardless, so modelling a mandatory deterministic function as a search DIMENSION is a category
+error and is what produced a 2^k lattice over twelve boolean decisions; the joint search has never
+paid, D63 being explicit that rediscovery "passes BY IDENTITY, the extracted candidate being the
+default plan's own execution"; it REMOVES a completeness loss rather than adding one, since
+`PipelineOrderedPlans` exists only to bound the plan tier and a local hill-climb may apply a rule
+twice or out of order; and a 58.6%/49.7% cost model choosing among a few local moves on one fixed
+program is a far easier job than the same model ranking twelve interacting decisions, with the
+damage bounded by the move. **The condition, and it is the real risk, stated rather than buried:
+Option B assumes program choice and plan choice are SEPARABLE**, which is not a theorem. The
+concrete failure shape is a term rewrite that makes a domain fusable which was not — worth much more
+WITH the fusion than without, so priced under the default plan it looks mediocre and loses. The
+mitigation I recommend is to price each candidate under `plan_after_extraction` rather than under
+the default plan, which restores separability by construction at one planning pass per candidate,
+affordable precisely because the term tier emits a handful of candidates. `InSearch` stays behind the
+enum for §5's arithmetic-dominated workload, where the layout rules' 1.73x-1.88x may make the joint
+search worth its cost again. **Settling it costs an afternoon** (new §8.8): extract the 60-trade
+fixture both ways and compare winner and wall clock; same program and same plan, which every number
+in the record predicts, means Option B is free and the 10.5 GiB goes away.
+
+Gate count 11 -> 14 (exactness advisory and defaulting to Unknown; path agreement carrying the
+number; both planning modes expressible with hill-climbing off by default, per D68). Still no
+mutant: still no behaviour to mutate.

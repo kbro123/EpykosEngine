@@ -13,8 +13,11 @@
 //      the cheapest guard against them drifting is that adding an enumerator without a name
 //      fails here.
 //   3. The classification predicates over `Axiom` agree with the design document's three-way
-//      split (unconditionally exact / exact under a side condition / E1), and no axiom is in two
-//      buckets at once. That is the part a reader is most likely to get wrong when adding one.
+//      split, and no axiom is in two buckets at once. That is the part a reader is most likely to
+//      get wrong when adding one.
+//   4. Nothing in the interface lets a rewrite be admitted BECAUSE it preserves bits.
+//      PRINCIPLES.md §4 retired that on 2026-09-25 and these tests are what stop it creeping back
+//      in as a default.
 //
 // Nothing here constructs a `TermEGraph` or calls any of the declared-but-undefined functions:
 // they are undefined on purpose and will stay that way until the interface has been reviewed.
@@ -61,8 +64,9 @@ TEST(TermRewritingDesign, EveryOutputClassHasAName) {
   }
 }
 
-// An axiom is exact unconditionally, or exact under a discharged side condition, or neither (E1
-// with a characterised error). Never two of those. docs/TERM_REWRITING.md §3.
+// An axiom is exact unconditionally, or exact under a discharged side condition, or neither (a
+// characterised error). Never two of those. This is a statement about floating-point behaviour,
+// not about admissibility — since §4, the exact bucket carries no privilege. §3.
 TEST(TermRewritingDesign, AxiomExactnessBucketsArePartitioned) {
   for (int i = 0; i < static_cast<int>(Axiom::Count_); ++i) {
     const Axiom a = static_cast<Axiom>(i);
@@ -73,9 +77,9 @@ TEST(TermRewritingDesign, AxiomExactnessBucketsArePartitioned) {
   }
 }
 
-// PRINCIPLES.md §4's central demotion: a rewrite may be admitted BECAUSE it is more accurate than
-// the recording. Under M1-M4 these two were inadmissible. If this list ever empties, the §4
-// contract has been quietly reverted.
+// PRINCIPLES.md §4's central point: a rewrite may be admitted BECAUSE it is more accurate than the
+// recording. Under M1-M4 these two were inadmissible. If this list ever empties, the §4 contract
+// has been quietly reverted.
 TEST(TermRewritingDesign, SomeAxiomsImproveAccuracy) {
   int improving = 0;
   for (int i = 0; i < static_cast<int>(Axiom::Count_); ++i) {
@@ -97,10 +101,11 @@ TEST(TermRewritingDesign, RecurrenceClassesNeedingExpLogAreNamed) {
   EXPECT_TRUE(epykos::rewrite::recurrence_needs_exp_log(RecurrenceClass::LinearConstantCoefficient));
 }
 
-// The default budget is the M1-M4 contract: E0 only, every class at zero. A package that lands
-// the implementation must not be able to loosen this by accident.
-TEST(TermRewritingDesign, DefaultBudgetIsExactOnly) {
-  const epykos::rewrite::ErrorBudget b = epykos::rewrite::ErrorBudget::exact_only();
+// PRINCIPLES.md §4 (amended 2026-09-25) retired bit-identity as a contract, so the library ships
+// NO default budget that amounts to one. `no_rewrites()` is the zero budget: named for what it
+// does, documented as a bisection tool, and explicitly not "the safe setting".
+TEST(TermRewritingDesign, ZeroBudgetIsNamedForWhatItDoesNotForWhatItPreserves) {
+  const epykos::rewrite::ErrorBudget b = epykos::rewrite::ErrorBudget::no_rewrites();
   for (int i = 0; i < static_cast<int>(epykos::rewrite::OutputClass::Count_); ++i) {
     EXPECT_EQ(b.relative[i], 0.0);
   }
@@ -108,6 +113,47 @@ TEST(TermRewritingDesign, DefaultBudgetIsExactOnly) {
   EXPECT_EQ(opts.budget.relative[0], 0.0);
   EXPECT_EQ(opts.propagator, nullptr);
   EXPECT_TRUE(opts.dce_before_pricing);
+}
+
+// Exactness is ADVISORY. A rule that has not characterised itself says so, and `Unknown` is the
+// default at every level — rule, rewrite and recorded application. If any of these ever defaults
+// to `Exact`, a rewrite could be admitted for preserving bits, which is exactly what §4 retired.
+TEST(TermRewritingDesign, ExactnessIsAdvisoryAndDefaultsToUnknown) {
+  const epykos::rewrite::TermRewrite r;
+  EXPECT_EQ(r.exactness, epykos::rewrite::ExactnessHint::Unknown);
+  const epykos::optimise::TermEGraph::AppliedRewrite a;
+  EXPECT_EQ(a.exactness, epykos::rewrite::ExactnessHint::Unknown);
+  for (int i = 0; i <= static_cast<int>(epykos::rewrite::ExactnessHint::Inexact); ++i) {
+    EXPECT_STRNE(epykos::rewrite::to_string(static_cast<epykos::rewrite::ExactnessHint>(i)), "?");
+  }
+}
+
+// §4's slow/fast path test. Every path kind is nameable, and an agreement result carries the
+// NUMBER, not just a boolean, because the number is the conditioning measurement §4 wants.
+TEST(TermRewritingDesign, PathAgreementCarriesTheNumberNotJustABoolean) {
+  for (int i = 0; i <= static_cast<int>(epykos::rewrite::PathKind::Oracle); ++i) {
+    EXPECT_STRNE(epykos::rewrite::to_string(static_cast<epykos::rewrite::PathKind>(i)), "?");
+  }
+  const epykos::rewrite::PathAgreement g;
+  EXPECT_EQ(g.max_relative, 0.0);
+  EXPECT_TRUE(g.within_tolerance);
+  EXPECT_FALSE(g.exact);  // exactness is observed, never assumed
+}
+
+// The planning question is open (§7.4). Both modes are expressible, both are named, and the
+// result carries which one ran so a caller reads one `plan` field either way.
+TEST(TermRewritingDesign, BothPlanningModesAreExpressible) {
+  EXPECT_STREQ(epykos::optimise::to_string(epykos::optimise::PlanningMode::InSearch), "in_search");
+  EXPECT_STREQ(epykos::optimise::to_string(epykos::optimise::PlanningMode::PostExtractionPass),
+               "post_extraction_pass");
+  const epykos::optimise::TermExtractOptions opts;
+  EXPECT_EQ(opts.planning, epykos::optimise::PlanningMode::PostExtractionPass);  // the recommendation
+  const epykos::optimise::TermExtractResult res;
+  EXPECT_EQ(res.planning, epykos::optimise::PlanningMode::PostExtractionPass);
+  // D68's measurement is why hill-climbing is off by default: a PERFECT plan-level cost model is
+  // worth ~0.08% of Stage A's wall clock.
+  const epykos::optimise::PlanningParams params;
+  EXPECT_FALSE(params.hill_climb);
 }
 
 // The bound that must not be relaxed silently: AC matching over Op::Sum. term_egraph.hpp gives

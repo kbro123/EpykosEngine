@@ -3420,7 +3420,7 @@ favour the other engine and one favours this one; none is left implicit.**
   continues the last forward. The comparison is sound only because nothing in the fixture is priced beyond the
   last knot; `tests/compare/ois_test.cpp` pins both engine-side behaviours AND walks every coupon, observation
   day and payment date of every calibration instrument and every book trade to assert none exceeds it. Found by
-  that test failing, not by inspection.
+  that test failing when it was first written against the wrong expectation, not by inspection.
 
 **7. What is gated in CI, and what is scheduled.** `tests/compare/ois_test.cpp` (ctest `compare_ois_test`, 5
 tests, 0.47 s) gates this engine's side alone and needs no second checkout: squareness, O1 recovery of the

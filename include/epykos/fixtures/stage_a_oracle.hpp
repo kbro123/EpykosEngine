@@ -23,8 +23,20 @@
 //
 // The `double` side of the comparison is `price_stage_a_at`, which is the reference every existing
 // Stage A gate already uses, and `tests/stage_a/gate_differential_e0_test.cpp` holds the compiled
-// program bitwise equal to it. So the naive path's error measured here is also the compiled
-// program's error, by transfer from a gate that is already green — measured, not assumed.
+// program bitwise equal to it. So the naive path's error measured here is also the COMPILED
+// program's error — by transfer from a gate that is already green, not by assumption.
+//
+// The transfer needs one step spelled out, because it is a claim about flags. That gate and
+// `price_stage_a_at` (`src/fixtures/stage_a_e0.cpp`) are both `-ffp-contract=off` in every preset,
+// as are the interpreter kernels (`src/exec/kernels_l*_e0.cpp`, D25), so the compiled program is
+// contraction-free whatever preset it is built in; the chain compiled == price_stage_a_at is
+// therefore established contraction-free. This fixture is NOT pinned, so under `release` its naive
+// side could in principle differ from `price_stage_a_at`. It does not:
+// `StageAOracleError.TheNaiveSideIsBitwiseThePriceStageAAtReferenceEveryOtherGateUses` checks all
+// 8,043 outputs bitwise and passes under BOTH presets, which closes the chain empirically rather
+// than by argument. Should that test ever fail under `release`, the release column becomes a
+// measurement of the templated `double` path alone and the `reference` column is the compiled
+// program's.
 //
 // Header-only for the same reason as fixtures/m1_oracle.hpp.
 #pragma once

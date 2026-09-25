@@ -1,9 +1,10 @@
 // EpykosEngine — the contraction-independence probe of verify/oracle.hpp (D72).
 //
-// This TU is DELIBERATELY NOT named *_e0.cpp: it must be compiled with whatever contraction the
-// preset gives it (on under `release`, off under `reference`), because the whole point is to check
-// that a `Wide` result is the same bits either way. tests/scalar/wide_e0_test.cpp computes the
-// same expression under -ffp-contract=off in every preset and compares.
+// An ordinary library TU carrying whatever flags the preset gives it. tests/scalar/wide_test.cpp
+// computes the identical expression in ITS TU and compares the two bitwise. D46's finding is that
+// contraction is "a per-TU, context-sensitive compiler decision", so two instantiations of the same
+// header-only template can be rounded differently even under the same flags; that is the failure
+// this pair reproduces, and neither side is pinned.
 //
 // The expressions below are written in the `a·b + c` and `a·b − c` shapes a compiler will fuse if
 // it is allowed to. If any of Wide's arithmetic leaked a contractible bare product-sum, this is

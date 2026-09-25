@@ -27,14 +27,14 @@
 //     MEASURED at 62.5x a double evaluation of the M1 book (45.7 ms against 0.731 ms, fingerprint
 //     d448afd70180, release flags), which an offline instrument can pay.
 //
-// `long double` is kept, but as a WITNESS rather than as the oracle: tests/scalar/wide_e0_test.cpp
+// `long double` is kept, but as a WITNESS rather than as the oracle: tests/scalar/wide_test.cpp
 // cross-checks `Wide` against `long double` on hosts where `long double` is wider than `double`,
 // and skips loudly where it is not. The static_assert on `Oracle` below is the compile-time guard
 // the owner asked for: it is on the ORACLE alias, so re-pointing the oracle at `long double`
 // breaks the build on Apple arm64 instead of degrading in silence.
 //
 // MEASURED ACCURACY (fingerprint d448afd70180, Apple clang 21, release flags;
-// tests/scalar/wide_e0_test.cpp re-measures all of it). + − × ÷ and sqrt agree with `long double`
+// tests/scalar/wide_test.cpp re-measures all of it). + − × ÷ and sqrt agree with `long double`
 // EXACTLY on 200,000 random operand pairs — the 64-bit witness cannot see a difference, so the
 // bounds below come from identities instead. Over |x| <= 2, which is the whole range this engine
 // evaluates (`exp(−z·t)` with z·t in roughly [0, 1.5]): |exp(x)·exp(−x) − 1| <= 2.6e-30 and
@@ -55,8 +55,12 @@
 // fusion explicitly through `std::fma`, which IEEE 754 defines as a single rounding whatever the
 // TU's `-ffp-contract` setting is. Every remaining `a·b + c` in the correction terms is written as
 // an explicit `std::fma` for the same reason, so a `Wide` result does not depend on the flags of
-// the TU that instantiated it. That is a claim, and tests/scalar/wide_e0_test.cpp measures it.
-// `-ffast-math` would break these algorithms outright; D13 forbids it.
+// the TU that instantiated it, nor on which TU instantiated it. That is a claim, and
+// tests/scalar/wide_test.cpp measures it against src/verify/wide_probe.cpp (D46's failure mode:
+// contraction is a per-TU, context-sensitive decision, so two instantiations can diverge even under
+// the same flags). The stronger form is measured on a real workload in D72 §6 — the whole Stage A
+// oracle is bit-identical under `release` and `reference`. `-ffast-math` would break these
+// algorithms outright; D13 forbids it.
 //
 // Contract (the operator surface of `Dual<N>`, so anything that instantiates on Dual instantiates
 // on Wide — that is what makes "the maths instantiates at the oracle type" a checkable statement):
@@ -105,7 +109,7 @@ inline void two_prod(double a, double b, double& p, double& e) noexcept {
 }
 
 // ln 2 as a double-double: hi is the nearest double, lo the remainder. Checked in
-// tests/scalar/wide_e0_test.cpp by exp(ln2) == 2 and by log(2) == ln2.
+// tests/scalar/wide_test.cpp by exp(ln2) == 2 and by log(2) == ln2.
 inline constexpr double ln2_hi = 0x1.62e42fefa39efp-1;
 inline constexpr double ln2_lo = 0x1.abc9e3b39803fp-56;
 
@@ -300,7 +304,7 @@ class Wide {
   // exp by range reduction to |r| <= ln2/64, a 16-term Taylor sum in double-double, five
   // squarings and an exact scaling by 2^k. Truncation after r^16/16! is below 1e-40; the
   // dominant residual is the reduction, |x|·2^-106 absolute, which for the |x| <= 1 this engine
-  // evaluates is ~1e-32 relative. Measured in tests/scalar/wide_e0_test.cpp.
+  // evaluates is ~1e-32 relative. Measured in tests/scalar/wide_test.cpp.
   friend Wide exp(const Wide& a) noexcept {
     if (a.hi <= -746.0) return Wide(0.0);
     if (a.hi >= 710.0) return Wide(std::numeric_limits<double>::infinity());

@@ -211,7 +211,7 @@ std::vector<Wide> oracle_jacobian(const OracleFn& truth, const double* z, int n_
 // D46 is the entry recording that exactly this assumption failed for header-only templates before,
 // so it is measured here rather than asserted: this function is defined in
 // src/verify/wide_probe.cpp, an ORDINARY library TU that the release preset is free to contract,
-// and tests/scalar/wide_e0_test.cpp computes the identical expression in its own
+// and tests/scalar/wide_test.cpp computes the identical expression in its own
 // -ffp-contract=off TU and compares the two bitwise.
 //
 // `out` receives 3 values: an add/multiply chain, a division chain, and an exp/log chain, each

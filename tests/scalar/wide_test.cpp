@@ -10,8 +10,9 @@
 //   * the operator surface is Dual's, so "the maths instantiates at the oracle type" is checkable;
 //   * a Wide result does not depend on the TU's contraction setting (D46's failure mode).
 //
-// Pinned -ffp-contract=off in every preset, which is what makes the contraction comparison mean
-// something: the other side of it is src/verify/wide_probe.cpp, compiled with the preset's flags.
+// NOT pinned to -ffp-contract=off, and deliberately not named *_e0_test.cpp: PRINCIPLES.md §4a
+// retires that convention as the rebuild reaches each file, and a new file should not join it. The
+// contraction check below does not need it (see the comment on that test).
 #include <gtest/gtest.h>
 
 #include <cmath>
@@ -29,12 +30,18 @@
 #include "epykos/version.hpp"
 #include "epykos/verify/oracle.hpp"
 
-#ifndef EPYKOS_FP_CONTRACT_OFF
-#error "an _e0_test.cpp TU must see EPYKOS_FP_CONTRACT_OFF"
-#endif
-
 using epykos::Wide;
 using epykos::WideBool;
+
+// `__int128` is a compiler extension, not standard C++20, and CMAKE_CXX_EXTENSIONS is OFF. Both
+// toolchains this project builds on have it (GCC 13 and Apple clang on x86-64 and arm64 alike), so
+// the integer-exactness proof below normally runs; it is guarded so that a target without it loses
+// that one proof rather than the file, and the other two proofs -- normalisation and agreement with
+// quick_two_sum -- are unconditional and need no wider type either.
+#if defined(__SIZEOF_INT128__)
+#define EPYKOS_HAVE_INT128 1
+using epykos_int128 = __int128;
+#endif
 
 namespace {
 
@@ -64,7 +71,7 @@ bool same_bits(double a, double b) {
 // The guard PRINCIPLES.md §4 asks for
 // ------------------------------------------------------------------------------------------------
 
-TEST(WideE0, OracleHasStrictlyMoreMantissaBitsThanDouble) {
+TEST(WideScalar, OracleHasStrictlyMoreMantissaBitsThanDouble) {
   // The static_assert in scalar/wide.hpp has already enforced this at compile time; this states
   // the number in the log so a reader of a CI run knows what the figures were taken with.
   static_assert(epykos::oracle_mantissa_bits_v<epykos::Oracle> > std::numeric_limits<double>::digits);
@@ -79,7 +86,7 @@ TEST(WideE0, OracleHasStrictlyMoreMantissaBitsThanDouble) {
 
 // The arm64 degradation, handled where it belongs. `long double` is the oracle's WITNESS, not the
 // oracle, so a host where it is useless costs a cross-check and nothing else. The skip is loud.
-TEST(WideE0, LongDoubleWitnessIsAnnouncedOrSkippedLoudly) {
+TEST(WideScalar, LongDoubleWitnessIsAnnouncedOrSkippedLoudly) {
   std::cout << "[ witness  ] long double = " << epykos::witness_mantissa_bits << " significand bits, sizeof "
             << sizeof(long double) << "\n";
   if (!epykos::witness_is_wider_than_double) {
@@ -96,7 +103,7 @@ TEST(WideE0, LongDoubleWitnessIsAnnouncedOrSkippedLoudly) {
 // The error-free transformations
 // ------------------------------------------------------------------------------------------------
 
-TEST(WideE0, TwoSumAndTwoProdAreExact) {
+TEST(WideScalar, TwoSumAndTwoProdAreExact) {
   // Exactness is proven three ways, none of which needs a wider float type, so the proof holds on
   // Apple arm64 too, where there is no witness:
   //   1. against 128-bit INTEGER arithmetic, for operands that are exact integers scaled by powers
@@ -114,22 +121,26 @@ TEST(WideE0, TwoSumAndTwoProdAreExact) {
     const std::int64_t mb = mant(rng);
     const int sa = shift(rng);
 
-    // 1a. two_sum against __int128: s + e must be the exact integer a + b.
+    // 1a. two_sum against a 128-bit integer: s + e must be the exact integer a + b.
     const double a = std::ldexp(static_cast<double>(ma), sa);
     const double b = static_cast<double>(mb);
     double s = 0.0, e = 0.0;
     epykos::wide_detail::two_sum(a, b, s, e);
-    const __int128 exact_sum = (static_cast<__int128>(ma) << sa) + static_cast<__int128>(mb);
-    EXPECT_TRUE(static_cast<__int128>(s) + static_cast<__int128>(e) == exact_sum)
+#if defined(EPYKOS_HAVE_INT128)
+    const epykos_int128 exact_sum = (static_cast<epykos_int128>(ma) << sa) + static_cast<epykos_int128>(mb);
+    EXPECT_TRUE(static_cast<epykos_int128>(s) + static_cast<epykos_int128>(e) == exact_sum)
         << "two_sum inexact at i=" << i;
+#endif
 
-    // 1b. two_prod against __int128: p + pe must be the exact integer a*b.
+    // 1b. two_prod: p must be fl(a*b), and p + pe the exact integer a*b.
     const double a2 = static_cast<double>(ma);
     double p = 0.0, pe = 0.0;
     epykos::wide_detail::two_prod(a2, b, p, pe);
-    const __int128 exact_prod = static_cast<__int128>(ma) * static_cast<__int128>(mb);
-    EXPECT_TRUE(static_cast<__int128>(p) + static_cast<__int128>(pe) == exact_prod)
+#if defined(EPYKOS_HAVE_INT128)
+    const epykos_int128 exact_prod = static_cast<epykos_int128>(ma) * static_cast<epykos_int128>(mb);
+    EXPECT_TRUE(static_cast<epykos_int128>(p) + static_cast<epykos_int128>(pe) == exact_prod)
         << "two_prod inexact at i=" << i;
+#endif
     EXPECT_TRUE(same_bits(p, a2 * b)) << "two_prod's head is not fl(a*b) at i=" << i;
     ++int_checked;
 
@@ -150,7 +161,12 @@ TEST(WideE0, TwoSumAndTwoProdAreExact) {
       ++quick_checked;
     }
   }
-  std::cout << "[ eft      ] two_sum / two_prod exact against __int128 on " << int_checked
+#if defined(EPYKOS_HAVE_INT128)
+  const char* int_note = "exact against 128-bit integer arithmetic on ";
+#else
+  const char* int_note = "NOT checked against integer arithmetic (no __int128 on this target) over ";
+#endif
+  std::cout << "[ eft      ] two_sum / two_prod " << int_note << int_checked
             << " operand pairs, normalised on all of them; two_sum == quick_two_sum on the "
             << quick_checked << " where Dekker's precondition holds\n";
 }
@@ -159,7 +175,7 @@ TEST(WideE0, TwoSumAndTwoProdAreExact) {
 // Against the witness, where there is one
 // ------------------------------------------------------------------------------------------------
 
-TEST(WideE0, ArithmeticAgreesWithLongDouble) {
+TEST(WideScalar, ArithmeticAgreesWithLongDouble) {
   if (!epykos::witness_is_wider_than_double) {
     std::cout << "[ witness  ] SKIPPED (see LongDoubleWitnessIsAnnouncedOrSkippedLoudly)\n";
     GTEST_SKIP() << "no witness on this target";
@@ -189,7 +205,7 @@ TEST(WideE0, ArithmeticAgreesWithLongDouble) {
             << static_cast<double>(w_div) << ", sqrt " << static_cast<double>(w_sqrt) << "\n";
 }
 
-TEST(WideE0, TranscendentalsBeatTheWitness) {
+TEST(WideScalar, TranscendentalsBeatTheWitness) {
   if (!epykos::witness_is_wider_than_double) {
     std::cout << "[ witness  ] SKIPPED (see LongDoubleWitnessIsAnnouncedOrSkippedLoudly)\n";
     GTEST_SKIP() << "no witness on this target";
@@ -218,7 +234,7 @@ TEST(WideE0, TranscendentalsBeatTheWitness) {
 // The identities, which reach past any witness this machine has
 // ------------------------------------------------------------------------------------------------
 
-TEST(WideE0, TranscendentalIdentitiesHoldAt1e28OrBetterInTheEngineRange) {
+TEST(WideScalar, TranscendentalIdentitiesHoldAt1e28OrBetterInTheEngineRange) {
   // |x| <= 2 is the whole range this engine evaluates: DF = exp(−z·t) with z·t in roughly [0, 1.5].
   std::mt19937_64 rng(31415);
   std::uniform_real_distribution<double> u(0.0, 1.0);
@@ -249,7 +265,7 @@ TEST(WideE0, TranscendentalIdentitiesHoldAt1e28OrBetterInTheEngineRange) {
 }
 
 // The one place a double-double degrades, measured rather than argued (scalar/wide.hpp).
-TEST(WideE0, PrecisionGuardCatchesTheSubnormalTail) {
+TEST(WideScalar, PrecisionGuardCatchesTheSubnormalTail) {
   EXPECT_TRUE(Wide(1.0).has_full_precision());
   EXPECT_TRUE(Wide(0.0).has_full_precision());
   EXPECT_TRUE(exp(Wide(-1.0)).has_full_precision());
@@ -320,7 +336,7 @@ S vocabulary(const S& a, const S& b) {
 }  // namespace
 }  // namespace epykos
 
-TEST(WideE0, OperatorSurfaceMatchesDualAndDouble) {
+TEST(WideScalar, OperatorSurfaceMatchesDualAndDouble) {
   const double a = 0.37, b = 1.21;
   const double d = epykos::vocabulary<double>(a, b);
   const epykos::Dual<1> du = epykos::vocabulary<epykos::Dual<1>>(epykos::Dual<1>(a), epykos::Dual<1>(b));
@@ -341,7 +357,7 @@ TEST(WideE0, OperatorSurfaceMatchesDualAndDouble) {
   static_assert(std::is_trivially_copyable_v<Wide>);
 }
 
-TEST(WideE0, SelectAndComparisonSemanticsMatchScalarSelect) {
+TEST(WideScalar, SelectAndComparisonSemanticsMatchScalarSelect) {
   const Wide a(-2.0), b(3.0);
   EXPECT_EQ(max(a, b).hi, 3.0);
   EXPECT_EQ(min(a, b).hi, -2.0);
@@ -362,9 +378,23 @@ TEST(WideE0, SelectAndComparisonSemanticsMatchScalarSelect) {
 // D46's failure mode: a header-only template rounded differently by the TU that instantiated it
 // ------------------------------------------------------------------------------------------------
 
-TEST(WideE0, WideResultDoesNotDependOnTheTUsContractionSetting) {
-  // The same expression as src/verify/wide_probe.cpp, which the release preset compiles with
-  // contraction ON while this TU has it OFF in every preset.
+// D46's finding, in its own words, is that "contraction is a per-TU, context-sensitive compiler
+// decision", so GCC is free to round one instantiation of a header-only template differently from
+// another EVEN WHEN BOTH TUs CARRY THE SAME FLAGS. That is the failure this test reproduces: the
+// same `Wide` expression is computed here and in src/verify/wide_probe.cpp, an ordinary library TU,
+// and the two must agree to the last bit of the low word. No pinning is involved on either side,
+// which is the point — the property being checked is that `Wide` gives one answer whatever the
+// compiler decides to do with it, and that property is what lets ONE oracle figure be the figure.
+//
+// Under PRINCIPLES.md §4 this is a test of convenience rather than a contract: the two paths do
+// agree exactly, asserting it costs nothing, and it is a good bug detector. If a future change to
+// Wide's kernels makes them legitimately flag-sensitive, this assertion is relaxed and the
+// divergence measured instead.
+//
+// The stronger, real-workload version of the same claim is in D72 §6 and needs no test at all: the
+// Stage A oracle produces identical figures under `release` and `reference`, over 8,043 outputs.
+TEST(WideScalar, WideResultDoesNotDependOnTheTUThatComputedIt) {
+  // The same expression as src/verify/wide_probe.cpp.
   auto here = [](double seed, Wide* out) {
     const Wide x(seed);
     const Wide y = x * 1.0000000001 + 0.5;
@@ -398,7 +428,7 @@ TEST(WideE0, WideResultDoesNotDependOnTheTUsContractionSetting) {
     }
   }
   std::cout << "[ contract ] " << compared
-            << " (seed, chain) results bitwise identical between this -ffp-contract=off TU and "
-               "src/verify/wide_probe.cpp compiled with the preset's own flags ("
+            << " (seed, chain) results bitwise identical between this TU and "
+               "src/verify/wide_probe.cpp, two separate instantiations under the same preset flags ("
             << epykos::build_flags() << ")\n";
 }

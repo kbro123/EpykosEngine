@@ -3283,7 +3283,7 @@ project, and they built this TU.
 package's base `581b8e9`, so it was present for every measurement here; the 0.994861 / 0.991029 above are
 post-`Lt`-fix figures and match D63 §4's own amended table, not D67's superseded one. Checked rather than assumed.
 
-## D72 — The oracle: ground truth is the templated maths at 106 significand bits, not `long double`; and the first measurement of the naive `double` path's own error (2026-09-25)
+## D72 — The oracle: ground truth is the templated maths at 106 significand bits, not `long double`; the first measurement of the naive `double` path's own error, and of an execution path's (2026-09-25)
 
 Implements step 1 of `PRINCIPLES.md` §8 ("This contract, and the oracle. Nothing downstream can be judged before both
 exist") and §4's replacement of the ground truth the engine has gated against since M1. `PRINCIPLES.md` §6 point 4
@@ -3318,7 +3318,7 @@ not available everywhere:
    speed — **measured 62.5x a `double` evaluation** on the M1 book (45.7 ms against 0.731 ms), which an offline
    instrument can pay.
 
-`long double` is KEPT, as the oracle's **witness** rather than as the oracle. `tests/scalar/wide_e0_test.cpp`
+`long double` is KEPT, as the oracle's **witness** rather than as the oracle. `tests/scalar/wide_test.cpp`
 cross-checks `Wide` against it and **skips loudly** where it cannot judge, printing why. That is the answer to the
 brief's "fail loudly or skip loudly — decide and state which": **skip, and only the witness skips.** The oracle itself
 never degrades on arm64, because a double-double does not depend on the host's extended-precision format, so no gate
@@ -3342,11 +3342,14 @@ construction — `two_sum`/`quick_two_sum` contain no multiply for an FMA to abs
 explicitly through `std::fma`, which IEEE 754-2008 §5.4.1 defines as a single rounding whatever the flags are — and
 every remaining `a·b + c` in the correction terms is written as an explicit `std::fma` for the same reason. Then it is
 MEASURED: `src/verify/wide_probe.cpp` is deliberately NOT named `*_e0.cpp`, so it carries the preset's own flags, and
-`tests/scalar/wide_e0_test.cpp` computes the identical expression under `-ffp-contract=off` and compares. **15 of 15
-(seed, chain) results bitwise identical, both the high AND the low word**, on `release` (contraction on) with Apple
-clang 21. That is what lets one oracle figure be the figure on every preset.
+`tests/scalar/wide_test.cpp` computes the identical expression in its own TU and compares. **15 of 15 (seed, chain)
+results bitwise identical, both the high AND the low word**, on `release` with Apple clang 21. Neither side is
+pinned: D46's finding is that contraction is "a per-TU, context-sensitive compiler decision", so two instantiations
+of the same header-only template can diverge under the SAME flags, and that is the failure this pair reproduces.
+The stronger, real-workload form is in §6 and needs no test: the whole Stage A oracle is bit-identical under
+`release` and `reference`. That is what lets one oracle figure be the figure on every preset.
 
-Measured accuracy (fingerprint `d448afd70180`, Apple clang 21, release flags; `tests/scalar/wide_e0_test.cpp`
+Measured accuracy (fingerprint `d448afd70180`, Apple clang 21, release flags; `tests/scalar/wide_test.cpp`
 re-measures all of it every run):
 
 * the error-free transformations are **exact against 128-bit integer arithmetic** on 50,000 operand pairs, normalised
@@ -3439,17 +3442,38 @@ record-point knots, rho 0.005, 8,043 book outputs, D26 scales:
 | valuation: leg PV | 4,000 | **1.616e-13** | 3.165e-15 | 1.467e-14 | 1,443 | 1.616e-13 |
 | valuation: aggregates | 43 | **1.465e-13** | 6.170e-14 | 3.250e-14 | 1,063 | 1.066e-10 |
 
+**An execution path, which §4 as rewritten makes part of the same tier** (see §8). The COMPILED program —
+`exec::Interpreter` over `infer(record_m1(book))`, 10 IR domains, batch 8 — measured against the same 106-bit truth,
+same ball, same D26 scales:
+
+| output class | outputs | max rel | median | rms | max ulps |
+|---|---|---|---|---|---|
+| valuation: swap PV | 1,000 | **1.792e-15** | 5.739e-16 | 3.075e-16 | 14.95 |
+| valuation: book PV | 1 | **1.079e-15** | 1.079e-15 | 3.891e-16 | 6.628 |
+
+Side by side with the templated `double` path in the same run: swap PV 1.792e-15 for both, book PV 1.079e-15 against
+1.040e-15. They coincide because `tests/verify/m1_differential_e0_test.cpp` holds them bitwise equal; the book-PV
+difference is the contraction one, and note that the interpreter's 1.079e-15 is exactly the templated path's
+`reference`-preset figure in §6 — which is what it should be, since the interpreter's kernels are `_e0`-pinned and
+therefore contraction-free under `release` too. Two independent routes to the same number is a cheap consistency
+check and it holds. **The value of measuring the execution path against TRUTH rather than against the templated path
+is that it says which one moved**, which is exactly why §4 prefers it; a path-against-path comparison of two figures
+that agree tells you nothing about either.
+
 **Sensitivities.** The naive derivative path is the same templated maths on `Dual` — the recorded expression's exact
 derivative evaluated in `double`, which is what the mechanical adjoint computes by the other route (M2 measured the
 two agreeing to 2.1e-13 on the M1 book, M3 to 2.79e-15 on the Stage A tape, D30/D31/D35/D44; so the adjoint's distance
 from truth is within a known constant of what follows, transferred from a green gate rather than re-measured).
 
-M1, `Dual<12>` against the oracle Jacobian over all 12 knots and 1,001 outputs:
+M1, `Dual<12>` against the oracle Jacobian over all 12 knots and 1,001 outputs. These are relative to the ENTRY
+itself, there being no per-coupon derivative available from which to build a D26 scale; the worst entries are at
+healthy magnitudes (truth 2.852e+03 and 5.129e+07 respectively, printed by the test), so they are arithmetic error
+and not the conditioning of a near-empty cell:
 
 | output class | entries | max rel | rms |
 |---|---|---|---|
-| sensitivity: d swap PV / d knot | 6,886 nonzero | **1.117e-13** | 2.326e-15 |
-| sensitivity: d book PV / d knot | 11 nonzero | **7.191e-15** | 2.240e-15 |
+| sensitivity: d swap PV / d knot | 6,886 nonzero of 12,012 | **1.117e-13** | 2.326e-15 |
+| sensitivity: d book PV / d knot | 11 nonzero of 12 | **7.191e-15** | 2.240e-15 |
 
 Stage A, `Dual<1>` against the oracle Jacobian over a stated SAMPLE of 10 of the 70 knots (every 7th, spread across
 all four curves; 4 oracle evaluations of the whole 2,000-trade book per knot). Structural zeros — an output that does
@@ -3589,7 +3613,7 @@ the four the mutant registration and the doc rules require: `include/epykos/muta
 `include/epykos/scalar/wide.hpp`,
 `include/epykos/verify/oracle.hpp`, `src/verify/oracle.cpp`, `src/verify/wide_probe.cpp`,
 `include/epykos/fixtures/m1_oracle.hpp`, `include/epykos/fixtures/stage_a_oracle.hpp`,
-`tests/scalar/wide_e0_test.cpp`, `tests/verify/oracle_truth_test.cpp`, `tests/maths/m1_oracle_error_test.cpp`,
+`tests/scalar/wide_test.cpp`, `tests/verify/oracle_truth_test.cpp`, `tests/maths/m1_oracle_error_test.cpp`,
 `tests/stage_a/oracle_error_test.cpp`. No pricing maths changed; `src/optimise/`, `src/rewrite/` and the cost model
 untouched; no existing gate weakened, replaced or retuned; no new dependency, so D12 stands unamended; no
 `-ffast-math`; no SwapEngine file opened.
@@ -3609,14 +3633,58 @@ record of that exact failure class occurring. Caught by
 unmerged): that entry gives each mutant a recorded catching gate, and this one's is
 `tests/verify/oracle_truth_test.cpp`.
 
-Two of the four new test files join D33's mutation gate set by name (`scalar_wide_e0_test` via `_e0_test$`,
-`verify_oracle_truth_test` via `verify`) and were deliberately kept cheap for it — 0.30 s and under 0.01 s. The two
-measurement files do NOT match the regex (`maths_m1_oracle_error_test`, `stage_a_oracle_error_test`) and are not
-gates; they cost 5.4 s and 91 s and are measurements, not contracts.
+One of the four new test files joins D33's mutation gate set by name (`verify_oracle_truth_test`, via `verify`) and
+was kept cheap for it — under 0.01 s, run once per mutant. `scalar_wide_test` does not, and that is deliberate: it
+was `wide_e0_test.cpp` until §4a retired the convention, and a new file should not join a convention that is being
+retired (§8 below). It catches no mutant, so nothing is lost. The two measurement files do not match the regex
+either (`maths_m1_oracle_error_test`, `stage_a_oracle_error_test`); they cost 5.4 s and 91 s and are measurements,
+not contracts.
 
 **Not done, and named rather than left implicit:** the calibration solve's own error (§5, out of scope by
 `PRINCIPLES.md` §3 and unreachable by construction); the full 70-knot Stage A Jacobian (a stated 10-knot sample);
-tolerance numbers in `PROBLEM.md` (the owner's, from §4); and an exact rather than finite-difference oracle
+tolerance numbers in `PROBLEM.md` (the owner's, from §4); the catalogue kernels and the adjoint against truth, which
+§8 below brings into scope and which this package leaves to the packages that own them, having shown with the
+interpreter that it costs a caller and no new harness code; and an exact rather than finite-difference oracle
 sensitivity channel, which would mean templating `Dual<N>` on its value type to get `Dual<N, Wide>` — a contained,
 mechanical change to one file, not made because the Richardson difference is already 1e5 to 1e16 below what it
 measures and the brief says not to gold-plate.
+
+### 8. The contract moved under this package, and what that changed in it
+
+`PRINCIPLES.md` §4 was rewritten by the owner at `f8849b4` while this package was in flight
+("docs(principles): retire bit-identity as a contract; slow and fast paths agree by tolerance"). **Bit-identity is
+retired as a contract anywhere.** Where §4 had three tiers it now has two and a test: structural stays exact,
+because it is a graph identity rather than arithmetic; mathematical is characterised error against this package's
+oracle and now covers **rewrites AND every execution path**; execution is no longer a tier of its own, and what
+replaces it is the owner's test that the slow and fast paths agree to within floating-point tolerance. §4a retires
+the `-ffp-contract=off` pinning and the `*_e0` naming — 14 engine sources, 37 test files, about 9,700 lines — **as
+the rebuild reaches each file, explicitly not as a sweep** ("a 52-file rename that touches nothing else is a bad
+commit").
+
+Three consequences for what landed here, and none of them invalidates a number above:
+
+1. **This harness is the PRIMARY instrument, not an additional one.** The brief that commissioned it said "you are
+   ADDING an instrument, not replacing the current contract yet"; §4 now makes error-against-truth the contract for
+   every execution path as well as every rewrite. Nothing in the harness needed changing to absorb that, because it
+   was built on `verify/differential.hpp`'s existing `BatchFn` — an `exec::Interpreter`, a `Replayer` or a
+   catalogued kernel drops in exactly where a reference implementation does. §4's table row is demonstrated rather
+   than asserted: the interpreter's own error against truth is measured in §4 above, and it cost one caller.
+2. **§4's preference is the one this harness implements.** "Prefer measuring each path against the oracle over
+   comparing the two paths to each other, where the oracle is affordable: it is the stronger statement and it says
+   which path is wrong, not merely that they differ." Every figure in §4 is of that form. Path-against-path remains
+   the cheap form for where the oracle is too expensive, and the existing differential gates are exactly that.
+3. **No file was swept and nothing existing was renamed.** One new file had joined the retired convention before the
+   rewrite landed — `tests/scalar/wide_e0_test.cpp` — and it was renamed to `tests/scalar/wide_test.cpp` before
+   landing, with its contraction check reworked to need no pinning at all. That check is now the cross-TU comparison
+   D46 actually describes (two instantiations of a header-only template under the SAME flags, which GCC is free to
+   round differently), which is a better test than the one it replaced and is why the pin is not missed. Its ctest
+   name leaves D33's mutation gate set as a result; it catches no mutant, so nothing is lost.
+
+**The bitwise assertions this package does make are §4's "test of convenience", not contracts**, and §4 explicitly
+permits them: "where two paths happen to agree exactly and the exactness costs nothing to assert, asserting it is a
+good bug detector and is allowed — it is a test of convenience, never a constraint." There are three. The
+error-free transformations are exact against 128-bit integers (§2) — that one is a mathematical fact about the
+algorithm, not a flags claim. The Stage A anchor holds this fixture's `double` side bitwise equal to
+`price_stage_a_at` (§5) — a guard against measuring the wrong thing, and if it ever fails the fix is to read the
+reference column rather than to force equality. And the cross-TU probe (§2). Each is free, each is a bug detector,
+and each would be relaxed and replaced by a measured error the moment the thing it watches has a reason to move.

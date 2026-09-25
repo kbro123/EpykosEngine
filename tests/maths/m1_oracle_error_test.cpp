@@ -14,7 +14,7 @@
 // `reference` the path without it. Those are two different naive paths and the difference between
 // the two runs is itself a result (D30 found contraction of the reference alone reaches 13 ulps).
 // The truth side does not move between them — scalar/wide.hpp's contraction independence, measured
-// in tests/scalar/wide_e0_test.cpp — so the whole difference belongs to the naive path.
+// in tests/scalar/wide_test.cpp — so the whole difference belongs to the naive path.
 //
 // Not a mutation gate: `maths_m1_oracle_error_test` does not match D33's gate regex. It is a
 // measurement, and it costs about 60x a double evaluation per state.
@@ -26,17 +26,23 @@
 #include <iostream>
 #include <vector>
 
+#include "epykos/exec/interpreter.hpp"
 #include "epykos/fixtures/m1_book.hpp"
 #include "epykos/fixtures/m1_differential.hpp"
 #include "epykos/fixtures/m1_oracle.hpp"
 #include "epykos/fixtures/m1_price.hpp"
 #include "epykos/fixtures/m1_tangent.hpp"
+#include "epykos/fixtures/record_m1.hpp"
+#include "epykos/ir/program.hpp"
+#include "epykos/ir/signature.hpp"
 #include "epykos/scalar/wide.hpp"
 #include "epykos/verify/differential.hpp"
 #include "epykos/verify/oracle.hpp"
 #include "epykos/version.hpp"
 
+namespace exec = epykos::exec;
 namespace fixtures = epykos::fixtures;
+namespace ir = epykos::ir;
 namespace verify = epykos::verify;
 using epykos::Wide;
 
@@ -237,4 +243,65 @@ TEST(M1OracleError, NaivePathSensitivityErrorAgainstTruth) {
   EXPECT_GT(swaps.max_rel, 0.0) << "the oracle resolved no difference at all: suspect the oracle";
   EXPECT_LT(swaps.max_rel, 1e-9);
   EXPECT_LT(bookpv.max_rel, 1e-9);
+}
+
+// ------------------------------------------------------------------------------------------------
+// An execution path against truth (PRINCIPLES.md §4 as rewritten 2026-09-25)
+// ------------------------------------------------------------------------------------------------
+
+// §4 retired execution as a tier of its own: "the interpreter, the catalogue kernels and the
+// adjoint are implementations of the recorded maths like any rewrite, and are judged the same way."
+// It also states the preference this test acts on: "prefer measuring each path against the oracle
+// over comparing the two paths to each other, where the oracle is affordable — it is the stronger
+// statement and it says which path is wrong, not merely that they differ."
+//
+// So this measures the COMPILED program, exec::Interpreter over infer(record_m1(book)), against the
+// same 106-bit truth the templated `double` path was measured against above. No new harness code is
+// needed: `error_against_truth` takes differential.hpp's `BatchFn`, and `interpreter_fn` is already
+// the adapter, so an execution path drops in exactly where a reference implementation does.
+//
+// What the two numbers together say, which neither says alone: the interpreter's error against
+// truth is the error a user of this engine actually gets, and the templated path's error is what it
+// would be if the engine did not exist. tests/verify/m1_differential_e0_test.cpp separately holds
+// the two bitwise equal, so they are expected to coincide here — and if they ever stop coinciding,
+// this test says WHICH of them moved away from truth, which a path-against-path comparison cannot.
+TEST(M1OracleError, CompiledInterpreterAgainstTruth) {
+  const fixtures::Book& b = book();
+  print_build("M1 interpreter");
+
+  const epykos::Tape tape = fixtures::record_m1(b);
+  const ir::Program program = ir::infer(tape);
+  const int n_out = static_cast<int>(tape.num_outputs());
+  ASSERT_EQ(n_out, b.n_swaps + 1);
+
+  exec::Options iopt;
+  iopt.max_batch = 8;
+  exec::Interpreter in(program, iopt);
+
+  verify::BallOptions bo;
+  bo.draws = kStates;
+  const verify::StateBall ball = fixtures::m1_state_ball(b, bo);
+
+  verify::TruthOptions opt;
+  opt.classes = fixtures::m1_output_classes(b);
+  opt.scale = fixtures::m1_leg_scale_fn(b);
+  opt.batch = 8;
+
+  const verify::TruthReport rep =
+      verify::error_against_truth(ball, n_out, verify::interpreter_fn(in), fixtures::m1_oracle_fn(b), opt);
+
+  std::cout << "[ measured ] interpreter (" << program.domains.size() << " IR domains, batch 8) vs truth\n";
+  std::cout << rep.per_class_table();
+  EXPECT_EQ(rep.degraded, 0u);
+  EXPECT_GT(rep.classes.at(0).max_rel, 0.0);
+  EXPECT_LT(rep.classes.at(0).max_rel, 1e-12);
+
+  // The same measurement on the templated `double` path, for the comparison §4 asks for: which
+  // path is closer to truth, not merely whether they differ.
+  const verify::BatchFn naive = verify::batch_of(fixtures::m1_reference_fn(b), fixtures::n_knots, n_out);
+  const verify::TruthReport ref =
+      verify::error_against_truth(ball, n_out, naive, fixtures::m1_oracle_fn(b), opt);
+  std::cout << std::scientific << std::setprecision(3) << "[ measured ] swap PV max rel vs truth: interpreter "
+            << rep.classes.at(0).max_rel << ", templated double " << ref.classes.at(0).max_rel << "; book PV "
+            << rep.classes.at(1).max_rel << " and " << ref.classes.at(1).max_rel << "\n";
 }

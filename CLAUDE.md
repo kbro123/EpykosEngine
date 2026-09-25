@@ -77,6 +77,24 @@ against 1.021-1.032x measured) but captures only 31% of reduction fusion and 11%
 next package should start. M5
 onward awaits the owner's decision on this failed exit gate. Nothing merges to `main` without the owner.
 
+**`docs/PRINCIPLES.md` (owner-set, 2026-09-25) is now the contract the optimiser is rebuilt against, and where it
+and an older document disagree it wins.** Its §4 was rewritten the same day (`f8849b4`): **bit-identity is retired
+as a contract anywhere.** Two tiers and a test, where there were three tiers — structural stays exact (a graph
+identity, not arithmetic); mathematical is characterised error against the oracle and covers rewrites AND every
+execution path; execution is no longer a tier of its own, and the owner's test replaces it: the slow and fast paths
+must agree to within floating-point tolerance. §4a retires the `-ffp-contract=off` pinning and the `*_e0` naming
+(14 engine sources, 37 test files) **as the rebuild reaches each file, never as a sweep** — do not rename anything
+on its own account, and do not add new files to that convention. Its step 1 landed 2026-09-25 (**D72**): ground truth is no longer the
+naive `double` path but the templated maths instantiated at 106 significand bits (`epykos::Wide`, an in-repo
+double-double, `include/epykos/scalar/wide.hpp`; `long double` is its witness, not the oracle, because it IS
+`double` on the arm64 CI runner). `verify/oracle.hpp` reports error against truth per output class and returns no
+verdict: PRINCIPLES §4 puts the tolerance numbers in `PROBLEM.md` and they are to be set FROM the first
+measurement, which is also D72's. That measurement, on `d448afd70180`, D26-scaled: the naive path's VALUATION error
+is 1.792e-15 of the leg scale on the M1 book and 7.854e-14 to 1.616e-13 on Stage A, and its SENSITIVITY error is
+62x and 656x larger respectively — so "valuation is held tight; sensitivities are allowed more" is now measured and
+not only judged. The first EXECUTION path measured against truth is the interpreter, at 1.792e-15 / 1.079e-15 on the
+M1 book, which cost one caller and no new harness code. The mutation registry is 51.
+
 ## Rules
 - **Decisions are in `docs/DECISIONS.md`.** Changing one means appending a new entry that supersedes it, in the same
   commit as the change.

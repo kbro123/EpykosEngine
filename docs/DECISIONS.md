@@ -3714,3 +3714,5 @@ experiment (§8.9 step 2) is the cheapest honest test of the e-graph specificall
 reappears the design has drifted back to the wrong layer. The six IR-layer headers, the old name
 table and the old test are DELETED. No existing rule, pass, cost model or e-graph source is touched.
 Still no mutant: still no behaviour to mutate.
+
+**CI evidence (D46).** `ci_green` = **true**, all four jobs on this package's exact SHA `10d0ac442bf1b182fb02a2606a5dfd09f76783f6`: run <https://github.com/kbro123/EpykosEngine/actions/runs/36191247329> -- ubuntu-latest/release, ubuntu-latest/reference, macos-latest/release and ubuntu-latest/mutation all success. Locally on Apple clang 21: `ctest --preset release` 112/112 and `--preset reference` 112/112, 0 failed each; the design gate `algebra_interface_test` 14/14 under both presets. The headers therefore compile under GCC 13 and Apple clang, which is the whole of what a design-only package can be gated on.

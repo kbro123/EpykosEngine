@@ -580,9 +580,14 @@ Correctness gates:
   of scans and unchanged;
 - **mutation testing** on rewrite rules (a mutated rule must fail a gate): every pass carries its mutants as one-line
   defects behind `epykos::mutant("<pass>.<defect>")` (`include/epykos/mutation/`), compiled in only by the `mutation`
-  preset and selected one per process by `EPYKOS_MUTANT`; `scripts/mutation_test.sh` runs the gates above once per
-  registered mutant and fails if any survives — a survivor is a gap in the gates, never a job for a mutant-specific
-  test (D32); the adjoint's mutants are caught by the adjoint gates, which are part of the harness's gate set (D33);
+  preset and selected one per process by `EPYKOS_MUTANT`; `scripts/mutation_test.sh` runs the whole gate set once
+  with no mutant selected and then, per registered mutant, the single gate `scripts/mutation_catchers.tsv` records
+  as catching it, falling back to the whole gate set whenever that record is missing, names a gate that no longer
+  exists or names one that no longer fails — so a stale record costs time and never correctness, and no mutant is
+  called uncaught until every gate has been run at it (D70). It fails if any mutant survives: a survivor is a gap in
+  the gates, never a job for a mutant-specific test (D32). `--full` runs the whole cross-product, every gate against
+  every mutant, and rewrites the record; that is how a new mutant finds its catcher (D70). The adjoint's mutants are
+  caught by the adjoint gates, which are part of the harness's gate set (D33);
 - **external oracles** (QuantLib and others) added per product, test-only.
 
 Performance gates: per machine+toolchain fingerprint; fail on > 1.25× self-regression or an absolute target miss. As

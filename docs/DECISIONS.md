@@ -3282,3 +3282,207 @@ project, and they built this TU.
 `fdd07a5` ("fit at the lane width the interpreter really plans with", D63's own (d2) fix) is an ancestor of this
 package's base `581b8e9`, so it was present for every measurement here; the 0.994861 / 0.991029 above are
 post-`Lt`-fix figures and match D63 §4's own amended table, not D67's superseded one. Checked rather than assumed.
+
+## D70 — The mutation gate tries each mutant's recorded catching gate first; the whole cross-product stays one flag away (2026-09-25)
+
+Owner-directed CI package, commissioned after the mutation job became the long pole of every push: at `7f22134`
+its three sibling jobs finish in 9.5, 10.1 and 11.8 minutes and it takes **62.6**. It is a hard gate and stays one
+— D32 requires every registered mutant to fail at least one gate test and the job to fail if any survives — so
+nothing below checks less. It reaches the same verdict with less work.
+
+Touches one script (`scripts/mutation_test.sh`), adds one generated metadata file
+(`scripts/mutation_catchers.tsv`) and two doc entries. No engine code, no rewrite, no exactness class, no gate
+text, no mutant added or removed, and **no change to `.github/workflows/ci.yml`** (§7).
+
+### 1. Measured before changing anything: the cost is flat, and the lever is gates-per-mutant
+
+The brief assumed a tail of expensive mutants. There is none. Broken out of the timestamped job log of CI run
+`36088537149` (the `push` run at `7f22134`, `ubuntu-latest / mutation`, GCC 13, `scripts/mutation_test.sh --jobs 2`),
+whose single step spans 62.5 minutes:
+
+| phase | wall clock | share of the step |
+|---|---|---|
+| configure + build the `mutation` preset | 508.0 s | 13.5% |
+| baseline: all 57 gates, no mutant selected | 64.9 s | 1.7% |
+| the 50 mutants | 3,166.2 s | 84.4% |
+
+and across those 50 mutants the per-mutant wall clock is **median 62.8 s, mean 63.3 s, p90 64.4 s** — against
+64.9 s for the same 57 gates with no mutant at all. Every mutant costs one whole gate-set run, to within noise.
+(Two adjacent rows read 127.5 s and 0.0 s. That pair is one log-flush artefact — the runner flushed a mutant's
+header and its result in the same write — not a slow mutant. The largest genuine row is 89.5 s.)
+
+So the cost is `50 mutants × (whole gate set)` and both factors grow with the registry. There is no slow-mutant
+tail to attack and no reordering to do. The only lever is how many gates each mutant is asked, and catching a
+mutant needs exactly **one** failing gate.
+
+Two further measurements shaped the design rather than confirming it.
+
+**(a) The gates are not uniform, and a fast path is worth only what the gate it picks costs.** On this machine
+(Xeon W-3223, Apple clang 21, the `mutation` preset, `ctest -j 4`) the 57 gates sum to 314.1 s of serial test
+time, and **15 of them account for 248.3 s of that 314.1 s** — 79% of the work in 26% of the gates, led by
+`stage_a_gate_differential_e0_test` at 33.28 s and `stage_a_risk_adjoint_test` at 25.54 s. The map therefore
+records the CHEAPEST catching gate, not the first one found.
+
+**(b) Half the registry has no choice about which gate that is.** The number of gates that catch a given mutant
+has median 2 and maximum 36, and **25 of the 50 mutants are caught by exactly one gate** — the same 25 under
+Apple clang and under GCC 13. For those the map's "choice" is forced, and the forced gate is usually an expensive
+one: `rewrite_r6_materialise_boundaries_e0_test` (15.85 s), `rewrite_r1_fold_uniform_columns_e0_test` (15.81 s),
+`rewrite_r7_block_linmap_e0_test` (14.16 s) and their R2–R5/fma/ad_mode siblings are each the sole catcher of two
+or three mutants. That is what sets the fast path's floor, and it is why §4's outer parallelism is measured
+rather than assumed.
+
+### 2. What changed
+
+`scripts/mutation_test.sh` keeps steps 1–4 exactly as they were — build, read the registry from the binary, select
+the gate set by `EPYKOS_GATE_REGEX`, and **run the whole gate set once with no mutant selected**. That baseline is
+never shortened: it is what makes a single later failure attributable to the mutant and to nothing else.
+
+After it, two new phases:
+
+  * **the fast path.** For every mutant that `scripts/mutation_catchers.tsv` records a catching gate for, run just
+    that one gate under `EPYKOS_MUTANT=<name>`. `--outer N` of them run at once, each its own process — a mutant
+    needs its own `EPYKOS_MUTANT`, so this is process-level parallelism and not `ctest -j` — dispatched by `xargs`
+    over a re-exec of the script as `--gate-worker`.
+  * **the fallback.** Every mutant the fast path did not settle then gets the ENTIRE gate set, exactly as before
+    this entry. Only after that can the harness call a mutant uncaught.
+
+`--full` skips the fast path, runs the whole cross-product and rewrites the map. `--no-map` takes the fallback for
+everything and writes nothing (the pre-D70 behaviour on demand). The script header says when to run `--full`:
+after adding a mutant, after adding, renaming or deleting a gate or changing the regex, whenever a run reports a
+non-zero fallback count, and periodically to see the two things only the cross-product can see (§6).
+
+Every run prints `N mutant(s) caught by their recorded gate, M needed the full 57-gate fallback`, and when M is
+non-zero it splits M into its three causes and says to re-run `--full`. A rising M is the drift signal.
+
+### 3. Why a stale, wrong or missing map cannot turn a survivor into a pass
+
+This is the property the change rests on, so it is enforced in three places rather than argued.
+
+  1. **The worker never reports a verdict.** `ctest` exits non-zero both for "the gate failed" (the mutant is
+     caught) and for "no test matched that name" (a stale record). Reading its exit status would silently convert
+     the second into a pass. The worker therefore always exits 0, and the parent decides by parsing the per-test
+     result line out of the log; a log with no such line reads as "not caught" and falls back.
+  2. **A recorded gate that is not in the current gate set never runs at all.** It is checked against the selected
+     gates first and sent straight to the fallback, counted as drift.
+  3. **Anything short of an observed non-`Passed` status for that exact gate falls back** to the whole set: a
+     missing or unreadable map, a mutant with no line, a line naming a gate that now passes, even a failure of
+     `xargs` itself.
+
+Verified by experiment on this tree (`--no-build`, Apple clang, the `mutation` preset):
+
+| experiment | the map entry for the mutant | expected | observed |
+|---|---|---|---|
+| E1 | the correct gate | fast-path hit, no fallback | caught via the recorded gate, 0 fallback, exit 0 |
+| E2 | a gate name that does not exist | fallback, still caught | "is not a gate test any more", caught by the full set, exit 0 |
+| E3 | a real gate that does not catch it | fallback, still caught | "did not fail", caught by the full set, exit 0 |
+| E4 | no map file at all | fallback for everyone | "no recorded gate", caught by the full set, exit 0 |
+| E5 | a gate set that genuinely cannot catch it | SURVIVED, exit 1 | SURVIVED, exit 1 |
+
+E5 matters most: with `EPYKOS_GATE_REGEX` narrowed so `r1.ignores_last_row`'s only catcher is out of the set, the
+harness still calls it a survivor and still exits 1. The fast path cannot hide a gap in the gates, because a
+mutant it fails to catch is precisely a mutant it hands to the full set.
+
+### 4. The outer/inner pair, measured rather than assumed
+
+`--outer` defaults to `--jobs`, each worker at `ctest -j 1`, so the fast path spends the core budget the caller
+already asked for and CI needed no workflow edit to get it (`--jobs 2` ⇒ two mutants at a time).
+
+Concurrent `ctest` invocations share one build directory and its `Testing/Temporary/`, which is worth checking
+rather than assuming. Measured on 12 mutants whose catching gate is unambiguous (each is that mutant's sole
+catcher, so the expected answer does not depend on the compiler), at `--outer 1` and `--outer 8`: **identical
+verdicts, mutant for mutant**, with the fast-path portion falling from 101 s to 46 s. What ctest writes there is
+logs and a scheduling-cost cache; neither is read back within a run, and with one test per invocation there is
+nothing to schedule. Verdicts do not depend on the pair; only the wall clock does.
+
+Across the whole registry on this machine, the whole job minus the build:
+
+| `--jobs` (inner) | `--outer` | wall clock | of which baseline | of which fast path |
+|---|---|---|---|---|
+| 4 | 1 | 315 s | 66.7 s | 248.3 s |
+| 4 | 4 | 149 s | 72.0 s | 77.0 s |
+| 4 | 8 | 141 s | 72.1 s | 68.9 s |
+| 2 | 2 | 260 s | 124.7 s | 135.3 s |
+
+Outer parallelism is worth 3.2× on the fast-path portion (248.3 s to 77.0 s at `--outer 4`) and is not free to
+skip: without it the 25 forced expensive gates of §1(b) are run one after another. Past `--outer 4` it flattens,
+as expected on 8 physical cores against a 15.85 s longest gate.
+
+### 5. The result
+
+**Work asked of the gates.** The fast path runs 315.0 s of serial test time — one recorded gate per mutant, 23
+distinct gates — where the cross-product runs 50 × 314.1 s = 15,703 s. Of that 315.0 s, **235.2 s is the 25
+forced single-catcher mutants and only 79.8 s is the 25 where the map had a choice**, which is §1(b) restated as
+a cost.
+
+**Wall clock, Apple clang 21, Xeon W-3223, the `mutation` preset, `--jobs 4`, build excluded** (the build is
+shared by both and is not what changed):
+
+| | wall clock |
+|---|---|
+| before — the whole cross-product (`--full`) | 3,551 s (59.2 min) |
+| after — the fast path (`--outer 4`) | 149 s (2.5 min) |
+
+a factor of **23.8×** on the part of the job this entry touches. Cross-check that `--full` is a fair stand-in for
+the pre-D70 script: the unmodified script's first 12 mutants on this machine ran at a median of 67.5 s each,
+against `--full`'s 66.7 s.
+
+**Wall clock on CI, GCC 13, ubuntu-latest, `--jobs 2`, the whole job including the build:** recorded in this
+entry's follow-up commit, together with the run id and its four job conclusions, per D46's rule that CI evidence
+is a poll of the package's own SHA and never "a recent green run".
+
+Projected from the parts already measured, and labelled as the estimate it is: the build (508.0 s) and the
+baseline (64.9 s) do not change, and the fast path is the only new term, so the job should land near eleven
+minutes and the BUILD becomes its long pole at roughly four fifths of it. That is not addressed here and is a
+separate question — D12 fixes the dependency set, so a compiler cache would need its own decision entry.
+
+**The verdict is unchanged, which is the claim that actually matters.** Fifty mutants over 57 gate tests, all 50
+caught, 0 survivors, in every one of these: the `--full` cross-product under Apple clang; the fast path under
+Apple clang at each of the four `--jobs`/`--outer` pairs above; the fast path under **GCC 13**, built and run in
+a `gcc:13` container into a container-local copy of the tree (`50 mutant(s) caught by their recorded gate, 0
+needed the full 57-gate fallback`, `every mutant caught`, exit 0); and, as the pre-change reference on that same
+compiler, CI run `36088537149`'s own table at `7f22134`. The 50 mutant names and their caught/survived verdicts
+are identical across all of them.
+
+**Every gate the Apple clang `--full` run chose also catches under GCC 13**, checked entry by entry against that
+CI run's table, so the committed map costs no fallbacks on the compiler CI actually uses. The two compilers
+disagree only on how MANY gates catch four of the mutants (`cse.merge_nonequal` 33 against 36,
+`affine.wrong_coefficient` 11 against 10, `adjoint.drop_broadcast` 15 against 18,
+`catalogue.binding_wrong_operand_order` 28 against 30) — tolerance gates landing either side of a bound under
+different contraction, the same class of cross-compiler difference D25 and D46 already record. It does not touch
+which mutants are caught, and the set of single-catcher mutants is identical on both.
+
+### 6. Two findings the cross-product turned up, which are why `--full` still exists
+
+  * **25 of the 50 registered mutants are caught by exactly one gate test.** Half the registry is a single point
+    of failure: weaken or delete one of those gates and the mutants behind it stop being covered by anything,
+    while the harness goes on reporting "every mutant caught" for the rest. The map now records the catcher count
+    beside the gate and a `--full` run prints the list, so this is visible rather than implicit.
+  * **8 of the 57 gate tests caught no mutant at all**: `adjoint_state_bar_bounds_e0_test`,
+    `hand_m1_hand_e0_test`, `maths_m1_fixture_e0_test`, `maths_m1_oracle_e0_test`, `maths_m1_scalar_e0_test`,
+    `scaffold_fp_contract_e0_test`, `scalar_dual_m1_e0_test`, `verify_differential_test`. Not a defect: each
+    guards something no registered mutant breaks — the hand-fused reference kernel (D9, D28) and the seeded
+    fixtures and oracles carry no mutants, and `scaffold_fp_contract_e0_test` checks build flags rather than
+    maths. But it is also exactly what a gate that has quietly stopped testing anything would look like, and
+    before this entry nobody was in a position to notice the difference.
+
+Neither is fixed here. Closing the first means new generic gates, which is D32's own prescription for a coverage
+gap and a package of its own. They are recorded because the cross-product is the only run that can see them,
+which is the argument both for keeping `--full` reachable and for running it periodically rather than only when
+something breaks.
+
+### 7. Scope: the docs-only path filter was dropped, and the workflow is untouched
+
+The package as first briefed had a second half: skip the mutation job for commits touching only `docs/**`, `*.md`
+or `bench/results/**`, since those cannot change whether a mutant is caught. The owner withdrew that half
+mid-package; it was not implemented, and `.github/workflows/ci.yml` is byte-identical to `7f22134`. Recorded
+because the reasoning around it should not be lost if it is ever picked up: a `paths-ignore` skip on a REQUIRED
+status check never reports and can block a merge forever, so the pattern that reports success without doing the
+work is the safe one. Checked while the question was still live, and stated here so the next attempt does not
+have to: this repository has **no branch protection and no rulesets** (`gh api .../branches/main/protection`
+returns 404 "Branch not protected"; `gh api .../rulesets` returns `[]`), so no status check is required on it
+today and either pattern would have been safe.
+
+One consequence of the fast path worth stating plainly, since it cuts against the dropped half: a docs-only
+commit still runs the mutation job. It no longer costs 62.6 minutes to do it, which is what made the filter
+urgent; the filter would take the remainder to nearly zero, but it is no longer the difference between an agent
+blocked for an hour and an unblocked one.

@@ -106,7 +106,7 @@ Priced<Scalar> price_at(const fixtures::CompareOis& s, const std::vector<double>
   std::vector<Scalar> zs;
   zs.reserve(z.size());
   for (double v : z) zs.push_back(Scalar(v));
-  const typename curve::Composite::template State<Scalar> st = comp.template prepare<Scalar>(zs.data());
+  const auto st = comp.prepare<Scalar>(zs.data());
   Memo<Scalar, std::function<Scalar(int, double)>> memo([&comp, &st](int, double t) { return comp.df(st, t); });
   Priced<Scalar> r;
   for (const instrument::CalibrationInstrument& ci : s.set.instruments) {
@@ -304,6 +304,17 @@ TEST(SpikeTelescoping, TheStructuralPrize) {
   const spike::FormCounts n = spike::count_compare_ois_spike(s, spike::Form::naive);
   const spike::FormCounts t = spike::count_compare_ois_spike(s, spike::Form::telescoped);
   std::cout << spike::compare_forms(n, t);
+  // Both tapes' record-time calibrations converged and landed on the same book, at FULL size --
+  // otherwise the telescoped column is a smaller program computing a different thing.
+  EXPECT_TRUE(n.converged);
+  EXPECT_TRUE(t.converged);
+  EXPECT_LT(n.jtr_inf, 1e-12);
+  EXPECT_LT(t.jtr_inf, 1e-12);
+  const double book_rel = std::fabs(n.book_pv - t.book_pv) / std::fabs(n.book_pv);
+  std::cout << "[spike/telescoping] at full size the two forms' record-point book PV agree to " << book_rel
+            << " relative (naive " << std::setprecision(17) << n.book_pv << ", telescoped " << t.book_pv
+            << std::setprecision(6) << "); optimality |J^T r|_inf " << n.jtr_inf << " and " << t.jtr_inf << "\n";
+  EXPECT_LT(book_rel, 1e-9);
   EXPECT_LT(t.tape_nodes_after_passes, n.tape_nodes_after_passes)
       << "telescoping did not remove a single surviving tape node; the spike is not measuring what it thinks";
   EXPECT_GT(n.ir_scan_domains, 0u) << "the naive form should record the compounding as a scan (D41)";

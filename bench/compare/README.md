@@ -252,6 +252,15 @@ sixteen book trades (D64), fingerprint `d448afd70180`:
 | IR steps x rows, the residual slice the solve iterates | 80,319 | 563 | **142.66x** |
 | IR scan rows (the compounding itself) | 9,946 | 18 | 552.56x |
 
+In wall clock, same fixture and fingerprint, `bench/run.sh` at 20 repetitions (load 4.90 before, 5.81 after; a
+confirmation run reproduces every ratio to within 0.8%-5.9%):
+
+| row | naive | telescoped | ratio |
+|---|---|---|---|
+| evaluate (whole-program interpreter, one lane) | 145.4 us | 3.096 us | **46.97x** |
+| calibrate (one full recalibration plus the forward pass) | 26,150 us | 155.0 us | **168.73x** |
+| the O3 ladder, warm | 7,341 us | 49.78 us | **147.48x** |
+
 The 250:1 loses about 9.5x before any optimiser is involved: the fixture's 94,942 recorded observation days are
 already only 9,946 distinct IR scan rows, because sixteen instruments on one annual grid out to forty years share
 their daily steps and `cse` merges them. What is left is still large. **Quote the measured figures, not 250:1.**

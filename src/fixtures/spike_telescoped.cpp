@@ -199,6 +199,9 @@ FormCounts count_compare_ois_spike(const CompareOis& s, Form form) {
   f.tape_nodes_raw = t.nodes_raw;
   f.tape_nodes_after_passes = t.nodes_after_passes;
   f.seconds_record = t.seconds_record;
+  f.converged = t.record_report.converged;
+  f.jtr_inf = t.record_report.jtr_inf;
+  f.book_pv = t.record_book;
 
   solver::ImplicitProgram prog(t.tape, t.registry, compare_ois_program_options(s));
   const ir::Program& p = prog.program();

@@ -27,7 +27,7 @@
 // un-baselined name is not gated). Run it on a quiet machine, per bench/run.sh:
 //
 //   uptime; ps -Ao %cpu,command -r | head        # load lags; check what is actually running
-//   bench/run.sh build/release/bench/telescoping_bench
+//   bench/run.sh build/release/bench/spike_telescoping_bench
 #include <benchmark/benchmark.h>
 
 #include <cstddef>
@@ -169,34 +169,45 @@ void record_row(benchmark::State& state, spike::Form form) {
   common_counters(state, f);
 }
 
+// The two forms of a row are registered ADJACENTLY, not all-naive-then-all-telescoped. Google
+// Benchmark runs benchmarks in registration order, so a machine that drifts over the run biases
+// the ratio directly if the two halves are minutes apart; registering the pair together makes the
+// two members of every ratio near neighbours in time. D68 made the same point about interleaving.
 void register_all() {
   using benchmark::RegisterBenchmark;
-  for (const spike::Form form : {spike::Form::naive, spike::Form::telescoped}) {
-    const std::string tag = std::string("/") + spike::to_string(form);
-    for (int t : kTrades) {
-      RegisterBenchmark("BM_Evaluate" + tag, [form](benchmark::State& s) { evaluate_row(s, form); })
-          ->Arg(t)
-          ->Unit(benchmark::kMicrosecond);
-      RegisterBenchmark("BM_Calibrate" + tag, [form](benchmark::State& s) { calibrate_row(s, form); })
-          ->Arg(t)
-          ->Unit(benchmark::kMicrosecond);
-      RegisterBenchmark("BM_LadderChord" + tag, [form](benchmark::State& s) { ladder_row(s, form, Which::Chord); })
-          ->Arg(t)
-          ->Unit(benchmark::kMicrosecond);
-      RegisterBenchmark("BM_LadderWarm" + tag, [form](benchmark::State& s) { ladder_row(s, form, Which::Warm); })
-          ->Arg(t)
-          ->Unit(benchmark::kMicrosecond);
-      RegisterBenchmark("BM_LadderCold" + tag, [form](benchmark::State& s) { ladder_row(s, form, Which::Cold); })
+  constexpr spike::Form kForms[] = {spike::Form::naive, spike::Form::telescoped};
+  auto pair = [&](const char* name, int arg, benchmark::TimeUnit unit, void (*fn)(benchmark::State&, spike::Form)) {
+    for (const spike::Form form : kForms) {
+      RegisterBenchmark(std::string(name) + "/form:" + spike::to_string(form),
+                        [form, fn](benchmark::State& s) { fn(s, form); })
+          ->Arg(arg)
+          ->Unit(unit);
+    }
+  };
+  for (int t : kTrades) {
+    pair("BM_Evaluate", t, benchmark::kMicrosecond, evaluate_row);
+    pair("BM_Calibrate", t, benchmark::kMicrosecond, calibrate_row);
+    for (const spike::Form form : kForms) {
+      RegisterBenchmark(std::string("BM_LadderChord/form:") + spike::to_string(form),
+                        [form](benchmark::State& s) { ladder_row(s, form, Which::Chord); })
           ->Arg(t)
           ->Unit(benchmark::kMicrosecond);
     }
-    RegisterBenchmark("BM_Build" + tag, [form](benchmark::State& s) { build_row(s, form); })
-        ->Arg(kTrades[0])
-        ->Unit(benchmark::kMillisecond);
-    RegisterBenchmark("BM_Record" + tag, [form](benchmark::State& s) { record_row(s, form); })
-        ->Arg(kTrades[0])
-        ->Unit(benchmark::kMillisecond);
+    for (const spike::Form form : kForms) {
+      RegisterBenchmark(std::string("BM_LadderWarm/form:") + spike::to_string(form),
+                        [form](benchmark::State& s) { ladder_row(s, form, Which::Warm); })
+          ->Arg(t)
+          ->Unit(benchmark::kMicrosecond);
+    }
+    for (const spike::Form form : kForms) {
+      RegisterBenchmark(std::string("BM_LadderCold/form:") + spike::to_string(form),
+                        [form](benchmark::State& s) { ladder_row(s, form, Which::Cold); })
+          ->Arg(t)
+          ->Unit(benchmark::kMicrosecond);
+    }
   }
+  pair("BM_Build", kTrades[0], benchmark::kMillisecond, build_row);
+  pair("BM_Record", kTrades[0], benchmark::kMillisecond, record_row);
 }
 
 }  // namespace

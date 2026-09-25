@@ -3839,7 +3839,7 @@ algorithm, not a flags claim. The Stage A anchor holds this fixture's `double` s
 reference column rather than to force equality. And the cross-TU probe (§2). Each is free, each is a bug detector,
 and each would be relaxed and replaced by a measured error the moment the thing it watches has a reason to move.
 
-## D74 — The telescoping prize, measured end to end before the machinery to find it is built: the 250:1 recorded ratio is 62:1 in surviving tape nodes, 143:1 in the work the calibration solve iterates, and not yet taken on a quiet machine in wall clock (2026-09-25)
+## D74 — The telescoping prize, measured end to end before the machinery to find it is built: the 250:1 recorded ratio is 62:1 in surviving tape nodes, 143:1 in the work the calibration solve iterates, and 46.97x on evaluate, 168.73x on calibrate and 147.48x on the reverse risk ladder in wall clock (2026-09-25)
 
 A MEASUREMENT SPIKE, not a feature, on `spike/telescoping-prize`. `PRINCIPLES.md` §8 orders the rebuild and puts
 telescoping fourth, "as the worked example — it exercises every part of this contract and is worth 250:1". That
@@ -3901,7 +3901,10 @@ nothing else.
 **The two forms agree on the outputs** (six calibration instruments, eight book trades, D64): O1 knots
 **4.673e-14**, O2 book PV **6.092e-15** relative to a 1.261e+06 book, O3 ladder **1.228e-15** relative to its own
 infinity norm. `PRINCIPLES.md` §4's operative contract — verified identities and path-to-path agreement within a
-loose tolerance — is what these are held to; nothing here is bitwise.
+loose tolerance — is what these are held to; nothing here is bitwise. **At FULL size** (sixteen calibration
+instruments, sixteen book trades, D64) both tapes' record-time calibrations converge — optimality ‖Jᵀr‖∞
+**2.228e-15** naive and **4.823e-16** telescoped — and their record-point book PVs agree to **9.064e-14** relative
+(-15,185,791.536680402 against -15,185,791.536679026). §6 says which of those two is the more nearly correct one.
 
 ### 4. The structural prize, and where the 250:1 goes
 
@@ -3971,12 +3974,73 @@ amount.
 
 ### 5. Wall clock — the number that was actually asked for
 
-**Not taken at the time this entry was first written**, and D9 is why: the machine was under two other
-sessions' test and mutation sweeps throughout (1-minute load 7.3 to 14.7 against `bench/run.sh`'s refusal bar of
-cores/2 = 8.0, with four to six other EpykosEngine processes at 100% CPU), and a contended number is worthless.
-`bench/spike/telescoping_bench.cpp` is the instrument: BM_Evaluate, BM_Calibrate, BM_LadderChord / Warm / Cold,
-BM_Build and BM_Record, registered once per coupon form on the same fixture, at sixteen and sixty-four book trades.
-A follow-up commit on this branch fills this section in.
+Fingerprint `d448afd70180`, `release` (Apple clang 21, `-O3 -march=x86-64-v3 -fno-math-errno`),
+`bench/spike/telescoping_bench.cpp` under `bench/run.sh` — 20 repetitions, `--benchmark_min_time=0.2s`, medians.
+Both forms are registered ADJACENTLY and measured in ONE process, so the two members of every ratio are near
+neighbours in time (D68 made the same point about interleaving). Results:
+`bench/results/d448afd70180/spike_telescoping.json`.
+
+**The machine, stated rather than claimed** (D9). 1-minute load **4.90 before, 5.81 after**, against
+`bench/run.sh`'s bar of cores/2 = 8.0, so the run is inside D29's own rule and `run.sh` accepted it. It was **not an
+idle box**: two processes unrelated to this repository were each burning a full core throughout (an
+`com.apple.Virtualization.VirtualMachine.xpc` at ~100% and an unrelated `./harness --mode stress` of the owner's,
+at ~99%), with WindowServer at ~40% and the desktop app at ~25–40%. Eight physical cores, one single-threaded
+benchmark. Both results files record the commit as `8c9005c (dirty)`: the dirty tree is exactly the sources of the
+commit that carries this section, and no source file changed between the measurement and that commit — only these
+documents did. **A confirmation run was therefore taken** (`spike_telescoping_repeat.json`, load 5.21 → 5.53, a
+different point in that background's cycle): **every ratio reproduces to within 0.8% to 5.9%**, the two worst being
+BM_Calibrate at sixteen trades (168.73x against 159.37x) and BM_Build (76.09x against 73.19x). The absolute
+microsecond figures below are of a busy-but-under-threshold machine and should be re-taken on an idle one before
+anybody quotes them as this engine's throughput; the RATIOS, which are what the spike exists to produce, are stable.
+
+**Sixteen book trades against sixteen calibration instruments (D64):**
+
+| row | naive | telescoped | naive/telescoped |
+|---|---|---|---|
+| **BM_Evaluate** — whole-program interpreter at the solved state, one lane | 145.4 µs | 3.096 µs | **46.97x** |
+| **BM_Calibrate** — O1 + O2, one full recalibration from the flat start plus the forward pass | 26,150 µs | 155.0 µs | **168.73x** |
+| **BM_LadderChord** — O3 through the adjoint and the IFT, record-point factorisation | 7,562 µs | 50.39 µs | **150.05x** |
+| **BM_LadderWarm** — O3, each lane building its own Jacobian | 7,341 µs | 49.78 µs | **147.48x** |
+| **BM_LadderCold** — O3 from the block's own flat start (full recalibration, then the ladder) | 25,970 µs | 164.0 µs | **158.33x** |
+| BM_Build — `ImplicitProgram` construction (structure, paid once) | 224.7 ms | 2.953 ms | 76.09x |
+| BM_Record — recording the tape and running the E0 passes (paid once) | 686.3 ms | 8.955 ms | 76.64x |
+
+**Sixty-four book trades against the same sixteen calibration instruments (D64):**
+
+| row | naive | telescoped | naive/telescoped |
+|---|---|---|---|
+| BM_Evaluate | 143.8 µs | 4.242 µs | **33.90x** |
+| BM_Calibrate | 25,170 µs | 156.5 µs | **160.76x** |
+| BM_LadderChord | 7,266 µs | 60.22 µs | **120.66x** |
+| BM_LadderWarm | 7,236 µs | 60.21 µs | **120.18x** |
+| BM_LadderCold | 26,100 µs | 175.2 µs | **148.94x** |
+
+**Five things these numbers say that the counts did not.**
+
+1. **The three quantities do not move by the same factor, and the ordering is the opposite of the one a
+   plan-level optimiser would produce.** Evaluate is the SMALLEST win (46.97x) and calibrate the largest
+   (168.73x). §4 predicted it: the whole-program IR collapses 68.48x while the residual slice the Newton solve
+   iterates collapses 142.66x, and the solve is where the time is.
+2. **The calibration solve is 180x the forward pass on this fixture** — 26,150 µs against 145.4 µs, naive. Every
+   claim in M4 about the optimiser's reach was about `exec::Interpreter`, which is the 145.4 µs. `PRINCIPLES.md` §6
+   point 6 ("the cost model models `exec::Interpreter` only, so it is blind to ... the calibration solve (~48%)")
+   is not a caveat here; it is the whole measurement.
+3. **The reverse ladder wins 147x–150x, and the cost model cannot see any of it either** (§6 point 6 again; D68
+   measured the adjoint path's plan-level dynamic range at exactly 1.000x "by construction"). The chord and warm
+   rows differ by 3%, so the Jacobian reuse D71 §6(b) worries about is not what is being measured.
+4. **The prize dilutes with book size, and the mechanism is visible.** Sixteen to sixty-four trades takes evaluate
+   from 46.97x to 33.90x and the warm ladder from 147.48x to 120.18x, because the telescoped program's remaining
+   1,313 nodes become 3,183 and the added work — fixed legs, discounting, aggregation — has nothing to telescope.
+   The naive side barely moves (145.4 to 143.8 µs), which is D71 §6(c)'s calibration dominance stated in time.
+5. **The structure passes are not free, and they win too.** Recording plus the E0 passes is 686 ms naive against
+   9 ms telescoped, and `ImplicitProgram` construction 225 ms against 3 ms. Those are paid once per book rather
+   than per valuation, so they are not part of the recurring answer — but a rewriting stage that ran BEFORE
+   inference would collect them, and one that ran after would not.
+
+**What these ratios are not.** They are this fixture's shape: one curve, sixteen compounded-SOFR OIS calibration
+instruments on one annual grid to forty years, a stub-free book. `PRINCIPLES.md` §5 keeps Stage A as the realism
+gate and adds an arithmetic-dominated workload as the optimiser's scoreboard; §4b above is as far as Stage A was
+taken here, and neither Stage A nor that future workload is measured by this table.
 
 
 ### 6. Accuracy: the telescoped form is the more accurate one, by about 40x to 53x
@@ -4001,13 +4065,19 @@ have been rejected for being right.
 
 ### 7. What this says about the rebuild
 
-1. **The prize is real and it is large, and it is NOT 250x.** State it as measured: 62x in surviving tape nodes,
-   68x in whole-program interpreter work, 143x in the work the calibration solve iterates, and the wall-clock
-   figures of §5. Anyone quoting 250:1 from here on is quoting a recorded count.
-2. **It is concentrated where `PRINCIPLES.md` §6 points 5 and 6 say the cost model cannot see.** The whole-program
-   `exec::Interpreter` is the one thing the cost model does model, and on this fixture it is the SMALLER half of
-   the prize; the residual slice the Newton solve iterates — which `estimate_program` does not price — is where the
-   142.7x sits.
+1. **The prize is real and it is large, and it is NOT 250x — on the wall clock it is bigger than 250x nowhere and
+   smaller than it everywhere, and by very different amounts.** State it as measured, per quantity: **46.97x on
+   evaluate, 168.73x on calibrate, 147.48x on the reverse risk ladder** at sixteen book trades, and 33.90x /
+   160.76x / 120.18x at sixty-four. Structurally: 61.94x in surviving tape nodes, 68.48x in whole-program IR
+   steps x rows, 142.66x in the work the calibration solve iterates. Anyone quoting "about 250:1" from here on is
+   quoting a recorded count that is not any of these numbers.
+2. **It is concentrated exactly where `PRINCIPLES.md` §6 points 5 and 6 say the cost model cannot see, and that is
+   now a measurement rather than an inference.** The whole-program `exec::Interpreter` is the one thing the cost
+   model does model, and on this fixture it is **145 µs of a 26,150 µs calibration** — the smallest of the three
+   wins. The residual slice the Newton solve iterates, which `estimate_program` does not price at all, is where
+   168.73x sits; the reverse ladder, which D68 measured as having a plan-level dynamic range of exactly 1.000x, is
+   where 147.48x sits. A cost model that prices the interpreter alone would rank this rewrite by its smallest
+   number and miss the rest of it.
 3. **The rule this needs is the recurrence rule kind of §2a, not a term rewrite.** 9,946 scan rows cannot be
    collapsed by applying a cancellation identity 9,945 times, and the scan detection that would feed such a rule
    already exists (D41). The IR already labels the thing: three scan domains, 9,946 rows.

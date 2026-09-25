@@ -47,6 +47,13 @@
 // truth is measured, not assumed (`tests/spike/telescoping_prize_test.cpp` measures both against
 // `epykos::Wide`, the D72 oracle, and PRINCIPLES.md §4 is what licenses using it as a diagnostic).
 //
+// The realised part rides along unchanged: `acc` starts at the coupon's `realised_factor`, a
+// double of the tables, so the telescoped form is `realised_factor · DF(first)/DF(last)`. The
+// `compare_ois` fixture has an EMPTY fixings history by construction, so every `realised_factor`
+// there is exactly 1.0 and that multiplication is never exercised at a value other than one. A
+// seasoned book would exercise it; this spike does not price one, and says so rather than
+// implying coverage it has not got.
+//
 // `telescopes()` CHECKS the precondition rather than assuming it, per coupon, on the tables; a
 // coupon that fails it (lookback, observation shift, lockout, a capped final day, an averaged or
 // term coupon) falls back to the naive form, so a telescoped recording of a book that does not
@@ -205,6 +212,9 @@ struct FormCounts {
   std::size_t residual_steps = 0;
   std::size_t residual_scan_rows = 0;
   double seconds_record = 0.0;
+  bool converged = false;      // the record-time calibration of this form's tape
+  double jtr_inf = 0.0;        // its optimality, |J^T r|_inf
+  double book_pv = 0.0;        // O2 at the record point, so the two forms can be compared at full size
   std::string to_string() const;
 };
 

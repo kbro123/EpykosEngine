@@ -3547,3 +3547,70 @@ perf-gate run, and no hot-path code changed (the whole engine-side diff is one `
 No SwapEngine file opened. No `-ffast-math`. No exactness class or gate text changed, no threshold relaxed, no
 platform `#ifdef`, and no registry regenerated to paper over a difference. `src/optimise/`, `src/exec/` planning and
 the cost model are untouched, per this package's constraints; `src/ir/` is untouched for the reason in §6.
+
+### 9. Addendum: §6's blast radius MEASURED, and the CI evidence for the landed commit
+
+**§6's judgement call, now measured rather than reasoned.** The one-line change §6 describes — drop
+`if (cl.emit_swapped[k]) std::swap(s.a, s.b);` from `Inference::assemble`, so a commutative step is always emitted
+in the canonical, token-sorted order — was applied to a scratch build of `0dbc543`, the whole suite run, and the
+change then reverted (the commit contains no `src/ir/` edit; `git status` clean, verified). Result: **3 of 112
+tests fail, and every one of them fails on a domain-NAME string, not on a number.**
+
+- `ir_scan_roundtrip_test`, 2 of its 5 cases: `scan_roundtrip_test.cpp:141` looks for the literal shape string
+  `"mul(^,$0)@scan"` in the domain-name list, and `:204` compares against
+  `"add(mul($0,@0),add(@2,mul(@1,^)))@scan"`. Its bitwise legs — the evaluator output and the expanded replay —
+  pass.
+- `ir_domain_chain_test`, 2 cases: `domain_chain_test.cpp:201` and `:239` look a domain up BY its shape string and
+  get -1.
+- `ir_program_test`, `IrProgram.UniformConstantsAreLiteralsVaryingOnesColumns`: the same, `program_test.cpp:85`.
+
+And, decisively for the reason D61 gave: **`ir_roundtrip_test` (5 cases) and `ir_nearmiss_roundtrip_e0_test` (3
+cases) both PASS**, which is the documentary finding of §6 confirmed by execution —
+`ir::roundtrip_identical` compares commutative operand pairs as unordered pairs, so the round-trip identity gates
+cannot see this change. So does everything else: **0 failures across `rewrite` (16 tests), `optimise` (11),
+`catalogue` (2), `adjoint` (9), `exec` (5), `solver` (4), `stage_a` (9) and `verify` (3)**. The rule-matching and
+cost-model risk §6 names is therefore **not observed on the current fixtures** — it remains the right thing to gate
+a future package on, but it is a hypothesis about what could change, not a measured breakage, and it is recorded
+that way here rather than left overstated.
+
+The recommendation is correspondingly firmer than §6's: the change is landable, its cost is updating three
+`tests/ir/` files' expected shape strings, and it belongs in its own small `src/ir/` package whose gate is those
+three files plus a re-run of the rule fire-counts — not in a catalogue fix, and not in a package forbidden from
+touching `src/optimise/`. It is left for the owner to schedule.
+
+**CI on the landed commit.** `ci_green` = **true, all four jobs**, on `0dbc543c32fbc46ef59d4d338ee92d112d258f10`
+— this package's own commit, matched by SHA and not by recency, per D46. Run
+<https://github.com/kbro123/EpykosEngine/actions/runs/36116574897>:
+
+- `ubuntu-latest / release` (GCC 13) **success**: `100% tests passed, 0 tests failed out of 112`, then
+  `scripts/catalogue_regen.sh --check`: `m1_book: 10 domains, 9 catalogue-eligible, 0 hash collision(s)`,
+  `stage_a: 67 domains, 66 catalogue-eligible, 0 hash collision(s)`, `22 distinct signature(s)`, and
+  `git diff --exit-code on the generated files / unchanged`. That last line is the cross-compiler byte-identity
+  check D61 made the direct test of the fingerprint's canonicality, re-proved here through `git diff` on GCC with
+  §5's full-equality map in place, and it also reports the collision count §5 added.
+- `ubuntu-latest / reference` (GCC 13) **success**: `100% tests passed, 0 tests failed out of 112`.
+- `macos-latest / release` **success**: `100% tests passed out of 112`.
+- `ubuntu-latest / mutation` (GCC 13) **success**: `mutation gate: 50 mutant(s), 58 gate test(s)` ...
+  `every mutant caught`. Worth one line of its own: on GCC,
+  `catalogue.signature_ignores_commutativity` is caught by **four** gates —
+  `adjoint_adjoint_catalogue_e0_test`, `exec_interpreter_catalogue_e0_test`,
+  `catalogue_signature_tape_order_e0_test` and `catalogue_signature_commutative_e0_test` — where on Apple clang it
+  is caught by three, the tape-order gate not among them. That asymmetry is this entry's own thesis showing up in
+  the harness: under GCC the recording really does put some class's first instance the other way round, so with the
+  canonicalisation mutated out, the re-recorded programs of the tape-order gate stop matching the canonically
+  generated registry. Unmutated, both compilers agree exactly (§1, §2).
+
+**The local per-mutant sweep.** `scripts/mutation_test.sh` on Apple clang, fingerprint `d448afd70180`: **50 mutants over 58 gate
+tests, every mutant caught, 0 survivors, exit 0**, with the baseline round (no mutant selected) green first, so the
+harness is meaningful. Two results matter for this package.
+
+- `catalogue.signature_ignores_commutativity` — the mutant that reverts D61's `canonical_swap_ab` and so reproduces
+  the pre-D61 code exactly — is caught by `adjoint_adjoint_catalogue_e0_test`,
+  `exec_interpreter_catalogue_e0_test` and `catalogue_signature_commutative_e0_test`. That third one now includes
+  §4's subset leg, which is the sense in which the new gate "fails on the old code by construction rather than only
+  under GCC": it is not waiting for a compiler to disagree, it enumerates the `emit_swapped` freedom directly.
+- The new `catalogue_signature_tape_order_e0_test` is not a passive test. It independently catches five registered
+  mutants — `cse.merge_nonequal`, `interpreter.tile_boundary`, `adjoint.wrong_transpose`,
+  `adjoint.drop_broadcast` and `catalogue.binding_wrong_operand_order` — which is the re-recording harness doing
+  real work: a tape rebuilt node by node and replayed through both the generic and the catalogued path exercises
+  CSE, tiling, the binding's operand order and the adjoint's transpose all at once.

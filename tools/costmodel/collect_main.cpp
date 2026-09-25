@@ -27,7 +27,7 @@
 // how much the planner's OTHER decisions are worth on this fingerprint, and that is a question
 // one process per knob answers directly. See D63's "next binding constraint".
 //
-// D68: two additions that make this tool a WALL-CLOCK instrument as well as a profile-capture
+// D68: three additions that make this tool a WALL-CLOCK instrument as well as a profile-capture
 // one, so the plan-level ceiling can be measured in a `release` build rather than inferred from
 // the `profile` build's instrumented per-domain sums.
 //
@@ -45,10 +45,17 @@
 //     fuse/inline optimisations of its own"), so --mode adjoint accepts the three knobs and is
 //     BY CONSTRUCTION unaffected by them. The measurement exists to put a number on that
 //     structural fact rather than to leave it as an argument from reading the header.
+//   * `--ceiling ROUNDS` runs the whole knob sweep in ONE process with the fixture built once:
+//     all_on, no_fuse_pairs, all_on, no_fuse_reductions, all_on, no_inline_producers, all_on,
+//     all_three_off, ROUNDS times, each knob-off loop separated from its own baseline by one
+//     Interpreter construction and nothing else. D63 section 2(f) learned the cross-process
+//     version the hard way. `all_three_off` prices the WHOLE plan stage against materialising
+//     every domain and dispatching one kernel per step, which is the plan-level ceiling.
 //
 // Usage: costmodel_collect --case m1|stage_a --B N --tile N --lane-tile N [--reps N] [--trades N]
-//                          [--mode forward|adjoint]
+//                          [--mode forward|adjoint] [--ceiling ROUNDS]
 //                          [--fuse-pairs 0|1] [--fuse-reductions 0|1] [--inline-producers 0|1]
+// With --ceiling, the three knob flags are ignored: the sweep sets them itself, eight ways per round.
 
 // D68, and it MUST come before every include in this file. `getloadavg` is a BSD extension, not
 // ISO C. The project builds with CMAKE_CXX_EXTENSIONS OFF (root CMakeLists.txt), so GCC is given
@@ -157,7 +164,9 @@ int effective_lane_tile(const exec::Options& o) noexcept { return std::min(o.lan
 
 [[noreturn]] void usage_error(const std::string& msg) {
   std::cerr << "costmodel_collect: " << msg << "\n"
-            << "usage: costmodel_collect --case m1|stage_a --B N --tile N --lane-tile N [--reps N] [--trades N] [--mode forward|adjoint] [--fuse-pairs 0|1] [--fuse-reductions 0|1] [--inline-producers 0|1]\n";
+            << "usage: costmodel_collect --case m1|stage_a --B N --tile N --lane-tile N [--reps N] [--trades N] [--mode forward|adjoint] [--ceiling ROUNDS] [--fuse-pairs 0|1] [--fuse-reductions 0|1] [--inline-producers 0|1]\n"
+            << "  --ceiling ROUNDS  the D68 plan-level sweep: all_on / no_fuse_pairs / all_on / no_fuse_reductions / all_on / no_inline_producers / all_on / all_three_off,\n"
+            << "                    ROUNDS times, one process, fixture built once; needs an explicit --reps and ignores the three knob flags above.\n";
   std::exit(2);
 }
 

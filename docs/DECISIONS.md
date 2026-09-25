@@ -3206,6 +3206,19 @@ Both are byte-identical to D63 §4's own table at those sizes, as they must be �
 and no coefficient. **Nothing clears noise, and nothing was expected to**; the point of quoting them is that the
 instrument added here is inert to the thing being measured.
 
+**One portability point, caught by reading rather than by CI, and it is the third of its family.** `getloadavg`
+is a BSD extension. This project sets `CMAKE_CXX_EXTENSIONS OFF`, so GCC gets `-std=c++20` and defines
+`__STRICT_ANSI__`, and glibc's `<features.h>` then declines to define `_DEFAULT_SOURCE` for itself, leaves
+`__USE_MISC` off and compiles the `getloadavg` declaration out of `<stdlib.h>` — while Apple clang builds the
+same line without complaint, because Darwin's libc gates that declaration on `_ANSI_SOURCE`, which nothing here
+defines. CI builds `tools/` on every preset (`cmake --build --preset <preset>`, no target filter), so this would
+have been a red ubuntu build on all three of its jobs. Fixed twice over, because there is no GCC on the
+measurement machine to test the first fix against: `_DEFAULT_SOURCE` is requested on the file's first line,
+before any include can pull `<features.h>` in, **and** the Linux path does not use `getloadavg` at all — it reads
+`/proc/loadavg`, which needs no feature-test macro and no declaration. After D46 (GCC's cross-TU FMA contraction)
+and D61 (unsequenced operand evaluation order), this is the third GCC/Apple-clang divergence on this project and
+the second that only the ubuntu jobs could have caught.
+
 No gate and no mutant: this entry adds no engine line to mutate and changes no decision any program makes.
 `ctest --preset release` **111/111** and `--preset reference` **111/111**, 0 failed each, on this tree. The
 registry stays at 50 mutants over 57 gate tests, unswept here because no file this entry touches is under

@@ -49,15 +49,29 @@
 // Usage: costmodel_collect --case m1|stage_a --B N --tile N --lane-tile N [--reps N] [--trades N]
 //                          [--mode forward|adjoint]
 //                          [--fuse-pairs 0|1] [--fuse-reductions 0|1] [--inline-producers 0|1]
+
+// D68, and it MUST come before every include in this file. `getloadavg` is a BSD extension, not
+// ISO C. The project builds with CMAKE_CXX_EXTENSIONS OFF (root CMakeLists.txt), so GCC is given
+// `-std=c++20` rather than `-std=gnu++20` and therefore defines `__STRICT_ANSI__`; glibc's
+// <features.h> then declines to define `_DEFAULT_SOURCE` for itself, `__USE_MISC` stays off, and
+// <stdlib.h>'s `getloadavg` declaration is compiled out -- so the ubuntu jobs would fail to build
+// this TU while Apple clang builds it happily (Darwin's libc gates the same declaration on
+// `_ANSI_SOURCE`, which nothing here defines). Requesting `_DEFAULT_SOURCE` explicitly is what the
+// macro is for, and it has to be set before <features.h> is pulled in by anything else, which is
+// why it is the first line rather than sitting next to the include it enables. Third in the same
+// family as D46 (GCC's cross-TU FMA contraction) and D61 (unsequenced operand evaluation order):
+// a difference between the two CI compilers that only the ubuntu jobs can catch.
+#define _DEFAULT_SOURCE 1
+
 #include <algorithm>
 #include <chrono>
-#include <cstdlib>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
-#include <stdexcept>
 #include <iostream>
 #include <memory>
-#include <stdlib.h>  // getloadavg (POSIX/BSD; not in <cstdlib>'s guaranteed surface)
+#include <stdexcept>
+#include <stdlib.h>  // getloadavg (BSD extension; not in <cstdlib>'s guaranteed surface)
 #include <string>
 #include <vector>
 
@@ -95,11 +109,28 @@ struct Args {
 
 // D68: the 1-minute load average, the quantity bench/run.sh gates on (D29) and the one
 // tools/costmodel/calibrate.py already records per capture. Printed before and after the timed
-// loop so a reader can see whether the machine moved under the measurement.
+// loop so a reader can see whether the machine moved under the measurement. Returns -1.0 when it
+// cannot be read, which the report prints as -1.00 rather than pretending the machine was idle.
+//
+// Two implementations rather than one, deliberately. The `_DEFAULT_SOURCE` at the top of this
+// file should be enough to get glibc to declare `getloadavg` under `-std=c++20`, but that is a
+// claim about a header this project's only GCC is on a CI runner, and the cost of being wrong is
+// a red ubuntu build on a measurement tool. Linux reads /proc/loadavg instead, which needs no
+// feature-test macro and no declaration at all; Darwin (where the release measurements of D68
+// were taken) keeps `getloadavg`.
 double load_1min() noexcept {
+#if defined(__linux__)
+  std::FILE* f = std::fopen("/proc/loadavg", "r");
+  if (f == nullptr) return -1.0;
+  double one = -1.0;
+  const int n = std::fscanf(f, "%lf", &one);
+  std::fclose(f);
+  return n == 1 ? one : -1.0;
+#else
   double avg[3] = {-1.0, -1.0, -1.0};
   if (::getloadavg(avg, 3) < 1) return -1.0;
   return avg[0];
+#endif
 }
 
 // D68: one timed rep loop, reported identically for every (case, mode) so the four knob settings

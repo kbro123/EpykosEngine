@@ -107,7 +107,9 @@ same family (D71: the closed form reproduces its sampled discount factors to 0.0
 
 1. **The compounded coupon's representation.** This engine evaluates the OIS float coupon as the
    *daily product* over its projected observation days — 49,091 of them in the calibration
-   instruments and 45,851 more in a sixteen-trade book, each an ACT/360 overnight forward. The
+   instruments and 45,851 more in a sixteen-trade book, each an ACT/360 overnight forward. (Those
+   are RECORDED days; the book's are then largely shared away by the E0 passes, which is item 6 —
+   do not read 45,851 as the book's cost. The calibration side's 49,091 are what dominate.) The
    other engine is given, and **can only be given**, one telescoped sub-period per accrual: 197
    coupon-periods on the calibration side. The two are algebraically equal for the plain
    observation method (the daily forwards are discount-factor ratios whose product telescopes),

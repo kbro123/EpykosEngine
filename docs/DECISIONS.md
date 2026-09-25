@@ -3364,7 +3364,9 @@ favour the other engine and one favours this one; none is left implicit.**
 
   (a) **The compounded coupon's representation, and this one is large and not in our favour.** This engine
   evaluates the OIS float coupon as the daily product over its projected observation days — **49,091** of them in
-  the sixteen calibration instruments and **45,851** more in a sixteen-trade book. The other engine is given, and
+  the sixteen calibration instruments and **45,851** more in a sixteen-trade book (those are RECORDED days; the
+  book's are then largely shared away by the E0 passes — see (c) — so 45,851 is not the book's cost, and the
+  calibration side's 49,091 are what dominate). The other engine is given, and
   can only be given, one telescoped sub-period per accrual: 197 coupon-periods on the calibration side, a ratio
   of work of about 250:1 for the same answer. The two are algebraically equal for the plain observation method,
   which is why the numbers agree at all. Handing them the daily decomposition instead was tried and **does not

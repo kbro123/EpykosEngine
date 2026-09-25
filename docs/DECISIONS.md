@@ -3282,3 +3282,268 @@ project, and they built this TU.
 `fdd07a5` ("fit at the lane width the interpreter really plans with", D63's own (d2) fix) is an ancestor of this
 package's base `581b8e9`, so it was present for every measurement here; the 0.994861 / 0.991029 above are
 post-`Lt`-fix figures and match D63 §4's own amended table, not D67's superseded one. Checked rather than assumed.
+
+## D69 — M5/C1-fix: `task_919ea449` is not reproducible; the catalogue's cross-compiler determinism proved by construction instead of by a green run, and the one order-sensitivity that remains located in `ir::infer`, not in the fingerprint (2026-09-25)
+
+Refines D61 and closes `task_919ea449`. The package was commissioned to root-cause and fix a GCC-only catalogue
+coverage shortfall on the premise that "D61 already made it canonical under commutativity and the divergence
+survived, so the remaining non-determinism is elsewhere". **That premise is false.** The brief was written against a
+pre-D61 tree (it also states a 107-test suite; the suite is 111 at this package's base `7f22134` and 112 with the
+gate below). The defect it describes does not exist on `integrate/m1-m5`. What follows is therefore a negative
+result with the evidence that makes it one, plus the two follow-ups D61's own author flagged, plus one genuinely
+new finding about `ir::infer` that the construction turned up.
+
+### 1. Stage 1, measured: there is no divergence, on either engine path, on any fixture
+
+Both compilers, same worktree, same commit, `release` preset, the catalogue gates run directly. GCC 13.5.0 in
+Docker (`gcc:13`, x86-64, the `ubuntu-latest` toolchain, built into a standard `build/release` inside a
+container-local copy of the worktree, so D46's and D61's `scripts_perf_gate_test` build-directory artefact does not
+arise); Apple clang 21 on fingerprint `d448afd70180`. Every figure is digit-for-digit identical on the two
+compilers, and identical to what D61 recorded:
+
+| fixture | `adjoint::Adjoint` groups | `adjoint::Adjoint` rows | `exec::Interpreter` groups | `exec::Interpreter` rows |
+|---|---|---|---|---|
+| M1 book | 9 of 9 | 42,302 of 42,302 | 3 of 3 | 3,432 of 3,432 |
+| Stage A, default (the reference instance) | **66 of the full Stage A tape's 66** | 423,087 of 423,087 | **28 of the full Stage A tape's 28** | 80,069 of 80,069 |
+| Stage A, 200 trades | 56 of 60 | 148,900 of 148,908 | 20 of 23 | 18,909 of 18,916 |
+| Stage A, 60 trades | — | — | 18 of 20 | 16,557 of 16,562 |
+| Stage A, 300 trades, `quote_noise_bp` 0 | — | — | 20 of 23 | 20,394 of 20,403 |
+
+0 catalogue-on/off bitwise mismatches in every cell on both compilers. `AdjointCatalogueE0.
+DefaultStageAIsFullyCatalogued`, `InterpreterCatalogueE0.{DefaultStageAIsFullyCatalogued,
+DifferentStageAInstanceHitsTheSameCatalogueAndIsMostlyCovered}` and `CatalogueSignatureCommutativeE0.*` all pass on
+GCC. **No group fails to catalogue on either compiler**, so there are no groups to name. The brief's own METHOD
+step 1 terminates here; everything below is stage 2, proving the absence rather than inferring it from one green
+run.
+
+### 2. The degree of freedom is real and still live — measured, not assumed
+
+First, whether the thing that caused D61's bug still happens at all. A temporary diagnostic (built and run under
+both compilers, not committed) digests the recorded tape and the emitted Program:
+
+| | Apple clang 21 | GCC 13.5.0 | |
+|---|---|---|---|
+| M1 book, tape node count | 75,698 | 75,698 | same |
+| M1 book, tape node-ORDER digest | 13559977735040413859 | 6729967319819439509 | **DIFFER** |
+| M1 book, `ir::Domain::name` digest | 1682480452663629516 | 1682480452663629516 | same |
+| M1 book, `catalogue::Signature` digest | 17316179871101196488 | 17316179871101196488 | same |
+| Stage A default, tape node count | 517,036 | 517,036 | same |
+| Stage A default, tape node-ORDER digest | 8163215455054922581 | 16093284295018287258 | **DIFFER** |
+| Stage A default, domains / literals / columns / gathers / segments | 67 / 6 / 24 / 77 / 18 | 67 / 6 / 24 / 77 / 18 | same |
+| Stage A default, `ir::Domain::name` digest | 13123707473657486713 | 16158069130014986707 | **DIFFER** |
+| Stage A default, `catalogue::Signature` digest | 3185154918156234175 | 3185154918156234175 | **same** |
+| Stage A default, eligible / catalogued | 66 / 66 | 66 / 66 | same |
+
+Three facts follow, and they are the spine of this entry. (a) D25's and D61's unsequenced-evaluation finding is
+still true today: the two compilers record the same nodes, with the same per-node operand slots, in a different
+ORDER, on both fixtures. (b) That order still reaches the emitted Program: on the default Stage A tape the two
+compilers still emit different `ir::Domain::name`s, which is `Class::emit_swapped` propagating "the first
+instance's recorded operand order" exactly as D61 said it would after D61 deliberately declined to change
+`ir::assemble`. The defect PATH is live, not closed by accident. (c) The catalogue's fingerprint is nevertheless
+identical on the two compilers. D61's `canonical_swap_ab` is what is holding, and it is load-bearing, not
+redundant.
+
+### 3. The audit: every input to `signature_of` and `bind_domain`, and what can reach it
+
+`signature_of(program, d)` reads exactly one thing: `program.groups[d].steps` — per step the `op` and the four
+operand slots' `kind`, plus, for a `Step`-kind slot, how many steps back it points. It reads no row count, no table
+index, no value, no domain id, name or level. `bind_domain` reads the same steps in the same canonical order and
+additionally dereferences the slots' table indices, so the ORDER of its arrays is a function of the Signature's own
+walk: if the Signature is invariant, so is the binding's shape. The audit therefore reduces to what determines a
+`Group`'s steps. From `Inference::assemble` there are exactly three inputs, and each was chased to a verdict.
+
+**(i) `Class::emit_swapped` — CAN reach a Signature, and is the D61 defect. Fixed there, gated wider here.** The
+class prototype is already order-blind: `extract_tree` sorts a commutative node's two operands by their CONTENT
+token (`token_at` → `h_`, a structural hash; `tok_ref_` for a boundary, `tok_const_` for a Const leaf — no node id,
+no address and no float ever enters it), so `a op b` and `b op a` build one prototype and one class whatever order
+they were recorded in. Only `emit_swapped`, taken from whichever instance of the class the tape happened to hold
+FIRST, carries the recording order into the emitted step. `catalogue::canonical_swap_ab` absorbs it.
+
+**(ii) `const_slot`'s Literal-vs-Column decision — CAN reach a Signature, is value-dependent, and is not
+canonicalisable.** `assemble` emits a constant slot as a `Literal` when one bit pattern covers every row of the
+domain and as a `Column` otherwise, so a single differing bit in one recorded constant is a genuinely different
+shape. This is the "float bit patterns entering a signature slot via constant folding" candidate the brief names,
+and it must not be canonicalised: a kernel broadcasting one double and a kernel indexing one double per row are
+different kernels. It is governed instead by D25/D46 — the fixture generators and the recording path are
+`src/**/*_e0.cpp`, pinned to `-ffp-contract=off` in every preset — and §2 confirms the governance holds: 6 literals
+and 24 columns on both compilers for the default Stage A tape. Not a defect; the existing pinning is the control.
+
+**(iii) The class prototype's op sequence, arities and step back-references — CANNOT reach a Signature from the
+recording order.** Content-derived throughout, per (i). Eliminated.
+
+**Eliminated hypotheses, recorded because a negative result is worth exactly what its exclusions are worth.**
+
+- *Iteration order over an unordered or pointer-keyed container reached during group formation or signature
+  construction.* `src/ir/signature.cpp` holds eight: `class_by_hash_` (line 217), `const_rows_` (221), `shared`
+  (353), `starts` (534), the per-class and per-domain `seen` sets (872, 1070), `literal_index` (1147) and `reads`
+  (1201). Every one is keyed on an integer — a `node_id`, an `int32_t` class or domain index, a `uint64_t` hash or
+  bit pattern — never on a pointer or a string, so no address ever reaches a decision. Seven of the eight are used
+  only for `find` / `count` / `insert(...).second`, whose results are order-independent; the sets at 872 and 1070
+  gate a `push_back` whose ORDER comes from the surrounding row/slot loop, not from the set. The one genuinely
+  iterated is `reads` at line 1266, `dom.reads.assign(reads.begin(), reads.end())` — and line 1329 sorts it
+  (`std::sort(dom.reads.begin(), dom.reads.end())`) before the Program is returned, so the output is canonical
+  regardless; `dom.reads` is in any case not an input to `signature_of`. `ir::annotate`'s
+  `std::unordered_map<std::string, AdMode>` is keyed on a string but is an annotation, never a group's steps.
+  **Eliminated, twice over.**
+- *FMA contraction reaching signature-relevant constant folding.* Reaches (ii) and only (ii), and is already pinned
+  by D25/D46; §2 measures identical literal and column counts on both compilers. **Eliminated as a live cause.**
+- *libm `std::exp` differences changing a folded constant.* Same channel as (ii), same measurement excludes it. A
+  differing `exp` would also have shown as differing tape node CONTENT, and the node counts and per-node operand
+  slots are identical on both compilers. **Eliminated.**
+- *`Op::Sum`'s fixed-arity member order, which D61 deliberately did not canonicalise.* A fixed-arity `Sum`'s members
+  come from the tape's side array in fold order; `op_is_commutative(Op::Sum)` is false, so `extract_tree` never
+  reorders them and the prototype keeps the recorded member order. That order is fixed by the SOURCE — which addend
+  is written first — not by evaluation order, which is the thing that is unsequenced. Two sites written in
+  different orders would be two prototypes, hence two classes and two Signatures: a coverage question of the kind
+  D55 finding 3 already documents, not a platform question. **Eliminated as a cross-compiler hazard**, and left
+  uncanonicalised for D61's own reason, that reassociating a left fold would change rounding.
+- *A hash collision in the generator's collection map.* A real defect class; fixed in §5. Measured 0 collisions on
+  both reference workloads.
+- *The netting-set arity effect of D55 finding 3.* Already excluded by D61, re-excluded here: the coverage figures
+  for the non-reference instances (200, 60 and 300 trades) are identical on the two compilers, so whatever the draw
+  does, it does the same thing on both.
+
+### 4. The new gates: the divergence constructed deterministically rather than waited for
+
+Two tests, because "permute the things a compiler is free to vary" has two distinct answers.
+
+**`tests/catalogue/signature_tape_order_e0_test.cpp` (new ctest entry `catalogue_signature_tape_order_e0_test`).**
+Re-records a fixture's tape through a ready list — at every point, any node whose operands are already recorded may
+be appended next — with byte-identical node CONTENT throughout: the same nodes, ops, operand wiring, constants and
+input/output ordinals, only a different order and hence a different numbering. It asserts node count, op histogram,
+input count, output count and `input_values` equality first, so it cannot silently compare two different programs,
+and then that the catalogue cannot tell the difference: the same multiset of Signatures with the same hashes
+resolving to the same registry entries, the same `coverage()` in groups and in rows, and interpreter output
+bitwise-identical to the original recording's on both the generic and the catalogued path. On the M1 book and a
+60-trade Stage A. It fires on real material — 5 re-recordings per fixture, moving 70,970 to 74,793 of the M1 book
+tape's 75,698 nodes and 161,395 to 184,194 of the 60-trade Stage A tape's 184,749 nodes to a different index — and
+it reports, rather than asserts, that at a compiler-realisable window none of those re-recordings changes the
+emitted operand order at all on these two fixtures. That is the measured result, not an omission: see §7.
+
+**One limitation of that test, stated because §2 measures the opposite and the tension must not be left for the
+reader to spot.** Real compilers DO change the emitted operand order on the default Stage A tape; a bounded-window
+re-recording does not. The two are consistent, and the reason locates what each gate is for. `emit_swapped` is taken
+from whichever instance of a class the tape holds FIRST, and the instances of one class are thousands of nodes
+apart — one curve's `c * x` and another's `x * c`, recorded in different statements of different loops. Flipping
+which of them comes first is a long-range change, which a compiler reaches not by moving a node a long way but
+because whole statements' worth of intra-expression reordering compose; a sliding window over ready nodes is a local
+shuffle and cannot reach it, and an unbounded window reaches it only by also doing things (§7) that no compiler
+does. So the tape-order test is a genuine and much wider audit of what a re-recording can disturb — it is the test
+that found §7 — but it is NOT what reproduces the cross-compiler emit-order difference. The subset-transposition
+gate is, and exactly: it enumerates the `emit_swapped` degree of freedom directly instead of trying to provoke it
+through the recorder. The two are complementary and both are needed.
+
+**`tests/catalogue/signature_commutative_e0_test.cpp` (extended, D61's own file).** D61's test transposes EVERY
+commutative step at once — one point of a space with 2^N members, since `emit_swapped` is a bit per class per step
+and two recordings can disagree about any subset of them. §2 measures that real compilers land inside that space
+rather than at its corners: some of the default Stage A tape's domains carry the same emitted order on both
+compilers and some do not. `check_subset_invariance` therefore flips a seeded SUBSET, five seeds per fixture, and
+asserts the same Signature, the same hash, the same registry entry, the same coverage and bitwise-identical values.
+It fires on 13 transpositions over 5 subsets on the M1 book and 54 over 5 subsets on the 60-trade Stage A. **This is
+the gate that fails on the old code by construction rather than only under GCC**: the registered mutant
+`catalogue.signature_ignores_commutativity` reverts `canonical_swap_ab` to exactly the pre-D61 behaviour, and the
+mutation harness catches it here on both compilers (§8).
+
+No new mutant is registered, and the registry stays at 50. The two changes that could carry one already do: the
+canonicalisation has `catalogue.signature_ignores_commutativity`, now caught by one more gate, and §5's fix lives
+in `tools/`, which is not linked into `libepykos` and which no mutant can reach.
+
+### 5. Follow-up A, fixed: the generator's collection map is now a full-equality map
+
+`tools/catalogue/generate_main.cpp` keyed its collection map on `Signature::hash()` alone and appended `found_in`
+without re-checking equality, so a 64-bit collision between two genuinely different signatures would silently drop
+one — lost coverage, never a wrong kernel, because `catalogue::lookup` verifies full equality at run time (D55),
+but the same defect class as the one D61 fixed in the fingerprint itself, and no more expensive to do right. The
+map is now `std::map<uint64_t, std::vector<CatalogueEntry>>` with a full `Signature` comparison inside the bucket;
+a collision makes a second entry under the same hash instead of discarding one, which is exactly the case the
+generated table — sorted by hash, binary-searched, then compared in full — was already written to handle. The
+generator now reports its collision count: **0 on the M1 book and 0 on the Stage A tape**.
+`scripts/catalogue_regen.sh --check --no-build` is a no-op against the committed `src/catalogue/generated/` (22
+distinct signatures, `git diff --exit-code` unchanged), so the fix is behaviour-preserving on the reference
+workloads, as it must be.
+
+### 6. Follow-up B, investigated and NOT landed, with the reason stated as evidence rather than as caution
+
+`ir::assemble` still applies `cl.emit_swapped[k]`, so a commutative step's emitted operand order is the recording's,
+and §2 measures that this really does still differ between GCC and Apple clang on the default Stage A tape. The fix
+is one line: emit the canonical (token-sorted) order unconditionally and drop `emit_swapped`.
+
+D61 declined it partly on the ground that "the round-trip identity gates are built on `emit_swapped` reproducing
+the recording's order". **That specific ground does not hold, and the correction is recorded here rather than
+repeated.** `ir::roundtrip_identical` compares two tapes through `canonical_form`, whose Merkle hash sorts a
+commutative node's operand hashes and whose comparison treats "commutative operand pairs ... as unordered pairs
+(a + b and b + a are one node: IEEE addition and multiplication are commutative bitwise)" —
+`include/epykos/ir/expand.hpp`'s own header. `tests/ir/roundtrip_test.cpp`, `ir/scan_roundtrip_test.cpp` and
+`ir/nearmiss_roundtrip_e0_test.cpp` assert node count, input and output counts, the op histogram,
+`roundtrip_identical` and bitwise evaluator output, every one of which is blind to, or unaffected by, a commutative
+transposition. The three round-trip identity gates would survive the change.
+
+It is still not landed, for two reasons about blast radius rather than about those gates, both of which this
+package's own constraints name. First, `src/ir/` is outside this package's files, and the change would alter the
+emitted Program that `src/rewrite/`'s rules pattern-match on and that `src/optimise/`'s cost model prices: a rule
+matching `mul(x, const)` with the constant in `b` could stop firing once canonicalisation puts it in `a`, which
+would move M4's measured rule fire-counts (D64, D67) and the extraction scores — and this package is forbidden from
+touching `src/optimise/` or the cost model at all, so it could not even measure the consequence properly. Second,
+the defect it would fix is now known to be cosmetic: after D61 the compiler-dependent surface is `ir::Domain::name`
+and the diagnostic dumps built on it (`src/ir/sharing.cpp`, `ir::to_string`), plus two rewrite rules that copy a
+name through (`src/rewrite/r7_block_linmap.cpp:198`, `src/rewrite/r2_bucket_rows.cpp:273`); nothing keyed on it
+changes a number. The recommendation for the owner is that this is its own package, whose gate is the rule
+fire-counts and the extraction scores before and after — not a rider on a catalogue fix. Flagged again rather than
+left unsaid.
+
+### 7. One genuinely new finding: `ir::infer`'s level assignment is order-sensitive, beyond what a compiler can do
+
+The construction in §4 turned up something neither D55 nor D61 knew. Sweeping the re-recording's freedom by a
+bounded window — pick pseudo-randomly among the `k` lowest-numbered ready nodes, so `k = 1` reproduces the original
+recording exactly and larger `k` strays further — on the 60-trade Stage A fixture, three seeds per window:
+
+| window | 1 | 2 | 4 | 8 | 16 | 64 | 256 | 4096 | unbounded |
+|---|---|---|---|---|---|---|---|---|---|
+| emitted operand order changes | no | no | no | no | no | **yes** | yes | yes | yes |
+| `catalogue::Signature` multiset changes | no | no | no | no | no | **yes** | yes | yes | yes, 2 of 3 seeds |
+| domains the catalogue serves, of the fixture's 56 eligible | 53 | 53 | 53 | 53 | 53 | **54** | 54 | 54 | 54 |
+| `Program::columns` | 16 | 16 | 16 | 16 | 16 | **17** | 17 | 17 | 17 |
+
+From window 64 upward exactly one domain changes, and the mechanism was isolated rather than guessed: a row moves
+between two levels of a non-trivial SCC. The base recording puts 27 rows at level 8 and 3 rows at level 9; the
+re-recording puts 25 and 5. Over 3 rows that level-9 domain's constant slot is uniform (a single `-1`) and
+`assemble` emits a `Literal`; over 5 rows it holds both `-1` and `1`, so `assemble` emits a `Column`, and
+`mul(step, lit)` becomes `mul(step, col)` — a genuinely different shape, correctly fingerprinted as one. This is
+`ir::infer`'s own level assignment, not the catalogue's fingerprint, and the catalogue is not wrong about it: the
+interpreter's values are bitwise identical to the original recording's in every one of these runs, with the
+catalogue on and with it off.
+
+**It is reported and not gated, because it is not something a compiler does.** Appending to the tape is an
+observable side effect, so a conforming compiler may reorder the unsequenced sibling subexpressions of one
+full-expression but never move work across a sequence point; and §2 measures directly that GCC and Apple clang emit
+the same 67 domains, 6 literals, 24 columns, 77 gathers and 18 segments with an identical Signature digest for the
+default Stage A tape. Neither compiler moves a row between levels. The gate therefore holds the bounded windows to
+full invariance and holds the unbounded case only to what must be true of it regardless — the values, and the
+catalogue never being wrong where it does dispatch — with the finding written into the test's own comments so it
+cannot be lost. It matters for a future package rather than for CI: a rewrite pass or an e-graph extraction that
+renumbers the tape has exactly this freedom, and `src/optimise/` is where it would bite.
+
+### 8. Verification
+
+Fingerprint `d448afd70180` (Apple clang 21, Intel Xeon W-3223, `-O3 -march=x86-64-v3 -fno-math-errno`) and GCC
+13.5.0 in Docker (`gcc:13`, x86-64, reproducing `ubuntu-latest`), the latter built into a standard `build/release` /
+`build/reference` inside a container-local copy of the worktree so the suite count is the full one and D46's and
+D61's `scripts_perf_gate_test` build-directory artefact does not arise. Tests only: no performance claim, no
+perf-gate run, and no hot-path code changed (the whole engine-side diff is one `tools/` file).
+
+- `ctest --preset release`: Apple clang **112/112**, GCC 13 **112/112**, 0 failed each.
+- `ctest --preset reference`: Apple clang **112/112**, GCC 13 **112/112**, 0 failed each.
+- `scripts/mutation_test.sh`: the registry stays at **50 mutants**, and the gate set grows from 57 to **58 tests** —
+  `catalogue_signature_tape_order_e0_test` is an `_e0_test`, so D33's regex picks it up with no harness change. The
+  baseline round (no mutant selected) is green on Apple clang, i.e. all 58 gates pass unmutated. The per-mutant
+  sweep is recorded in the CI-evidence addendum at the end of this entry, together with CI's own
+  `ubuntu-latest / mutation` job, which is this project's only GCC mutation authority (D61's own precedent) and runs
+  the full registry.
+- `scripts/catalogue_regen.sh --check --no-build`: a no-op, 22 distinct signatures, 0 hash collisions on either
+  reference workload.
+- CI on the landed commit: recorded in the addendum below and in the `docs/RESUME.md` §5 line, per D46's rule that
+  the evidence names the matched commit and never "a recent green run".
+
+No SwapEngine file opened. No `-ffast-math`. No exactness class or gate text changed, no threshold relaxed, no
+platform `#ifdef`, and no registry regenerated to paper over a difference. `src/optimise/`, `src/exec/` planning and
+the cost model are untouched, per this package's constraints; `src/ir/` is untouched for the reason in §6.

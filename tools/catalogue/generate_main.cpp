@@ -47,9 +47,18 @@ namespace {
 // Folds every catalogue-eligible domain of `program` into `entries`, tagging new signatures
 // with `workload` and appending to an existing entry's `found_in` the first time a later
 // workload repeats a signature the first one already produced.
+//
+// Keyed on the hash AND checked for full `Signature` equality (D69). Until that fix this map was
+// keyed on `Signature::hash()` alone, so two genuinely different signatures that collided on 64
+// bits would have silently dropped one of them: lost coverage, never a wrong kernel, because
+// `catalogue::lookup` verifies full equality at run time (D55) -- but the same defect class as the
+// one D61 fixed in the fingerprint itself, and no more expensive to do right. A collision now
+// makes a second entry under the same hash instead of discarding one; the generated table is
+// sorted by hash and `lookup` binary-searches then compares the full Signature over the run of
+// same-hash entries, which is exactly the case it was already written to handle.
 void collect(const ir::Program& program, const std::string& workload,
-            std::map<std::uint64_t, catalogue::tool::CatalogueEntry>& by_hash) {
-  int seen = 0, eligible = 0;
+            std::map<std::uint64_t, std::vector<catalogue::tool::CatalogueEntry>>& by_hash) {
+  int seen = 0, eligible = 0, collisions = 0;
   for (std::size_t d = 0; d < program.domains.size(); ++d) {
     ++seen;
     const ir::domain_id did = static_cast<ir::domain_id>(d);
@@ -57,14 +66,23 @@ void collect(const ir::Program& program, const std::string& workload,
     ++eligible;
     catalogue::Signature sig = catalogue::signature_of(program, did);
     const std::uint64_t h = sig.hash();
-    auto it = by_hash.find(h);
-    if (it == by_hash.end()) {
-      by_hash.emplace(h, catalogue::tool::CatalogueEntry{std::move(sig), workload});
-    } else if (it->second.found_in.find(workload) == std::string::npos) {
-      it->second.found_in += ", " + workload;
+    std::vector<catalogue::tool::CatalogueEntry>& bucket = by_hash[h];
+    catalogue::tool::CatalogueEntry* found = nullptr;
+    for (catalogue::tool::CatalogueEntry& e : bucket) {
+      if (e.signature == sig) {
+        found = &e;
+        break;
+      }
+    }
+    if (found == nullptr) {
+      if (!bucket.empty()) ++collisions;
+      bucket.push_back(catalogue::tool::CatalogueEntry{std::move(sig), workload});
+    } else if (found->found_in.find(workload) == std::string::npos) {
+      found->found_in += ", " + workload;
     }
   }
-  std::fprintf(stderr, "[ catalogue ] %s: %d domains, %d catalogue-eligible\n", workload.c_str(), seen, eligible);
+  std::fprintf(stderr, "[ catalogue ] %s: %d domains, %d catalogue-eligible, %d hash collision(s)\n",
+               workload.c_str(), seen, eligible, collisions);
 }
 
 ir::Program m1_program() {
@@ -112,13 +130,16 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  std::map<std::uint64_t, catalogue::tool::CatalogueEntry> by_hash;
+  std::map<std::uint64_t, std::vector<catalogue::tool::CatalogueEntry>> by_hash;
   collect(m1_program(), "m1_book", by_hash);
   collect(stage_a_program(small), small ? "stage_a(small)" : "stage_a", by_hash);
 
+  // Sorted by hash ascending (std::map), and within one hash in first-encounter order, which is
+  // deterministic for a given pair of fixtures: the generated table's own ordering contract.
   std::vector<catalogue::tool::CatalogueEntry> entries;
-  entries.reserve(by_hash.size());
-  for (auto& [h, e] : by_hash) entries.push_back(std::move(e));
+  for (auto& [h, bucket] : by_hash) {
+    for (auto& e : bucket) entries.push_back(std::move(e));
+  }
   std::fprintf(stderr, "[ catalogue ] %zu distinct signature(s) across both workloads\n", entries.size());
 
   write_file(out_dir + "/kernels_e0.cpp", catalogue::tool::generate_kernels_file(entries));

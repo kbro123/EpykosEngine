@@ -127,6 +127,22 @@ candidate improved from 0.999055x to 0.991029x on the full tape, which is still 
 own error, and `cross_stage_wins` is still 0. The model's prediction error improved from 84.4%/69.3% to
 58.6%/49.7% and still misses this section's <25% target by about a factor of two.
 
+**The remaining miss is measured to be unreachable on this tape (D68, 2026-09-25), and this section's own gate is
+what should change.** D63 §5 hypothesised that the Stage A tape might not contain a plan-level win at all and
+named the test; D68 ran it. On wall clock, on the uninstrumented `release` build, with all eight knob settings
+interleaved in one process over three rounds, `exec::Interpreter`'s three planning decisions TOGETHER are worth
+**1.027x-1.042x** on Stage A at every lane width and batch size tested (D63's 1.066x was two repetitions and does
+not reproduce), and **exactly 1.000x on the adjoint path, by construction** — `adjoint::Options` carries no
+fuse/inline knob and `solver::ImplicitProgram::adjoint` never calls the interpreter, so the O3 risk ladder
+executes no `exec::Interpreter`. `exec::Interpreter` is 5.20% of one O4 scenario-lane batch and **2.513% of the
+whole Stage A problem**, so a cost model with ZERO error is worth **0.080% of Stage A's wall clock**. Separately,
+`optimise::estimate_program` models the interpreter and nothing else, so the search cannot see the **24.66%** of
+the problem that is the reverse ladder — the one part where a real win (the catalogue's 1.11x-1.16x, D55) has
+already been measured. **The cross-stage-win clause above, as written, asks the search for something this tape
+does not contain at the plan level, and a clause a correct implementation cannot satisfy is not a gate.** D68 §5
+sets out three concrete replacements for the owner's decision; none of them is applied here, and the gate text
+above is unchanged pending it.
+
 ## 8. Milestones (D35; supersedes ROADMAP M3–M5 as first written)
 
 - **M3 — groundwork and the Stage A tape**: conventions layer with sources, real instruments, all schemes and

@@ -2979,3 +2979,235 @@ all-distinct column; an interleaved `{1,1,2,2,1,1}` column).
 `docs/RESUME.md` §5's entry for the suite counts, the mutation-gate result and the CI run ids. No SwapEngine file
 opened. No file under `src/adjoint/`, `include/epykos/optimise/cost.hpp`, `src/optimise/cost.cpp` or
 `include/epykos/optimise/plan_bridge.hpp` touched.
+
+## D68 — The plan-level ceiling, measured: `exec::Interpreter`'s three planning decisions are worth 2.7%-4.2% on Stage A and exactly nothing on the adjoint path, so the remaining cost-model programme has ~0.08% of Stage A's wall clock to find (2026-09-25)
+
+Owner-directed follow-up to D63 §5's second finding, which was labelled there as "a hypothesis with two
+measurements behind it" and which named its own test: "the same knob-off sweep at the other lane_tiles and on the
+adjoint path, which this entry did not do." This entry does it. It was commissioned as stage 1 of a two-stage
+brief whose stage 2 — giving the calibration grid `fuse_reductions` and `inline_producers` contrast and refitting —
+was explicitly gated on stage 1's result. **Stage 1 says do not proceed, and stage 2 was not done.** The
+reasoning is below and the recommendation is §5.
+
+Touches one tool (`tools/costmodel/collect_main.cpp`) and two records
+(`bench/results/d448afd70180/plan_ceiling.json`, this file). No engine code, no rewrite, no exactness class, no
+gate and no mutant: this entry changes nothing any program computes or any search decides. It is a measurement.
+
+### 1. What was built: `costmodel_collect` as a wall-clock instrument
+
+Two additions, both in `tools/costmodel/collect_main.cpp`.
+
+**(a) Every run times its own rep loop** and prints `wall_us_per_rep` with the 1-minute load before and after
+(D9). The line is printed in EVERY preset, outside the `EPYKOS_EXEC_PROFILE` `#ifdef`, so a contrast can be taken
+on the uninstrumented `release` binary. D63 §3's sweep was taken on the `profile` build and read the summed
+per-domain profile table; §4 below shows those two quantities agree, so this is not a correction of D63's method,
+but it removes the question.
+
+**(b) `--ceiling R` runs the whole knob sweep in ONE process**, fixture built once, `R` rounds of eight timed
+loops each: `all_on`, `no_fuse_pairs`, `all_on`, `no_fuse_reductions`, `all_on`, `no_inline_producers`, `all_on`,
+`all_three_off`. Every knob-off loop is separated from its own baseline by one `exec::Interpreter` construction
+and nothing else. D63 §2(f) learned the cross-process version of this the hard way — ~12 minutes of load drift
+between the on-points and the off-points made Stage A look 0.65x FASTER with pairing off, uniformly, including in
+slot 4095, the output copy no interpreter option can touch. `--ceiling` also needs an explicit `--reps`, so the
+sweep cannot silently change its own loop length between configurations.
+
+`all_three_off` is the row D63 did not have, and it is the one the brief was really asking for: it is the whole
+plan stage priced against materialising every domain and dispatching one kernel per step.
+
+**(c) `--mode adjoint`** runs the same program through `adjoint::Adjoint`, the O3 risk ladder's engine.
+
+### 2. The adjoint path's plan-level ceiling is exactly 1.000x, and this is a structural fact before it is a measurement
+
+The brief's strongest hypothesis was that "the risk ladder is where the catalogue already showed a real
+1.11-1.16x win, so the adjoint path is where plan choice may be worth more". It is worth nothing there, and the
+code says so in three places before any timer is started:
+
+  * `adjoint::Options` (`include/epykos/adjoint/adjoint.hpp`) has `tile`, `max_batch`, `lane_tile` and
+    `use_catalogue`. It has **no** `fuse_pairs`, `fuse_reductions` or `inline_producers`. Its own header states
+    the reason: "the forward pass below materialises every domain's rows unconditionally (unlike
+    exec::Interpreter, Adjoint applies none of the fuse/inline optimisations of its own)".
+  * `solver::ImplicitProgram::adjoint` (`src/solver/implicit_program.cpp`) calls `im.adj->run`, never
+    `im.interp->run`. The O3 ladder (`fixtures::ladder`, `src/fixtures/stage_a_e0.cpp`) is that call plus the
+    block solves plus the IFT pull. **The risk ladder does not execute one instruction of `exec::Interpreter`.**
+  * `solver::ResidualProgram` (`src/solver/residual.cpp`) builds its own `exec::Options io` from the defaults
+    rather than from `ProgramOptions::interpreter`, so the block solves inside a ladder run are knob-independent
+    too, and `costmodel_collect`'s three flags cannot reach them either.
+
+Measured anyway, because the point of the exercise is to put a number on it rather than argue from a header. On
+the adjoint side `--ceiling` times ONE `Adjoint` object under all eight labels, so the spread of those rows IS
+this harness's noise floor at that configuration:
+
+| case | B | lane_tile | pairs off | reductions off | inlining off | all three off | noise floor |
+|---|---|---|---|---|---|---|---|
+| M1 book | 1 | 8 | 1.0076 | 1.0009 | 0.9988 | 1.0059 | 1.0237 |
+| M1 book | 64 | 8 | 0.9973 | 1.0004 | 0.9961 | 0.9930 | 1.0605 |
+| Stage A | 1 | 8 | 0.9961 | 0.9976 | 1.0003 | 0.9996 | 1.0105 |
+| Stage A | 64 | 8 | 0.9991 | 0.9990 | 0.9983 | 1.0005 | 1.0093 |
+
+Every one of those sixteen contrasts is inside its configuration's noise floor, as it must be. **The plan-level
+ceiling on the adjoint path is 1.000x by construction, and 0.993x-1.008x as measured.** The brief's hypothesis is
+refuted, not merely unsupported.
+
+### 3. Stage A's forward plan-level ceiling is 1.027x-1.042x, and the greedy planner already sits at the good end of it
+
+`release` preset, tile 256, three rounds per configuration, medians of the three per-round ratios, 1-minute load
+3.0-5.0 on 16 cores throughout (under `bench/run.sh`'s own cores/2 = 8.0 bar, though this is not a `bench/run.sh`
+product — see §6 on how to read these numbers).
+
+| case | B | lane_tile | Lt | pairs off | reductions off | inlining off | **all three off** | noise floor |
+|---|---|---|---|---|---|---|---|---|
+| M1 book | 1 | 8 | 1 | 1.0271 | 1.6561 | 1.1351 | **1.7919** | 1.0107 |
+| M1 book | 64 | 1 | 1 | 1.0308 | 1.6358 | 1.1275 | **1.7592** | 1.1217 |
+| M1 book | 64 | 8 | 8 | 1.0428 | 1.7278 | 1.0016 | **1.7255** | 1.0122 |
+| M1 book | 64 | 32 | 32 | 1.1338 | 1.7931 | 1.0675 | **1.8822** | 1.0145 |
+| Stage A | 1 | 8 | 8 | 0.9933 | 1.0092 | 0.9928 | **1.0308** | 1.0279 |
+| Stage A | 64 | 1 | 1 | 1.0132 | 1.0273 | 1.0342 | **1.0421** | 1.0303 |
+| Stage A | 64 | 8 | 8 | 1.0047 | 1.0319 | 0.9938 | **1.0330** | 1.2018 |
+| Stage A | 64 | 32 | 32 | 1.0240 | 1.0059 | 1.0114 | **1.0268** | 1.0126 |
+
+"Noise floor" is the max-over-min of that configuration's twelve `all_on` runs, which are twelve timings of
+identical work; the 1.2018 is one round-2 outlier at 64,091 us against a 53,300-53,900 us cluster and the 1.1217
+is one at 4,493 us against 4,005-4,060 us, both stated rather than dropped.
+
+Three readings, in the order they matter.
+
+**The whole plan stage is worth 2.7%-4.2% on Stage A.** Four configurations spanning Lt = 1, 8 and 32 and B = 1
+and 64 agree on 1.027x-1.042x. That is the ceiling D63 §5 put at 6.6%. It is lower, and it is lower at every
+lane_tile, which is precisely the check D63 said it had not made.
+
+**The greedy planner is at or within 0.7% of the best of the measured settings.** The same table read as a search
+problem: at Stage A B=64 lane_tile 32 and B=64 lane_tile 1 no knob-off setting beats the greedy default, and at
+the other two the best setting beats it by 0.7% (`no_inline_producers`, median 0.9928 and 0.9938). At Stage A
+B=1 lane_tile 8 both the pairing-off and the inlining-off settings came in below the baseline in three of three
+rounds each — six of six runs — so the direction is consistent even though 0.7% does not clear that
+configuration's 1.0279 noise floor. On the M1 book the greedy default is the best of the four settings at all
+four configurations. **The dynamic range and the realisable gap are different quantities and this entry reports
+both: the range is 3.3%, the gap a perfect re-planner could actually close is about 0.7% and not separable from
+noise.**
+
+**The M1 book's range is 1.73x-1.88x and the greedy planner captures all of it.** That is worth stating because
+it is the good news in the table: the interpreter's planning stage is doing real work, roughly a factor of 1.8 on
+the kill-path workload. It is Stage A specifically — the tape `PROBLEM.md` §7's cross-stage clause is evaluated
+on — where the plan stage has almost nothing in it.
+
+### 4. D63 §3's Stage A 1.066x does not reproduce
+
+D63 §3 recorded Stage A `fuse_reductions` off at **1.066x** (1583.5 -> 1687.5 us) and §5 built its 6.6% ceiling
+on that single row. Re-run here with D63's own protocol — `profile` preset, one process per setting, 2
+repetitions, alternating — reading BOTH quantities out of the same four processes, 1-minute load 3.64-3.88:
+
+| quantity | on | off | off/on |
+|---|---|---|---|
+| wall clock, us per run | 1592.9 | 1624.2 | **1.0196x** |
+| summed per-domain profile table, us per run | 1513.1 | 1542.8 | **1.0196x** |
+
+The two agree to four figures, so the `profile` build's instrumentation is **not** the difference and D63's
+choice of instrument was sound. What differs is repetition count: D63 took two, and this entry measures that
+contrast's own per-round spread at 0.9997-1.0561 at the same configuration. **D63's 1.066x was a two-repetition
+measurement that landed on a high round.** The eight-loop, three-round, one-process sweep of §3 puts the same
+contrast at 1.0092 (B=1) and 1.0319 (B=64). D63's 1.014x pairing row and 0.999x inlining row both reproduce.
+
+This is D63's own §2(f) lesson arriving one level up: the discipline it adopted (alternate the twins, record the
+load) fixed the systematic error, and the residual random error at two repetitions is still comparable with the
+effect being measured.
+
+### 5. What this means, and the recommendation
+
+**The arithmetic, which is the part that settles it.** From
+`bench/results/d448afd70180/stage_a_stage_a.json` (release, 20 repetitions, load 7.2 before / 3.4 after), medians:
+
+  * `exec::Interpreter`'s share of one O4 scenario-lane batch — `BM_Evaluate` over `BM_Run`, the interpreter
+    alone over the whole lane including its block solves — is **8.91%** at B=1, **5.15%** at B=8 and **5.20%** at
+    B=64. The other ~95% is the calibration solves, which no M4 rule touches.
+  * `exec::Interpreter`'s share of the O3 reverse risk ladder is **0%** (§2).
+  * Over the whole Stage A problem as `PROBLEM.md` §4 defines it — 1,000 O4 scenario lanes, a 2,043-output O3
+    ladder, one record and build — the split is O4 15,789.6 ms (48.36%), O3 reverse ladder 8,052.6 ms (24.66%),
+    record plus build 8,807.0 ms (26.97%), total 32,649.2 ms, of which `exec::Interpreter` is **820.6 ms, or
+    2.513%**.
+
+Multiply the ceiling by the share. The plan stage is worth 3.195% of `exec::Interpreter`'s own time at Stage A
+B=64 lane_tile 8 (the 1.0330x of §3, expressed as a saving). That is **0.166% of one O4 lane batch** and
+**0.080% of the whole Stage A problem's wall clock**. A perfect plan-level cost model — zero error, not the
+<25% target, zero — buys eight hundredths of one percent of this problem.
+
+**Correction to a number that has been circulating.** The brief that commissioned this work read D55's 9.56% as
+"`exec::Interpreter` is 9.56% of Stage A's wall clock". It is not that quantity.
+`catalogue::Coverage::time_fraction` (`include/epykos/catalogue/coverage.hpp`) is "the fraction of this
+instance's OWN measured wall-clock evaluation time ... spent in catalogued-domain execution", so D55's figure
+means **the catalogue serves 9.56% of `exec::Interpreter`'s own time on Stage A**, with the compounding scan
+taking most of the rest. The interpreter's actual share of the workload is the 5.20% / 2.513% measured above. The
+two land in the same order of magnitude by coincidence and the conclusion is unchanged, but `RESUME.md` §5's
+wording invited the misreading and is corrected in the same commit.
+
+**A third fact, which no previous entry has stated plainly.** `optimise::estimate_program` models
+`exec::Interpreter` and nothing else, and `src/optimise/extract.cpp` makes it the extraction objective. There is
+no adjoint execution model — `estimate_jacobian_ns` is a coarse AD-mode selector that scales a forward pass by a
+constant `adjoint_multiplier = 8.0`, not a model of what the reverse pass does. So the search is not merely
+finding little on the 2.513% it can see; it is **structurally blind to the 24.66% of Stage A that is the reverse
+ladder**, which is the one part of this problem where the project has already measured a real win (the
+catalogue's 1.11x-1.16x, D55/D59).
+
+**Recommendation: stop fitting the plan-level cost model.** Under the brief's own test — "if the ceiling is
+genuinely near 6.6% or lower across configurations, say so, recommend against further fitting" — the ceiling is
+below 6.6% at every Stage A configuration measured, at three different lane widths and two batch sizes, and is
+zero on the adjoint path. Stage 2 of the brief (adding `fuse_reductions` and `inline_producers` contrast to the
+calibration grid and teaching `fit_main` to take a `DefaultPlanOptions`) remains correctly specified and would
+still improve the model; it is simply not worth a night, because the thing it would improve has 0.08% of this
+problem behind it. The work is left described in D63 §5 and in this paragraph for whoever wants it.
+
+**What the gate should be instead.** Three changes to `PROBLEM.md` §7, offered for the owner's decision and NOT
+made here:
+
+1. **Retire the "at least one cross-stage optimisation" clause on Stage A, or give it a wall-clock denominator
+   and declare it not-applicable.** As written it is evaluated as a ratio of `estimate_program` estimates. On a
+   tape where the thing being estimated is 2.5% of the work and its whole dynamic range is 3.3%, the clause is
+   asking the search for a win the tape does not contain at the plan level. A clause that cannot be satisfied by
+   a correct implementation is not a gate, and M4 should not stay failed on it.
+2. **Retire or re-scope the cost model's <25% mean-relative-error target.** It has been missed since D48 (84.4%,
+   then 58.6% after D63) and this entry shows that closing it entirely is worth 0.08%. If it stays, it should be
+   a target on a model that prices something worth optimising.
+3. **Re-point the optimisation gate at where the time is**, which this entry measures for the first time: the
+   block solves (about 95% of an O4 lane and 46% of the whole problem), the reverse ladder (24.66%, uncosted),
+   and record-plus-build (26.97%). The natural next package is not more fitting — it is an execution model for
+   `adjoint::Adjoint` so the search can see the quarter of the problem where a win has already been measured by
+   other means.
+
+The framework itself is not what failed. Equality saturation reaches a fixpoint on a 517,036-node tape in 3.9 s
+(D62), every extracted program verifies at its declared exactness class, the rules fire on real sites (D65, D67)
+and the cost model now reads the planner's real plan and prices pairing to within measurement spread (D63). What
+this entry measures is that all of that was pointed at 2.5% of the problem.
+
+### 6. How to read these numbers, and verification
+
+Every number in §2, §3 and §4 is a `costmodel_collect` measurement, not a `bench/run.sh` product: there is no
+baseline entry, no `bench/targets.json` row and `scripts/perf_gate.py` was not run on them, so they are
+**informational under D9**, exactly as D63's own knob sweep was. They are recorded in
+`bench/results/d448afd70180/plan_ceiling.json` with every per-round ratio, every configuration's noise floor and
+the 1-minute load range of each. The 1-minute load was 3.0-5.0 on 16 cores throughout, i.e. under the cores/2 =
+8.0 threshold `bench/run.sh` would have enforced had it been the instrument; the perf gate did not refuse
+anything because it was not invoked. The §5 shares are read from the committed
+`bench/results/d448afd70180/stage_a_stage_a.json`, which IS a `bench/run.sh` product at this fingerprint.
+
+The ratios of §3 and §4 are a `release`-preset and a `profile`-preset measurement respectively and are not
+compared with each other except in §4, where both quantities come from the same four processes.
+
+**The search is verifiably unmoved by this entry**, which is what a tool-only change should be able to
+demonstrate rather than assert. `tools/egraph_scale/egraph_scale --extract --lane-tile 8 --fingerprint
+d448afd70180`, release, on this tree, both printing `== cost model: fingerprint 'd448afd70180' fitted=LOADED`
+(the line D57 added and D67 §"side observation 2" exists because of — without `--fingerprint` the tool falls back
+to `CostCoefficients::defaults()` and reports the retracted synthetic 0.977259x):
+
+  * 60 trades: 624 candidates in 1,313 ms, program node 35 (53 domains), 287,996.565693 ns against the default's
+    289,484.229058 ns, ratio **0.994861**, history `r5.group_formation` four times.
+  * 2,000 trades (the full tape): 896 candidates in 7,923 ms, program node 27 (64 domains), 679,694.980658 ns
+    against 685,847.858213 ns, ratio **0.991029**, history `r5.group_formation` three times.
+
+Both are byte-identical to D63 §4's own table at those sizes, as they must be — this entry touches no engine file
+and no coefficient. **Nothing clears noise, and nothing was expected to**; the point of quoting them is that the
+instrument added here is inert to the thing being measured.
+
+No gate and no mutant: this entry adds no engine line to mutate and changes no decision any program makes.
+`ctest --preset release` **111/111** and `--preset reference` **111/111**, 0 failed each, on this tree. The
+registry stays at 50 mutants over 57 gate tests, unswept here because no file this entry touches is under
+`src/` or `include/` at all. No SwapEngine file opened. No file under `include/epykos/`, `src/` or `tests/`
+touched.

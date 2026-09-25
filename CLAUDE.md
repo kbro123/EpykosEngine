@@ -48,7 +48,18 @@ now passes (1.0164x at B=1, 0.9985x at B=64, where D59 recorded 1.0277x/1.0427x)
 extracted candidate is the default plan's own execution, not something better than it. D63 also measured, for the first time,
 what the interpreter's three planning decisions are worth: reduction fusion 1.618x (M1) / 1.066x (Stage A),
 inlining 1.124x / 1.000x, step pairing 1.021x / 1.014x — so on Stage A the whole plan-level search has at most
-~6.6% available to it. **D52's open `adjoint::` crash is closed
+~6.6% available to it. **That ceiling is now measured properly and is smaller still, which settles the M4
+question (D68, 2026-09-25)**: the same knob-off sweep taken as wall clock on the `release` build, all eight
+settings interleaved in one process, three rounds, at lane_tile 1, 8 and 32 and B = 1 and 64 puts Stage A's WHOLE
+plan stage at **1.027x-1.042x** (D63's 1.066x was two repetitions and does not reproduce — re-run under D63's own
+protocol it is 1.0196x on both the wall clock and the profile-table sum), and the adjoint path at **exactly
+1.000x by construction**: `adjoint::Options` has no fuse/inline knob and `ImplicitProgram::adjoint` never calls
+the interpreter, so the O3 risk ladder runs no `exec::Interpreter` at all. Multiply by the share and the
+programme is over: `exec::Interpreter` is 5.20% of an O4 scenario-lane batch and **2.513% of the whole Stage A
+problem**, so a PERFECT plan-level cost model is worth **0.080% of Stage A's wall clock**. The search is also
+blind to the 24.66% of the problem that is the reverse ladder, because `estimate_program` models the interpreter
+and nothing else. D68's recommendation, for the owner: **stop fitting; change the gate.** **D52's open
+`adjoint::` crash is closed
 too (D65, 2026-09-24), and it was never an adjoint defect**: R-a's own Stage A test handed `adjoint::Adjoint::run`
 a 70-entry `state_bar` buffer for a tape with 148 Inputs, so every call wrote 78 doubles past its end. The harness
 now derives state and buffer lengths from the Program, a guard-region gate pins the write-bounds clause, and R2's

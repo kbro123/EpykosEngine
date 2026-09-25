@@ -3028,10 +3028,17 @@ code says so in three places before any timer is started:
     exec::Interpreter, Adjoint applies none of the fuse/inline optimisations of its own)".
   * `solver::ImplicitProgram::adjoint` (`src/solver/implicit_program.cpp`) calls `im.adj->run`, never
     `im.interp->run`. The O3 ladder (`fixtures::ladder`, `src/fixtures/stage_a_e0.cpp`) is that call plus the
-    block solves plus the IFT pull. **The risk ladder does not execute one instruction of `exec::Interpreter`.**
-  * `solver::ResidualProgram` (`src/solver/residual.cpp`) builds its own `exec::Options io` from the defaults
-    rather than from `ProgramOptions::interpreter`, so the block solves inside a ladder run are knob-independent
-    too, and `costmodel_collect`'s three flags cannot reach them either.
+    block solves plus the IFT pull. **The risk ladder never runs the whole-program `exec::Interpreter` at all** —
+    the object the plan knobs configure, the object the e-graph's extracted program would be executed by, and the
+    only `exec::Interpreter` `optimise::estimate_program` is a model of.
+  * Stated precisely rather than more strongly than is true, because the ladder is not free of every
+    `exec::Interpreter`: the block solves inside it do construct one, per residual block
+    (`solver::ResidualProgram`, `src/solver/residual.cpp`, `interp_`). Two things make that irrelevant here and
+    both are in the code. It is built from a **local, hardcoded** `exec::Options io` with `max_batch = 1` and
+    `lane_tile = 1` — not from `ProgramOptions::interpreter` — so neither this sweep's three flags nor any
+    caller's plan choice can reach it; and it runs a **residual slice program**, a different `ir::Program` from
+    the whole-program tape, which no M4 rule is ever applied to and which the e-graph never sees. The residual
+    interpreters are part of what the solve costs, and they are outside both the knobs' reach and the search's.
 
 Measured anyway, because the point of the exercise is to put a number on it rather than argue from a header. On
 the adjoint side `--ceiling` times ONE `Adjoint` object under all eight labels, so the spread of those rows IS
@@ -3116,14 +3123,18 @@ effect being measured.
 **The arithmetic, which is the part that settles it.** From
 `bench/results/d448afd70180/stage_a_stage_a.json` (release, 20 repetitions, load 7.2 before / 3.4 after), medians:
 
-  * `exec::Interpreter`'s share of one O4 scenario-lane batch — `BM_Evaluate` over `BM_Run`, the interpreter
-    alone over the whole lane including its block solves — is **8.91%** at B=1, **5.15%** at B=8 and **5.20%** at
-    B=64. The other ~95% is the calibration solves, which no M4 rule touches.
-  * `exec::Interpreter`'s share of the O3 reverse risk ladder is **0%** (§2).
+Throughout, "`exec::Interpreter`" means the **whole-program** one — `ImplicitProgram`'s `im.interp`, the object
+the plan knobs configure and the only one `optimise::estimate_program` models. The per-block residual
+interpreters of §2 are counted in the solve cost, where they belong, because no knob and no rule reaches them.
+
+  * The whole-program interpreter's share of one O4 scenario-lane batch — `BM_Evaluate` over `BM_Run`, the
+    interpreter alone over the whole lane including its block solves — is **8.91%** at B=1, **5.15%** at B=8 and
+    **5.20%** at B=64. The other ~95% is the calibration solves, which no M4 rule touches.
+  * Its share of the O3 reverse risk ladder is **0%** (§2).
   * Over the whole Stage A problem as `PROBLEM.md` §4 defines it — 1,000 O4 scenario lanes, a 2,043-output O3
     ladder, one record and build — the split is O4 15,789.6 ms (48.36%), O3 reverse ladder 8,052.6 ms (24.66%),
-    record plus build 8,807.0 ms (26.97%), total 32,649.2 ms, of which `exec::Interpreter` is **820.6 ms, or
-    2.513%**.
+    record plus build 8,807.0 ms (26.97%), total 32,649.2 ms, of which the whole-program `exec::Interpreter` is
+    **820.6 ms, or 2.513%**.
 
 Multiply the ceiling by the share. The plan stage is worth 3.195% of `exec::Interpreter`'s own time at Stage A
 B=64 lane_tile 8 (the 1.0330x of §3, expressed as a saving). That is **0.166% of one O4 lane batch** and

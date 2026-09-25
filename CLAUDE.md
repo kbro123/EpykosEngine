@@ -53,10 +53,12 @@ question (D68, 2026-09-25)**: the same knob-off sweep taken as wall clock on the
 settings interleaved in one process, three rounds, at lane_tile 1, 8 and 32 and B = 1 and 64 puts Stage A's WHOLE
 plan stage at **1.027x-1.042x** (D63's 1.066x was two repetitions and does not reproduce — re-run under D63's own
 protocol it is 1.0196x on both the wall clock and the profile-table sum), and the adjoint path at **exactly
-1.000x by construction**: `adjoint::Options` has no fuse/inline knob and `ImplicitProgram::adjoint` never calls
-the interpreter, so the O3 risk ladder runs no `exec::Interpreter` at all. Multiply by the share and the
-programme is over: `exec::Interpreter` is 5.20% of an O4 scenario-lane batch and **2.513% of the whole Stage A
-problem**, so a PERFECT plan-level cost model is worth **0.080% of Stage A's wall clock**. The search is also
+1.000x by construction**: `adjoint::Options` has no fuse/inline knob and `ImplicitProgram::adjoint` calls
+`im.adj->run` and never `im.interp->run`, so the O3 risk ladder never runs the whole-program `exec::Interpreter`
+(the per-block residual solves inside it do build their own, from hardcoded local options no caller can reach,
+on slice programs no rule is applied to). Multiply by the share and the programme is over: the whole-program
+`exec::Interpreter` is 5.20% of an O4 scenario-lane batch and **2.513% of the whole Stage A problem**, so a
+PERFECT plan-level cost model is worth **0.080% of Stage A's wall clock**. The search is also
 blind to the 24.66% of the problem that is the reverse ladder, because `estimate_program` models the interpreter
 and nothing else. D68's recommendation, for the owner: **stop fitting; change the gate.** **D52's open
 `adjoint::` crash is closed

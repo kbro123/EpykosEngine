@@ -3431,3 +3431,274 @@ be. **Deferred to a reserved machine:** `bench/run.sh build/release/bench/compar
 warm, cold, evaluate and build rows at 16, 64 and 256 trades) against repeated `risk_us` samples from their CLI
 on the identical exchange file, both sides' load recorded before and after, per D29. Informational only (D9),
 and it is the ratio §6(a) governs.
+
+## D75 — Evaluation: WRITE the term e-graph, do not wrap one. egraphs.cpp is a sound congruence-closure core with none of the machinery D62 had to build; SymEngine cannot classify E0 from E1; and the region measurement says the term layer is not what unlocks the prize (2026-09-25)
+
+Owner-authorised evaluation of whether a third-party symbolic-algebra or e-graph library should be used rather
+than writing one, asked because **we already wrote our own and got it wrong**: D49 hand-wrote an e-graph precisely
+because D12 fixes the dependency set, it shipped with no redundancy or subsumption check, it could not reach a
+fixpoint on the real tape at any size, and D62 was a dedicated package to make it saturate. The question is
+whether writing a second one, at term level (D73), repeats that.
+
+**This entry records an EVALUATION, not an integration.** No candidate is vendored into this repository, no
+candidate is in its build, and D12's dependency set is unchanged. What landed here is one measurement tool,
+`tools/egraph_eval/` (`egraph_eval_regions`), which links only the engine; the harness that actually drives
+`egraphs.cpp` was built out of tree against `build/release/libepykos.a` and is not committed. This branch also
+merges `mx/head-to-head`, because the `compare_ois` fixture the owner named for the measurement lives there and
+there is no other way to compile against it.
+
+**Recommendation: WRITE.** Argued below from what was measured, not from writing being easier to start.
+
+---
+
+### 1. The region sizes, and they are the finding
+
+`tools/egraph_eval/egraph_eval_regions`, fingerprint `d448afd70180`, release preset, 1-minute load 6.0-6.5 of 16
+(informational only, D9: no `bench/targets.json` entry, no `--accept`). A region is a maximal connected component
+under "consumer and operand are both field ops" (`Add Sub Mul Div Neg Recip Fma Sum Affine`) — exactly the unit a
+library could be handed in one piece. Measured at both levels the engine has, because they disagree by three
+orders of magnitude and **the disagreement is the answer**:
+
+| trades | tape nodes | tape regions | largest | singletons | IR domains | IR steps | largest IR region |
+|---|---|---|---|---|---|---|---|
+| 8 | 80,989 | 9,955 | **60,455** | 9,703 (97.5%) | 30 | 36 | **4** |
+| 64 | 83,191 | 9,955 | **62,227** | 9,703 (97.5%) | 31 | 38 | **4** |
+| 256 | 92,534 | 9,955 | **70,030** | 9,703 (97.5%) | 31 | 38 | **4** |
+
+At the TAPE level the answer looks wonderful: one region of 62,227 nodes at 64 trades (74.8% of the tape), with
+10,490 boundary leaves and only 81 exits. 97.5% of the other regions are singletons and exactly ONE region has
+eight or more members.
+
+At the IR level — which is the level D73's term e-graph is designed over, and the level the optimiser actually
+works at — the largest region is **4 steps**, the median is 1, and **it does not grow with the book**: 8 trades
+and 256 trades give the identical 38 steps and the identical largest region of 4. That invariance is not a
+disappointment, it is what `ir::infer` is FOR. The book size goes into row counts, not into steps; the
+83,191 : 38 collapse is the sharing, and it happens before the optimiser is reached (D73 says the same thing from
+the other direction and estimates 10^3 nodes for Stage A).
+
+So the honest statement of region size is: **62,227 un-collapsed, or 4 collapsed, and a library would be handed
+the collapsed one.** Wrapping a 925-line dependency to canonicalise a four-node expression is not a trade anyone
+would make. That alone does not settle it — the term graph is small but the SEARCH over it need not be — so the
+rest was measured too.
+
+One incidental finding, worth recording because it surprised this package: the largest region contains **no
+`Add`, `Neg`, `Recip` or `Fma` at all**. Its 62,227 members are `mul` 21,986, `div` 19,992, `sum` 10,161, `sub`
+10,088. `affine_collapse` has already consumed every Add, and the 9,954 resulting `Affine` nodes are almost all
+SINGLETON regions, because their operands are `exp` results, which are boundaries. An identity set written for a
+textbook field signature would match almost nothing here.
+
+### 2. The chain length, which decides whether associativity is usable at all
+
+New in `egraph_eval_regions`: the longest path through the largest region restricted to one op. Measured at 64
+trades:
+
+| op | longest chain | AC closure |
+|---|---|---|
+| **`Mul`** | **251** | **2^252 - 1 e-classes** |
+| `Sum` | 15 | 2^16 - 1 |
+| `Div` | 1 | — |
+| `Sub` | 1 | — |
+
+That 251 is the compounded-SOFR product loop, and it is `PRINCIPLES.md` §2a's "250-step scan" appearing as a
+measurement on a real fixture for the first time. Associativity-plus-commutativity over an n-leaf product closes
+over the non-empty subsets of those leaves: **2^n - 1 e-classes, which is a theorem about the identity, not a
+property of any implementation.** No library choice changes it. §2a's "collapsing a 250-step scan by applying
+cancellation 249 times will exhaust any e-graph" is now measured rather than asserted, and §2a's conclusion —
+that this needs a rule KIND that recognises a recurrence class, not a term rewrite — is confirmed from the data.
+
+### 3. egraphs.cpp: what it is, measured by running it
+
+`can-lehmann/egraphs.cpp`, vendored to a scratch area at `egraphs.hpp` sha256
+`176e13e581edd6cddfd81bd49414d79fa0a491388e2f4f5faa7e5a26e9da14f6`.
+
+**Translation, both ways, and it works.** 135 non-comment lines: 55 for the `NodeData` and its `std::hash`, 35
+in, 45 out. The owner's expectation that the mapping is not trivial even for standard ops is correct, and the
+reason is precise: an e-node is `(data, children)`, while our `Node` carries four things that are not children —
+the Input ORDINAL (which aliases the operand slot `a`), the Const BIT PATTERN (+0.0 and -0.0 are distinct nodes),
+the TAINT bit, and `Affine`'s per-operand COEFFICIENT side array. All four must go into `NodeData` or hash-consing
+will wrongly identify two nodes; the coefficients are the awkward one, because they are positional, so they are
+part of the node's identity AND would have to be permuted in step with any operand reordering. Timings at 64
+trades, 62,227 members: **in 0.129-0.231 s, extract 0.111-0.130 s, out 0.061 s**, and the round trip is
+**81/81 exits bit-identical, worst relative 0.0**. Hash-consing collapsed nothing (72,717 -> 72,717), which is
+expected: `cse` already ran.
+
+**A small identity set behaves.** `Mul` commutativity alone reaches a real fixpoint in 2 rounds, 72,717 ->
+94,703 e-nodes (+21,986, exactly one commuted twin per Mul), 0.6 s, 348 MiB. Congruence closure is doing its job.
+
+**The test that matters — a region where identities match everywhere — reproduces D49's failure exactly.**
+Commutativity plus associativity of `Mul`, same region:
+
+| round | e-classes | e-nodes | queued merges | round s | peak MiB |
+|---|---|---|---|---|---|
+| 0 | 72,717 | 72,717 | — | 0.231 | 354 |
+| 1 | 82,685 | 115,261 | 32,576 | 0.798 | 357 |
+| 2 | 132,747 | 235,983 | 70,660 | 4.443 | 366 |
+| 3 | 505,171 | 1,130,315 | 708,962 | **241.0** | 525 |
+
+No fixpoint. Stopped by **the harness's own cap, because the library has none.** Verified by reading the header
+and confirmed by grep: there is no iteration limit, no node bound, no timeout, no budget and no rule scheduler
+anywhere in the 925 lines. `merge(queue)` runs `while (!queue.empty())`. Termination is entirely the caller's
+problem — which is to say, the caller has to write D62 again.
+
+Cleanly, on a synthetic balanced product tree where the identities match at every node:
+
+| leaves / Muls | result |
+|---|---|
+| 4 / 3 | fixpoint round 7: 15 e-classes, 54 e-nodes |
+| 8 / 7 | fixpoint round 9: **255 e-classes = 2^8 - 1**, 6,058 e-nodes, 9.2 MiB, 0.066 s |
+| 16 / 15 | **no fixpoint in 16 min 09 s at 911 MiB**, killed |
+| 32 / 31 | did not complete a single round in 10 min, killed |
+
+255 = 2^8 - 1 is the AC completion exactly. **Sixteen leaves is already out of reach, and the real chain is 251.**
+
+**The extraction interface is genuinely good, with one real constraint.** All three overloads work on the real
+region (`DataCostFn` 0.111 s, a fitted per-op latency cost 0.125 s, the general `CostFn` 0.116 s, 72,717 classes
+each), so yes, we can supply our own cost function, and op count and later accuracy both fit. The constraint is
+that `Cost` is `uint64_t`, so a fitted model in nanoseconds must be quantised, and the header states — and the
+code asserts — that a node's cost "must be greater than 0 and greater than the cost of every child", because
+extraction is Dijkstra from the leaves. **A cost function that makes a parent CHEAPER than its children violates
+that precondition, and that is exactly what a fusion or catalogue discount is.** `PRINCIPLES.md` §6 item 5 names
+teaching the cost model the catalogue as work to be done; this library's extractor could not express the result.
+
+**Licence and build, verified from the repository rather than a search result.** Apache-2.0, from `LICENSE.txt`
+(the raw `LICENSE` path 404s), with a `NOTICE` reading "egraphs.cpp / Copyright 2024 Can Joshua Lehmann" that
+Apache-2.0 requires be propagated. **This repository has no `LICENSE` file of its own**, so there is nothing to
+check compatibility against; that gap should be closed on its own terms and is noted here rather than fixed.
+It is genuinely header-only (one 925-line header, no `.cpp`). It compiles and runs under **Apple clang 21.0.0 at
+`-std=c++20`** and under **GCC 13.5.0 at `-std=c++20`** (in a `gcc:13` container, on a probe exercising every
+feature this evaluation used: a custom `NodeData` carrying a payload vector, its `std::hash`, both `node()`
+overloads, `MergeQueue`, the saturation loop, `EClass::match(kind)` and all three `extract()` overloads).
+Under `-Wall -Wextra` it emits two warnings (`-Wmismatched-tags`, `-Wunused-parameter`); under `-Wpedantic` a
+third, because `Node::_children[]` is a **C99 flexible array member, not standard C++** — a compiler extension
+both our compilers happen to support. Vendoring would follow `scripts/bootstrap.sh`'s pattern exactly (pinned
+tarball, sha256, `third_party/`, added SYSTEM so the warnings do not reach us).
+
+**Maturity, stated plainly: it is a research artefact.** 23 stars, **10 commits, 1 contributor, every commit
+between 2024-03-30 and 2024-04-04, last commit 2024-04-04 — dormant 18 months**. Zero tags, zero releases, no
+`.github/`, so no CI. Its own test file includes `"../../unittest.cpp/unittest.hpp"`, a sibling repository that
+is not vendored, not a submodule and not mentioned in the README; vendoring the tests means vendoring a second
+undeclared repo. The README is 760 bytes and documents no API at all — everything in §3 above was read from the
+source. A small research repository is not automatically disqualified, and this one's core is sound: the
+union-find, the hash-cons, the deferred congruence rebuild and the Dijkstra extractor all did what they claim.
+
+**What it actually supplies, and this is the decisive comparison.** It is a congruence-closure core plus an
+extractor. It has **no rewrite-rule system, no pattern language, no variable binding, no e-matching engine and no
+saturation driver** — rules are hand-written C++ `switch` statements and the caller writes the loop, which is
+what the harness above had to do. Set that against what D62 actually had to build to make our own e-graph
+saturate: an application memo keyed on (node, rule, site), representative-only matching, and a re-firing policy.
+**Not one of those three is in this library.** It supplies the layer we already have working and none of the
+layer that was hard. If it were adopted, D62's package would have to be written a second time, against a
+foreign node type, and D73's application memo — which that entry already re-keyed to (e-node, rule, binding) and
+argued sound from rule purity — would have to be re-derived against an arena whose lifetimes we do not own.
+
+**If it were abandoned, which it may already be:** the stranded work is small precisely because the library is
+small. The 135-line translation and whatever rule driver we wrote around it would be stranded; the identities,
+the exactness classes, the cost model and the extraction objective would not, because they are ours. That is an
+argument that adopting it is *cheap to reverse*, not an argument that it is worth adopting.
+
+### 4. egg / egglog: no, and here are the reasons rather than the assumption
+
+`egg` is MIT, 1,838 stars, active (last commit 2026-07-19, crates.io 0.11.0), and is unquestionably the mature
+canonical implementation — its rule language, its scheduler and its bounds are the things egraphs.cpp lacks.
+`egglog`, the successor, is MIT and active. **Neither has a C or C++ FFI binding.** That is a negative result
+from searching (the egg README documents none; a GitHub repo search returned none; `egglog`'s workspace members
+include an `egglog-bridge` that is the internal Rust engine core, not a C bridge, and there is no `cbindgen`, no
+`ffi` crate and no `cdylib`/`staticlib` crate type) — absence of evidence, and stated as such. There is also no
+C++ port of egg: a GitHub search for C++ e-graph repositories returns 18, of which egraphs.cpp at 23 stars is the
+only one above 5, and the rest are toys or a different meaning of "e-graph" entirely.
+
+So adopting egg means writing and owning the FFI. Priced against this project's actual constraints: cargo becomes
+a build-tool dependency on a four-job CI matrix that includes an **arm64 macOS runner** and GCC 13 on Linux;
+`scripts/bootstrap.sh`'s model (pinned tarball, sha256, extract, no network at build time) does not survive
+contact with a cargo dependency tree, so reproducible builds would need vendored crates and a locked registry;
+and the whole of it would sit under a D12 amendment for a dependency written in a second language. Against that,
+what is bought is a rule engine for a term graph measured above at 38 steps. The expectation that this comes out
+as a no is correct, and it is a no on build-system and CI grounds rather than on quality grounds.
+
+**A third use is NOT excluded and is worth recording:** `egglog` has a CLI that consumes `.egg` text files. Using
+it OFFLINE, as a rule-development aid to explore whether an identity set finds a given rewrite before we
+implement it, costs nothing at build time and touches no CI job. That is a tool, not a dependency, and nothing
+here forecloses it.
+
+### 5. SymEngine for the one job it was scoped to: measured, and the answer is no
+
+Evaluated, as directed, only as an offline verifier of the identities we write — `PRINCIPLES.md` §4 moves rigour
+to the rule definitions ("a proof obligation discharged once, on paper, by whoever writes the rule") and the
+question is whether that can be discharged mechanically instead. SymEngine 0.15.0 was downloaded, built (CMake,
+static, GMP) and run against D73's actual axiom buckets, using the `eq(expand(sub(a,b)), zero)` idiom:
+
+| obligation | SymEngine | what that means |
+|---|---|---|
+| `mul_assoc`, `sum_factor_common` (n=3), `mul_recip_as_div` | PROVED | true in R. The easy bucket, and not where the risk is. |
+| **`add_zero`: x + 0 == x** | **PROVED** | **WRONG for our purposes.** D73 point 4 records that this is not unconditionally E0: it fails at x = -0.0, and the engine observes it through `Recip`/`Div`/`Sqrt`. SymEngine has no signed zero, so it asserts the unsound form. |
+| **`add_assoc`: (a+b)+c == a+(b+c)** | **PROVED** | **WRONG for our purposes.** This is D73 finding 5's unbounded-error family and exactly what D61 refused to do to `Op::Sum`'s fold order. |
+| `(ds/de - 1)/tau == (ds - de)/(de*tau)` | PROVED | true in R, and the two forms differ enormously in conditioning (D73 finding 8). It cannot rank them. |
+| telescoping product | PROVED at fixed n = 3, 8, 40 | three ground instances. No induction and no symbolic product over a symbolic range, so it cannot prove what the RULE claims, which is for all n. Our chain is n = 251. |
+| D73's (P2) index condition, (P3) coefficient condition | N/A | (P2) is an equality of `int32` value ids in a gather's index table; (P3) a bitwise comparison of two `Column`s. These are what separate a blueprint that telescopes from one that does not — the two-day-lookback blueprint passes (P2) and FAILS (P3) — and a CAS has nothing to say about either. |
+
+**An oracle that answers PROVED to `add_zero` and `add_assoc` cannot classify E0 from E1, which is the only
+classification our rules need.** It would verify the half of the easy bucket that has never been in doubt while
+silently blessing the two axioms whose entire content is that the naive answer is wrong in floating point. It
+would cost a new dependency class against D12 (GMP, LGPL/GPL dual-licensed, or Boost.Multiprecision via
+`INTEGER_CLASS=boostmp`) and a compiled library rather than a header. Licence verified from the source tarball:
+MIT, with a modified-BSD carve-out for `symengine/utilities/teuchos` (Trilinos / Sandia). **Not recommended, for
+this job or any other here.**
+
+**What WOULD fit the job, and is not recommended now either:** `Z3` (MIT, very active) genuinely proves rather
+than normalises, and its `FloatingPoint` theory can reason about IEEE-754 semantics, which is the one thing a CAS
+cannot. If a mechanical soundness check for the axiom set is ever wanted, that is the tool to evaluate, not a CAS.
+It is large to vendor and would need its own decision entry; recorded as the right candidate for a question
+nobody has yet asked.
+
+### 6. Other candidates checked
+
+From `philzook58/awesome-egraphs`, whose Implementations list has exactly one C++ entry and it is egraphs.cpp.
+Beyond it: `BrandenXia/egs` (C++20, non-invasive e-graph) **has no licence file at all and is therefore legally
+unusable**, and is 0 stars, created 2026-04-14; `spacemen0/egraph-cpp` is a 1-star personal scratch repo;
+`annuasd/egraph-mlir` is MIT but coupled to MLIR and not embeddable standalone. `GiNaC` is GPL and a non-starter
+(licence from web search, not verified against the repository — flagged). No header-only C++ term-rewriting
+library was found in any form.
+
+### 7. The decision, and one finding the owner should weigh separately
+
+**Write.** The reasons, in order of weight:
+
+1. **The library does not supply what was hard.** D62's three mechanisms — the application memo, representative-
+   only matching, the re-firing policy — are absent, and the one measurement that reproduces D49's failure
+   (§3's stress table) shows the candidate failing in precisely the same way, because it has no bound of any
+   kind. Adopting it means writing D62 again against a foreign node type. The risk the owner named — that
+   writing a second e-graph repeats the first — is real, but it is not avoided by this library; D73 already
+   addresses it by construction, and does so more completely than a wrap would (its term-level e-nodes make
+   D62's representative-only matching unnecessary and RECOVER the completeness `NoFreshCrossRule` booked away).
+2. **The term graph is 38 steps.** A dependency is not warranted at that size, and the size does not grow with
+   the book.
+3. **The extraction objective does not fit.** Integer costs and a strict child-monotonicity precondition cannot
+   express a catalogue or fusion discount, which `PRINCIPLES.md` §6 item 5 makes future work.
+4. **Maturity.** 10 commits, one author, dormant 18 months, no CI, no releases, tests that need an unvendored
+   second repo. For a core piece of the optimiser, on a project whose dependency set is deliberately frozen.
+
+**And the finding that is larger than the question asked.** §2's 251-long `Mul` chain says that the prize —
+telescoping, ~250:1, the thing `PRINCIPLES.md` §0 exists to prevent us missing — is **unreachable by term
+rewriting in any e-graph, ours or anyone's**, because AC-closing it is 2^252 e-classes. D73 finding 6 reached the
+same conclusion from the other side (a recurrence collapse deletes rows, so it is a domain-level edit and slots
+into the EXISTING `rewrite::Rule` interface, one site per scan domain, five on the whole Stage A tape) and
+suggested the sequencing consequence. This package's measurement is independent evidence for it:
+**`PRINCIPLES.md` §8 orders term rewriting (item 2) before telescoping (item 4), and item 4 does not need item
+2.** Doing item 4 first would test the §4 contract end to end on the one rewrite known to be worth 250:1, and
+would be the evidence that decides whether the term layer earns its six thousand lines. That is the owner's call
+and this entry does not make it; it records that two independent packages now point the same way.
+
+### 8. What real integration would involve, stated because this was only an evaluation
+
+Had the answer been "wrap": a D12 amendment; `scripts/bootstrap.sh` extended with a pinned tarball and sha256 (no
+release exists, so it would have to pin a commit); `third_party/egraphs_cpp/` added SYSTEM; the `NOTICE` file
+propagated per Apache-2.0; a `LICENSE` file created for this repository so compatibility can be asserted at all;
+the 135-line translation promoted out of scratch with its own round-trip gate; a saturation driver, an
+application memo and a bound written on top, because the library has none; and the extraction objective
+re-expressed in positive integers with a documented quantisation. None of that was done.
+
+**Verification.** `tools/egraph_eval/` links only the engine and adds no dependency; `ctest --preset release` and
+`--preset reference` are green on the landed tree (see the progress-log line for the counts). No rewrite is
+added, so this package declares no exactness class and registers no mutant — the same precedent D49 and D62 set
+for packages that add no arithmetic. `src/optimise/`, `src/rewrite/`, the cost model and the pricing maths are
+untouched. No `-ffast-math`. **No SwapEngine file opened.**

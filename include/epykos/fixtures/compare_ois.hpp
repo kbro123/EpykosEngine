@@ -61,6 +61,16 @@ struct CompareOisOptions {
   double generating_long = 0.0430;
   double generating_reversion_years = 3.0;
   double rate_moneyness = 0.15;           // book fixed rates are par * (1 + U(-m, m))
+  // How far forward a book trade's effective date may be drawn, in days, capped at half its
+  // remaining term. **DEFAULT 0, and it has to be**: a forward start that is not a whole number
+  // of years gives the trade a front STUB, and the two engines do not agree on stubs — measured,
+  // at 360 the book NPV and the ladder disagree by 1e-3 to 1e-4 relative while the curve still
+  // agrees to 5.8e-13, which localises the difference to the stub and nothing else. Kept as an
+  // option because it is the knob that demonstrates that, not because anything should set it.
+  // The consequence is recorded in bench/compare/README.md §4: a stub-free book is necessarily
+  // built on one annual grid, so its trades share structure, and this engine's book-side cost is
+  // understated relative to a real book. That caveat runs in THIS engine's favour.
+  int max_start_offset_days = 0;
   int max_batch = 64;
 };
 

@@ -146,7 +146,27 @@ same family (D71: the closed form reproduces its sampled discount factors to 0.0
    behaviour and it walks every coupon, observation day and payment date of every calibration
    instrument and every book trade to assert none exceeds the last knot. Extend the tenor set or
    the book without re-checking that test and the agreement below stops being valid.
-6. **Not attempted at all.** Futures and deposits as calibration instruments, multi-curve and
+6. **The book is stub-free, which is forced, and it therefore shares structure — a caveat that
+   runs in THIS engine's favour.** Every book trade spot-starts and its schedule is whole annual
+   periods. That is not a preference: give the trades a forward start that is not a whole number
+   of years and they acquire a front stub, and the two engines **stop agreeing** — measured, the
+   book NPV and the ladder go off by 1e-3 to 1e-4 relative while the curve still matches to
+   5.8e-13, which localises the disagreement to the stub and nothing else. Their `USD-SOFR-OIS`
+   conventions entry states no stub rule, ours states `ShortFront`, and there is no trade-level
+   override (tried: `payment_lag`, `spot_lag`, `frequency`, `day_count`, `bdc`, `calendar`,
+   `stub` and `convention` on a trade are all silently ignored). So the matched sub-problem
+   excludes stubs.
+   The consequence: a stub-free book is necessarily built on ONE annual grid, so its trades share
+   coupon structure and this engine's E0 passes collapse them. Measured: a 256-trade book is
+   92,534 tape nodes against 80,581 for no book at all — about 47 nodes per trade, where the
+   same book with distinct starts costs about 125. **This engine's book-side cost is understated
+   relative to a real desk book**, while the other engine prices trade by trade. Note which way
+   this one points: items 1 and 3 favour them, this one favours us. The fixture is also
+   calibration-dominated for the same reason — 80,581 of the 83,758 nodes at sixteen trades are
+   the curve, so the ladder ratio is mostly a curve-side comparison.
+   `CompareOisOptions::max_start_offset_days` is the knob that demonstrates all of this; it
+   defaults to 0 and nothing should set it.
+7. **Not attempted at all.** Futures and deposits as calibration instruments, multi-curve and
    tenor basis, EUR, cross-currency, seasoned trades with realised fixings, scenario grids, the
    G10 desk, and any curve whose scheme is not piecewise-constant forward. Those are the rest of
    `PROBLEM.md`; none of them is in this comparison and no claim here extends to them.

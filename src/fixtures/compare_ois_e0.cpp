@@ -179,18 +179,42 @@ CompareOis make_compare_ois(const CompareOisOptions& options) {
     for (double& q : s.quotes) q += p.uniform_range(-n, n);
   }
 
-  // The book: `trades` OIS trades, tenor drawn from the calibration tenor set, notional
-  // log-uniform between one million and two hundred million, side +/-1, fixed rate the par rate
-  // of that tenor moved by uniform +/- rate_moneyness (so the book is genuinely off-market).
+  // The book: `trades` OIS trades. Trade i draws a calibration instrument to MATURE WITH, a
+  // forward-start offset, a notional log-uniform between one million and two hundred million, a
+  // side, and a fixed rate that is that instrument's par quote moved by uniform
+  // +/- rate_moneyness, so the book is genuinely off-market.
+  //
+  // Two properties of that draw are deliberate and load-bearing, and neither is cosmetic:
+  //
+  //   * the TERMINATION is a calibration instrument's own termination, so the trade's last
+  //     payment lands exactly on a curve knot and nothing is ever priced beyond the last one,
+  //     where the two engines' extrapolations differ (bench/compare/README.md section 4 item 5,
+  //     gated by tests/compare/ois_test.cpp);
+  //   * the EFFECTIVE date offset is drawn but `max_start_offset_days` DEFAULTS TO 0, so every
+  //     trade spot-starts and its schedule is whole annual periods with NO STUB. That is forced,
+  //     not preferred: at an offset of 360 days the trades become structurally distinct and the
+  //     two engines stop agreeing -- book NPV and ladder off by 1e-3 to 1e-4 relative while the
+  //     curve still matches to 5.8e-13, which localises the disagreement to the front stub and
+  //     nothing else. A stub-free book is necessarily built on ONE annual grid, so its trades
+  //     share coupon structure and the E0 passes collapse them: measured, a book of two hundred
+  //     and fifty-six trades is 92,534 nodes against 80,581 for no book at all, about 47 nodes
+  //     per trade, where the distinct-start book cost about 125. This engine's book-side cost is
+  //     therefore understated relative to a real desk book, and that caveat runs in ITS favour;
+  //     it is recorded in bench/compare/README.md section 4 rather than left implicit.
   const std::vector<std::string>& tenors = def.instruments[0].tenors;
   rng::Philox pb(options.seed, 2);
   for (int i = 0; i < options.trades; ++i) {
     const std::size_t ti = static_cast<std::size_t>(pb.uniform() * static_cast<double>(tenors.size()));
     const std::size_t tix = std::min(ti, tenors.size() - 1);
+    const Instrument& anchor = s.set.instruments[tix].instrument;
     Trade t;
     t.id = "CMP-" + std::to_string(i);
     t.blueprint = "USD-SOFR-OIS";
-    t.tenor = Period::parse(tenors[tix]);
+    const int term_days = static_cast<int>(anchor.termination - anchor.effective);
+    const int max_offset = std::min(options.max_start_offset_days, term_days / 2);
+    const int offset = max_offset > 0 ? static_cast<int>(pb.uniform() * static_cast<double>(max_offset)) : 0;
+    t.effective = anchor.effective + offset;
+    t.termination = anchor.termination;   // a knot, by construction
     const double lo = std::log(1.0e6), hi = std::log(2.0e8);
     t.notional = std::exp(pb.uniform_range(lo, hi));
     t.side = pb.uniform() < 0.5 ? +1 : -1;

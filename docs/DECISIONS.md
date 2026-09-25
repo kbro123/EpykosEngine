@@ -3431,3 +3431,77 @@ be. **Deferred to a reserved machine:** `bench/run.sh build/release/bench/compar
 warm, cold, evaluate and build rows at 16, 64 and 256 trades) against repeated `risk_us` samples from their CLI
 on the identical exchange file, both sides' load recorded before and after, per D29. Informational only (D9),
 and it is the ratio §6(a) governs.
+
+## D76 — MX/H2H stage 2: the measurement. Our risk ladder is ~42x the other engine's on the same exchange file, and the two documented asymmetries are most of it (2026-09-26)
+
+Completes D71, which built the fixture, established agreement and explicitly took no timing because the machine
+was contended. The owner reserved the machine; this entry is the measurement. **Informational under D9** — the
+other engine's side is not a `bench/run.sh` product and cannot be, so no perf gate was invoked and none refused.
+
+### 1. The numbers
+
+Ours: `bench/run.sh build/release/bench/compare_ois_ladder_bench`, release, Apple clang 21, fingerprint
+`d448afd70180`, Google Benchmark 20 repetitions, medians of the repetition means, 1-minute load 4.07 before /
+4.84 after against the cores/2 = 8.0 bar. Theirs: `swaps_api_cli`'s own reported `risk_us` on the byte-identical
+exchange file, **15 samples, one cold sample per process**, load 3.42.
+
+| quantity | 64-trade book |
+|---|---|
+| their risk ladder, median of 15 | **166.0 us** (min 150.1, max 458.2) |
+| ours, chord ladder | **6,950.6 us** |
+| ours, warm ladder | 6,936.1 us |
+| ours, cold ladder | 26,152.4 us |
+| ours, evaluate only | 141.3 us |
+| ours, calibrate | 23,917.3 us |
+
+**Ratio on the closest comparison: 41.9x.** It is a LOWER bound: their sample is cold-cache and one per process,
+ours is a warm in-process median, so a like-for-like warm measurement of theirs would be faster still.
+
+**Correction to a number already relayed to the owner.** A single sample of their side read **330.9 us** and was
+reported as a 21x gap. Fifteen samples put that at the 14th of 15 order statistic — the distribution is strongly
+right-skewed (a tight 150-167 cluster, then a tail to 458) because each sample is a fresh process with cold
+caches. The median is the right statistic and the one-sample figure understated the gap by about half. This is
+the same error class as D63 section 3's 1.066x, which was two repetitions landing on a high round and did not
+reproduce (D68). Recorded rather than quietly replaced.
+
+### 2. Our ladder does not scale with book size
+
+7,039.4 us at 16 trades, 6,950.6 at 64, 7,100.7 at 256. Flat. The ladder's cost is a function of the 16 curve
+knots, not of the book, which is what an IFT ladder should look like. Whether theirs scales with trades is
+unmeasured and would narrow or widen the gap with book size; it was sampled at 64 only.
+
+### 3. The two asymmetries, both against us, both documented BEFORE the timing existed
+
+`bench/compare/README.md` section 4 states them and neither was invented after seeing the result.
+
+**The representation, which dominates.** We evaluate the overnight coupon as a daily product over every projected
+observation day, 49,091 of them on the calibration side. Their public interface can only be given one telescoped
+sub-period per accrual, 197 coupon-periods. The two are algebraically equal, which is why the answers agree to
+1e-13, and the ratio of arithmetic is about 250:1. Handing them the daily decomposition was tried and changes
+their calibrated curve, so their sub-period list is not a telescoping product and cannot carry our semantics;
+`--daily` keeps that experiment, reports the disagreement and exits 1, and no timing is quoted from it.
+
+**Jacobian reuse.** Every one of our ladder calls rebuilds the 16x16 calibration Jacobian, because
+`ImplicitProgram::adjoint` solves the block and factorises before the IFT. Theirs runs on a curve already
+calibrated and reuses its factorisation. `BM_LadderChord` asks for the chord policy to close this and does not.
+
+### 4. What this does and does not say
+
+It does NOT say the generic path is 42x slower than a hand-written specialist at the same work. It says we are
+doing about 250 times the arithmetic on the calibration side and rebuilding a factorisation they keep, and that
+those two choices together cost about 42x on this workload.
+
+It is therefore the strongest available evidence for `PRINCIPLES.md` section 0's thesis: a representation choice
+made at recording time is worth two orders of magnitude here, and no plan-level rewrite can touch it. The whole
+plan-level dynamic range on Stage A is 1.027x-1.042x (D68). The telescoping spike (D74) is measuring what
+collapsing the first asymmetry is actually worth, and the second is a solver change that
+`PRINCIPLES.md` section 3 currently places out of scope.
+
+### 5. Agreement, re-run at the same time, unchanged from D71
+
+`scripts/compare_swapengine.py --per-trade`, 64-trade book: discount_factor 5.832e-13 over 200 (tol 1e-12);
+model_par_rate 3.963e-14 over 16 (1e-11); book_npv 5.760e-13 (1e-10); book_ladder 8.425e-14 over 16 (1e-9);
+trade_npv 2.558e-12 over 64 (1e-10). All ok. Their calibration converged in 4 iterations with 0 rank deficiency;
+ours reports |Jtr|inf = 2.228e-15.
+
+No SwapEngine source file was opened. Only its built binaries were executed, per D21.

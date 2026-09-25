@@ -111,16 +111,56 @@ The oracle is the templated maths instantiated at wider precision. That the math
 sensitivities are allowed more, because risk numbers tolerate error that P&L does not. The specific
 numbers belong in `PROBLEM.md` beside the outputs they govern, not here.
 
-**Bit-identity is demoted from an admission criterion to an execution property.** Three tiers:
+**Bit-identity is retired as a contract anywhere** (owner, 2026-09-25: "I genuinely don't think we
+care about bitwise correctness if we've got deterministic algebraic equivalence"). Two tiers, and a
+test:
 
 | tier | what it covers | contract |
 |---|---|---|
-| structural | `expand(infer(tape))` reproduces the tape; signature canonicality | exact, unchanged |
-| execution | interpreter, catalogue kernels and adjoint realise the compiled program | **bitwise**, unchanged |
-| mathematical | rewrites of the recorded maths | characterised error against §4's oracle |
+| structural | `expand(infer(tape))` reproduces the tape; signature canonicality | **exact** — a graph identity, not arithmetic, so rounding does not arise |
+| mathematical | rewrites of the recorded maths, AND every execution path | characterised error against §4's oracle, within the output class's tolerance |
 
-Only the third tier changes. The execution tier is where E0 earns its keep and is what makes
-swapping in a specialised kernel safe; a difference there is still a bug.
+**Execution is no longer a tier of its own.** The interpreter, the catalogue kernels and the adjoint
+are implementations of the recorded maths like any rewrite, and are judged the same way. What
+remains is a TEST, stated by the owner: **the slow and fast paths must agree to within floating-point
+tolerance.** Generic interpreter against catalogued kernel, unfused against fused, reference against
+release — a disagreement beyond tolerance is a bug. The comparison is by tolerance, not by equality.
+
+**"But if the algebraic engine is correct they agree by construction"** (owner, 2026-09-25). True in
+ℝ, and not in floating point: two algebraically equivalent expressions are different sequences of
+roundings, usually a few ulps apart and occasionally nowhere near each other where cancellation is
+involved. More to the point, the test is not testing the algebra. It tests that the CODE implements
+the algebra, which is a claim about the construction rather than a consequence of it. Two defects
+this week were exactly that gap — the catalogue fingerprint was canonical by design and was not
+(D61), and a harness sized a buffer from the wrong vector and overran it on every call (D65).
+Neither was an algebra failure. The test also measures conditioning for free: agreement at 1e-16
+says the expression is well conditioned, agreement at 1e-9 says one path is losing precision and
+nothing is broken. In the steady state it always passes and carries no information, which is true of
+every regression test.
+
+Prefer measuring each path against the oracle over comparing the two paths to each other, where the
+oracle is affordable: it is the stronger statement and it says which path is wrong, not merely that
+they differ. Path-against-path within tolerance is the cheap form and belongs wherever the oracle
+is too expensive to run.
+
+Where two paths happen to agree exactly and the exactness costs nothing to assert, asserting it is a
+good bug detector and is allowed — it is what caught the GCC operand-order divergence (D61). It is a
+test of convenience, never a constraint. The moment a kernel wants to reorder for speed, the
+assertion is relaxed there and the error measured.
+
+### 4a. What this retires
+
+The `-ffp-contract=off` pinning and the `*_e0.cpp` / `*_e0_test.cpp` naming convention exist for one
+reason: making results reproducible bit for bit across compilers. Measured 2026-09-25: **14 engine
+sources and 37 test files, about 9,700 lines, plus 21 lines of build routing.** None of it serves the
+mathematics; it serves an equality check that is no longer the contract.
+
+It has not been free either. Two of the cross-compiler defects chased this week were in that
+machinery rather than in the maths: FMA contraction reaching a folded constant (D25/D46) and
+unsequenced operand ordering leaking into the catalogue fingerprint (D61).
+
+Retire it as the rebuild reaches each file. Do not do it as a separate sweep — a 52-file rename that
+touches nothing else is a bad commit.
 
 **Reproducibility is a separate property and is kept.** Same build, same inputs, same answer, every
 time. It does not require agreeing with the naive ordering, and it is what people usually mean when

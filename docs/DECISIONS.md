@@ -3282,3 +3282,152 @@ project, and they built this TU.
 `fdd07a5` ("fit at the lane width the interpreter really plans with", D63's own (d2) fix) is an ancestor of this
 package's base `581b8e9`, so it was present for every measurement here; the 0.994861 / 0.991029 above are
 post-`Lt`-fix figures and match D63 §4's own amended table, not D67's superseded one. Checked rather than assumed.
+
+## D71 — MX/H2H stage 1: a neutral, purely time-based exchange form makes the SwapEngine risk-ladder comparison
+genuinely like-for-like, and the two engines agree to 2.7e-13 on the ladder; no timing taken yet (2026-09-25)
+
+Implements the first half of `ROADMAP.md` §MX under D21, on `mx/head-to-head`. This entry is the AGREEMENT
+record. **No performance number is stated here and none was taken as a result**: the machine was under a
+concurrent mutation sweep throughout, the owner reserved it for the measurement, and D9's own rule ("performance
+claims are measured ... state load and flags") is not satisfiable under contention. The measurement plan is §7.
+
+**The rule this package ran under, and what it actually opened.** D11 forbids sharing code with SwapEngine in
+either direction; D21 permits building and running it as a black box and reading its public interface "only as
+far as needed to feed it the same bundle"; D37 permits reading its harvested conventions as data. Opened: its
+`README.md`, `baselines/baselines.json` (the metric descriptions), `conventions/conventions.json` (D37, already
+imported), `api/api_surface.py` (the API descriptor that generates its JSON dispatch and bindings — the public
+interface D21 names), `bench/fixtures/sofr_bundle.json` (one committed example of that interface's input), and
+directory listings. **Not opened: any `.cpp` or `.hpp`, anywhere in that checkout**, including
+`bench/risk_bench.cpp`. Nothing derived from it is in this repository. Executed: `build/bench/risk_bench`,
+`build/bench/curve_build_bench` (`--benchmark_list_tests` and one short run each, to read what they report) and
+`build/api/swaps_api_cli`. Its checkout was not modified.
+
+**1. The comparison had to change direction, and D21 already anticipated which way.** SwapEngine's own risk
+metric (`sofr_23k_risk_ladder_23q_book9`) is a 23-knot USD SOFR curve — 6 FOMC meeting dates flat-forward plus 17
+spline knots, 23 instruments of 1M-averaged and 3M-compounded SOFR futures and OIS to 30Y, a 9-swap book, eval
+2026-07-08. Reproducing THAT in Epykos needs its fixture's quotes, its exact meeting dates and its spline, and
+that fixture is defined in `bench/risk_bench.cpp` — the line. So the comparison runs the other way, which is
+exactly what D21's wording contemplates: **we write the bundle and feed it to them.** `bench/compare/README.md`
+states clause by clause what is and is not matched; that table, not this paragraph, is the authority.
+
+**2. The fixture: `include/epykos/fixtures/compare_ois.hpp` + `src/fixtures/compare_ois_e0.cpp`** (test-only,
+D28; an E0 TU per D25). One USD SOFR OIS curve; sixteen fixed-vs-compounded-SOFR OIS calibration instruments,
+par-rate quoted, at one year through ten years annually then twelve, fifteen, twenty, twenty-five, thirty and
+forty years; sixteen knots at those instruments' own maturities, so the block is **square** and neither side
+needs a pseudo-inverse or a regulariser; a book of sixteen, sixty-four or two hundred and fifty-six OIS trades at
+off-market rates; no seasoned trades and an EMPTY fixings history, so the book is a function of the curve alone.
+Built from this repository's own `blueprints/` through the real `build_calibration_set` / `CurveSet::calibrate` /
+`ImplicitProgram` path; the `CurveDefinition` is constructed in code rather than committed under
+`blueprints/curves/`, because it is a comparison artefact and not a curve the desk problem calibrates.
+
+**3. The load-bearing choice is the curve family, and it was MEASURED, not assumed.** Both sides are log DF
+piecewise linear on {0, knots...} — equivalently, piecewise-constant instantaneous forward — so the discount
+factor at every time is pinned by the knot values alone and neither engine's interpolation has to be taken on
+trust. On our side that is `{scheme: linear, variable: logdf}`. On theirs, the bundle JSON carries NO scheme
+field, so the scheme was determined by black-box probing: with every knot in the bundle's `meeting` region and
+`back` left empty, the closed form `DF(t) = exp(-Σ fᵢ Δtᵢ)` reproduces its sampled discount factors to
+**0.000e+00** relative error across 101 sample times (with knots split between `meeting` and `back`, the same
+hypothesis misses by 5.4e-3 and a linear-zero hypothesis by 5.9e-2, so the identification is sharp).
+
+**4. The exchange form.** `fixtures::compare_ois_exchange_json` writes the curve, the calibration instruments and
+the book as year fractions from the valuation date on ACT/365F curve time and nothing else — no calendar, day
+count, index or scheme name is needed to reprice it. `tools/compare/compare_ois` writes it alongside this
+engine's own answers; `scripts/compare_swapengine.py` maps it onto the other engine's request schema and diffs
+the two answer sets, exiting non-zero on any disagreement. That request schema was established by probing the
+CLI's own error messages (`book: every typed trade needs 'index'`, `... needs 'pay'`, `... needs a 'csa'
+(collateral_currency) or an explicit 'discount_index'`, `curve_roles has no entry for trade index`), not by
+reading its codec. An independent confirmation that the two conventions layers agree fell out of it: the coupon
+times this engine generates for a spot-start annual USD SOFR OIS — `t_start` 0.005479452054794521, `t_end`
+1.010958904109589, `t_pay` 1.0164383561643835, `tau` 1.0194444444444444 — are digit-for-digit the ones in their
+committed bundle example.
+
+**5. Agreement (fingerprint d448afd70180, `release`, Apple clang 21, `-O3 -march=x86-64-v3 -fno-math-errno`).**
+Worst relative disagreement over five configurations — two valuation dates (2026-09-23, 2027-03-15), three quote
+noise levels (0, 1.0, 2.5 bp) and four book sizes (16, 64, 256 trades, and 16 priced one trade per request):
+
+| quantity | n | worst relative | tolerance |
+|---|---|---|---|
+| discount factor, sampled to the last knot | 200 per run | 5.832e-13 | 1e-12 |
+| model par rate of each calibration instrument | 16 | 3.963e-14 | 1e-11 |
+| book NPV (relative to the book's gross scale) | 1 | 1.542e-12 | 1e-10 |
+| per-trade NPV | 16 | 2.558e-12 | 1e-10 |
+| **O3 ladder d(book PV)/d(quote)** (relative to its own ∞-norm) | 16 | **2.747e-13** | 1e-9 |
+
+Both sides converge: theirs `rank_deficiency` 0 in 4–6 iterations, ours ‖Jᵀr‖∞ between 1.86e-15 and 4.16e-15.
+The per-trade row is the one that matters most for method, because their book trades are NOT given as times:
+they are given by index and dates and their schedules are regenerated by their own conventions. Agreement to
+2.6e-12 on every trade individually is what turns "the conventions should match, both came from the same
+research" into a measurement. **Stage 1 passes: the two engines compute the same quantities.**
+
+**6. Four asymmetries found, all recorded in `bench/compare/README.md` §4 rather than smoothed over. Three
+favour the other engine and one favours this one; none is left implicit.**
+
+  (a) **The compounded coupon's representation, and this one is large and not in our favour.** This engine
+  evaluates the OIS float coupon as the daily product over its projected observation days — **49,091** of them in
+  the sixteen calibration instruments and **45,851** more in a sixteen-trade book (those are RECORDED days; the
+  book's are then largely shared away by the E0 passes — see (c) — so 45,851 is not the book's cost, and the
+  calibration side's 49,091 are what dominate). The other engine is given, and
+  can only be given, one telescoped sub-period per accrual: 197 coupon-periods on the calibration side, a ratio
+  of work of about 250:1 for the same answer. The two are algebraically equal for the plain observation method,
+  which is why the numbers agree at all. Handing them the daily decomposition instead was tried and **does not
+  work**: splitting one observation period into equal sub-periods changes their calibrated curve (one sub-period
+  over [0,1] gives DF(1) = 0.961538461538461 and the par rate exactly; two equal sub-periods give
+  0.961168781237985; four give 0.960980344482816), so their `obs` sub-period list is not a telescoping product of
+  discount-factor ratios and cannot carry our daily ACT/360 semantics. Finding out what it is would mean reading
+  their source. `--daily` is kept as the evidence for that: it reports the disagreement, exits 1, and no timing
+  will be quoted from it. **The consequence for MX is that the two engines can be made to agree on the answer but
+  cannot be made to do the same arithmetic, and any ratio must be read with that in front of it.**
+
+  This is also the first direct evidence on `PRIOR_ART.md` §2's four named fast paths, and it sharpens one of
+  them. `DESIGN.md` §7's table maps "identity sub-periods" to **R3, elide trivial maps**, whose kill-path column
+  is `sub_is_identity` and which finds 0 sites on the M1 book and 0 on Stage A. Checked rather than assumed:
+  R3 as built merges domains across *length-1 segments and identity gathers* — a STRUCTURAL elision of a
+  sub-period layer that has only one member. What the other engine does is a different operation: it collapses
+  N consecutive daily sub-periods into one by the ALGEBRAIC identity Π DF(tᵢ)/DF(tᵢ₊₁) = DF(t₀)/DF(t_N), and it
+  does it at the input, before any pricing graph exists. Every one of R1–R7 plus fma-contraction is a structural
+  or planner rewrite over the domain IR — fold uniform columns, bucket rows, elide trivial maps, push unary ops
+  through gathers, group formation, materialisation boundaries, block `linmap`, fma contraction — and **none of
+  them is an algebraic identity over a scan domain's recurrence.** So "R3 finds no sites" was never evidence
+  that there was nothing there to find; it is evidence that the rule set cannot express the thing. That is a
+  rule-set gap, not a search failure, and it is the first of the four fast paths for which the distinction has
+  been measured rather than inferred.
+
+  (b) **Jacobian reuse.** Every `ImplicitProgram::adjoint` call re-solves the block and builds its 16×16
+  calibration Jacobian before the IFT (`jacobians=1` in the bench counters), while their `risk_us` is taken on an
+  already-calibrated curve that reuses its calibration Jacobian. `BM_LadderChord` asks for the chord policy to
+  close this and does not — the factorisation is still built once per call — so the bench reports the chord, warm
+  and cold rows separately and the difference between them is the Jacobian, stated rather than argued away.
+
+  (c) **The book is stub-free, which is forced, and it therefore shares structure — and this
+  asymmetry runs the OTHER way, in our favour.** Every book trade spot-starts on a whole annual
+  grid. Give the trades a forward start that is not a whole number of years and they acquire a
+  front stub and the two engines stop agreeing: measured at a 360-day maximum offset, book NPV
+  and the ladder go off by 1e-3 to 1e-4 relative while the curve still matches to 5.832e-13,
+  which localises the disagreement to the stub and nothing else. Their `USD-SOFR-OIS` conventions
+  entry states no stub rule, ours states `ShortFront`, and no trade-level override exists (tried
+  and silently ignored: `payment_lag`, `spot_lag`, `frequency`, `day_count`, `bdc`, `calendar`,
+  `stub`, `convention`). A stub-free book is necessarily built on ONE annual grid, so its trades
+  share coupon structure and the E0 passes collapse them: a 256-trade book is 92,534 tape nodes
+  against 80,581 for no book at all, about 47 nodes per trade, where the distinct-start book
+  costs about 125. **Our book-side cost is understated relative to a real desk book**, and the
+  fixture is calibration-dominated besides (80,581 of 83,758 nodes at sixteen trades are the
+  curve), so the ladder ratio is mostly a curve-side comparison.
+  `CompareOisOptions::max_start_offset_days` is the knob that demonstrates it, defaults to 0, and
+  nothing should set it.
+
+  (d) **Extrapolation beyond the last knot differs.** Inside `[0, last knot]` the two curves are the same
+  function of the knots. Beyond it this engine holds the variable flat (log DF constant, forward zero) and theirs
+  continues the last forward. The comparison is sound only because nothing in the fixture is priced beyond the
+  last knot; `tests/compare/ois_test.cpp` pins both engine-side behaviours AND walks every coupon, observation
+  day and payment date of every calibration instrument and every book trade to assert none exceeds it. Found by
+  that test failing when it was first written against the wrong expectation, not by inspection.
+
+**7. What is gated in CI, and what is scheduled.** `tests/compare/ois_test.cpp` (ctest `compare_ois_test`, 5
+tests, 0.47 s) gates this engine's side alone and needs no second checkout: squareness, O1 recovery of the
+generating curve to 1e-12 from a flat start, the log-DF-piecewise-linear property and both extrapolations, the
+"nothing priced beyond the last knot" condition, the O3 ladder against bump-and-recalibrate (worst **1.897e-09**
+relative, gate 1e-6), and the exchange file's round-trip. The cross-engine script is not a ctest and never will
+be. **Deferred to a reserved machine:** `bench/run.sh build/release/bench/compare_ois_ladder_bench` (the chord,
+warm, cold, evaluate and build rows at 16, 64 and 256 trades) against repeated `risk_us` samples from their CLI
+on the identical exchange file, both sides' load recorded before and after, per D29. Informational only (D9),
+and it is the ratio §6(a) governs.

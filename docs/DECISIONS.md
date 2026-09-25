@@ -2737,13 +2737,26 @@ fingerprint `d448afd70180`, `tools/egraph_scale/egraph_scale --extract --lane-ti
 
 **Result: the ladder is byte-identical to D63's own table, which was measured without the R2 fix present.**
 
-| trades | D62 (neither fix) | D63's table (cost model only) | this run (BOTH fixes) | delta from D63 |
-|---|---|---|---|---|
-| 60 | 0.999707 | 0.996450 | **0.996450** | 0 |
-| 250 | 0.999583 | 0.995837 | **0.995837** | 0 |
-| 500 | 0.999459 | 0.995184 | **0.995184** | 0 |
-| 1,000 | 0.999221 | 0.994132 | **0.994132** | 0 |
-| 2,000 | 0.999055 | 0.994770 | **0.994770** | 0 |
+**AMENDED 2026-09-25 by this entry's author, in place and dated.** The table below was measured on `aa6643d`.
+D63's package then landed one more code commit, `fdd07a5` ("fit at the lane width the interpreter really plans
+with" — six of 21 calibration captures had been fitted against a plan the interpreter never ran, D63's own
+largest single correction), which moved every rung. The ORIGINAL columns are kept because the zero-delta
+comparison is the point of this entry and it was made against D63's then-current table. Both ladders are
+re-measured below on the current tip. **The conclusion is unchanged and in fact reconfirmed at the new
+coefficients: the delta attributable to the R2 package is still exactly zero at every size.**
+
+| trades | D62 (neither fix) | on `aa6643d`: D63 table / this run | on `59459cd`, after `fdd07a5`: D63 §4 / re-run here |
+|---|---|---|---|
+| 60 | 0.999707 | 0.996450 / **0.996450** | 0.994861 / **0.994861** |
+| 250 | 0.999583 | 0.995837 / **0.995837** | 0.993661 / **0.993661** |
+| 500 | 0.999459 | 0.995184 / **0.995184** | 0.992365 / **0.992365** |
+| 1,000 | 0.999221 | 0.994132 / **0.994132** | 0.990441 / **0.990441** |
+| 2,000 | 0.999055 | 0.994770 / **0.994770** | 0.991029 / **0.991029** |
+
+Every rung re-run with `tools/egraph_scale/egraph_scale --extract --lane-tile 8 --fingerprint d448afd70180` on
+`59459cd`, release, Apple clang 21, each printing `fitted=LOADED`. Delta from D63's own table: 0 at all five
+sizes, on both trees. The predicted gain is now 0.51%-0.96% rather than 0.35%-0.59%; **it is still noise**, and
+D68 §5 supersedes the question entirely by measuring that the whole plan stage is worth 0.08% of this problem.
 
 Extracted history, every size: `r5.group_formation` x2-4, `r6.materialise_boundaries`,
 `planner.reduction_fusion`, `planner.fused_pairs`. **Neither `r1.fold_uniform_columns` nor `r2.bucket_rows`

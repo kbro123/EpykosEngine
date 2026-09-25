@@ -3635,7 +3635,8 @@ unmerged): that entry gives each mutant a recorded catching gate, and this one's
 `tests/verify/oracle_truth_test.cpp`.
 
 One of the four new test files joins D33's mutation gate set by name (`verify_oracle_truth_test`, via `verify`) and
-was kept cheap for it — under 0.01 s, run once per mutant. `scalar_wide_test` does not, and that is deliberate: it
+was kept cheap for it — under 0.01 s, run once per mutant. **The registry is therefore 51 mutants over 58 gate
+tests**, from 50 over 57: counted by applying D33's regex to `ctest -N` on this tree, not recalled. `scalar_wide_test` does not, and that is deliberate: it
 was `wide_e0_test.cpp` until §4a retired the convention, and a new file should not join a convention that is being
 retired (§8 below). It catches no mutant, so nothing is lost. The two measurement files do not match the regex
 either (`maths_m1_oracle_error_test`, `stage_a_oracle_error_test`); they cost 5.4 s and 91 s and are measurements,

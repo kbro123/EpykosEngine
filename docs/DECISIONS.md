@@ -3266,6 +3266,19 @@ the second that only the ubuntu jobs could have caught.
 
 No gate and no mutant: this entry adds no engine line to mutate and changes no decision any program makes.
 `ctest --preset release` **111/111** and `--preset reference` **111/111**, 0 failed each, on this tree. The
-registry stays at 50 mutants over 57 gate tests, unswept here because no file this entry touches is under
-`src/` or `include/` at all. No SwapEngine file opened. No file under `include/epykos/`, `src/` or `tests/`
-touched.
+registry stays at 50 mutants over 57 gate tests, unswept locally here because no file this entry touches is under
+`src/` or `include/` at all — CI's ubuntu mutation job runs the merged registry in full and did. No SwapEngine
+file opened. No file under `include/epykos/`, `src/` or `tests/` touched.
+
+**CI: `ci_green` = true, all four jobs, twice.** On `dffc0c8`, the commit carrying this entry's only code — the
+tool, the `getloadavg` fix and the result record — run
+<https://github.com/kbro123/EpykosEngine/actions/runs/36081853231>: ubuntu-latest/release, ubuntu-latest/reference,
+ubuntu-latest/mutation and macos-latest/release all **success**. Re-confirmed on `b948244`, this package's last
+commit, run <https://github.com/kbro123/EpykosEngine/actions/runs/36082611765>, **success** on all four again. The
+two ubuntu compile jobs are the ones that matter for the portability point above: they are the only GCC on this
+project, and they built this TU.
+
+**One note on the ladder numbers quoted just above, because the branch moved while this entry was being written.**
+`fdd07a5` ("fit at the lane width the interpreter really plans with", D63's own (d2) fix) is an ancestor of this
+package's base `581b8e9`, so it was present for every measurement here; the 0.994861 / 0.991029 above are
+post-`Lt`-fix figures and match D63 §4's own amended table, not D67's superseded one. Checked rather than assumed.

@@ -1,33 +1,22 @@
-// EpykosEngine — name tables for the term-rewriting DESIGN headers (P1, D73).
+// EpykosEngine — name tables for the symbolic-algebraic-reduction DESIGN headers (P1, D73).
 //
-// This is the ONLY .cpp the term-rewriting design package ships, and it deliberately contains no
-// design logic: three `to_string` tables, matching the convention every other enum in the
-// repository follows (tape/op.hpp, rewrite/rule.hpp). It exists so that the enumerations are
-// linkable and so `tests/rewrite/term_interface_test.cpp` can assert that every `Axiom` and every
-// `RecurrenceClass` has a name — a cheap guard against the enum in the header and the identity
-// table in `docs/TERM_REWRITING.md` §3 drifting apart, which is the most likely way a
-// design-only package rots before it is implemented.
+// This is the ONLY .cpp the package ships and it contains no design logic: five `to_string`
+// tables, matching the convention every other enum in the repository follows. It exists so the
+// enumerations are linkable and so `tests/algebra/interface_test.cpp` can assert every `Axiom`
+// and `RecurrenceClass` has a name — a cheap guard against the enum and the identity table in
+// `docs/TERM_REWRITING.md` §3 drifting apart, which is the most likely way a design-only package
+// rots before it is implemented.
 //
-// Everything else the headers declare is intentionally undefined: there is no implementation yet
-// and there is not meant to be one until the interface has been reviewed.
+// Everything else the headers declare is intentionally undefined: there is no implementation and
+// there is not meant to be one until the interface has been reviewed.
 
-#include "epykos/optimise/term_egraph.hpp"
-#include "epykos/optimise/term_extract.hpp"
-#include "epykos/rewrite/error_model.hpp"
-#include "epykos/rewrite/recurrence.hpp"
-#include "epykos/rewrite/term_rule.hpp"
+#include "epykos/algebra/egraph.hpp"
+#include "epykos/algebra/error.hpp"
+#include "epykos/algebra/recurrence.hpp"
+#include "epykos/algebra/reduce.hpp"
+#include "epykos/algebra/rule.hpp"
 
-namespace epykos::rewrite {
-
-const char* to_string(OutputClass c) noexcept {
-  switch (c) {
-    case OutputClass::Valuation: return "valuation";
-    case OutputClass::Sensitivity: return "sensitivity";
-    case OutputClass::Diagnostic: return "diagnostic";
-    case OutputClass::Count_: break;
-  }
-  return "?";
-}
+namespace epykos::algebra {
 
 const char* to_string(ExactnessHint h) noexcept {
   switch (h) {
@@ -35,6 +24,16 @@ const char* to_string(ExactnessHint h) noexcept {
     case ExactnessHint::Exact: return "exact";
     case ExactnessHint::ExactGivenCondition: return "exact_given_condition";
     case ExactnessHint::Inexact: return "inexact";
+  }
+  return "?";
+}
+
+const char* to_string(OutputClass c) noexcept {
+  switch (c) {
+    case OutputClass::Valuation: return "valuation";
+    case OutputClass::Sensitivity: return "sensitivity";
+    case OutputClass::Diagnostic: return "diagnostic";
+    case OutputClass::Count_: break;
   }
   return "?";
 }
@@ -48,6 +47,8 @@ const char* to_string(PathKind p) noexcept {
     case PathKind::Adjoint: return "adjoint";
     case PathKind::ForwardDual: return "forward_dual";
     case PathKind::Oracle: return "oracle";
+    case PathKind::BeforeReduction: return "before_reduction";
+    case PathKind::AfterReduction: return "after_reduction";
   }
   return "?";
 }
@@ -60,6 +61,22 @@ const char* to_string(RecurrenceClass c) noexcept {
     case RecurrenceClass::Arithmetic: return "arithmetic";
     case RecurrenceClass::LinearConstantCoefficient: return "linear_constant_coefficient";
     case RecurrenceClass::Count_: break;
+  }
+  return "?";
+}
+
+const char* to_string(Closure c) noexcept {
+  switch (c) {
+    case Closure::Endpoints: return "endpoints";
+    case Closure::PerStep: return "per_step";
+  }
+  return "?";
+}
+
+const char* to_string(CostMetric m) noexcept {
+  switch (m) {
+    case CostMetric::WeightedNodes: return "weighted_nodes";
+    case CostMetric::InferAndEstimate: return "infer_and_estimate";
   }
   return "?";
 }
@@ -80,6 +97,7 @@ const char* to_string(Axiom a) noexcept {
     case Axiom::SubSelf: return "sub_self";
     case Axiom::DivSelf: return "div_self";
     case Axiom::AffineDropZeroCoef: return "affine_drop_zero_coef";
+    case Axiom::FoldUntainted: return "fold_untainted";
     case Axiom::AddAssoc: return "add_assoc";
     case Axiom::MulAssoc: return "mul_assoc";
     case Axiom::MulDistribAdd: return "mul_distrib_add";
@@ -96,23 +114,9 @@ const char* to_string(Axiom a) noexcept {
     case Axiom::LogExp: return "log_exp";
     case Axiom::SqrtProduct: return "sqrt_product";
     case Axiom::SumFactorCommon: return "sum_factor_common";
-    case Axiom::GatherPushUnary: return "gather_push_unary";
-    case Axiom::GatherPushBinary: return "gather_push_binary";
     case Axiom::Count_: break;
   }
   return "?";
 }
 
-}  // namespace epykos::rewrite
-
-namespace epykos::optimise {
-
-const char* to_string(PlanningMode m) noexcept {
-  switch (m) {
-    case PlanningMode::InSearch: return "in_search";
-    case PlanningMode::PostExtractionPass: return "post_extraction_pass";
-  }
-  return "?";
-}
-
-}  // namespace epykos::optimise
+}  // namespace epykos::algebra

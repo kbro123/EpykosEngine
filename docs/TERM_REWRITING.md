@@ -1,223 +1,223 @@
-# TERM_REWRITING — replacing a term instead of a program
+# TERM_REWRITING — symbolic algebraic reduction on the tape
 
-Design package P1, 2026-09-25. Implements `docs/PRINCIPLES.md` §8 item 2 ("Term-level rewriting: a
-proposal that replaces a sub-term, e-classes over terms") and §8 item 3 (the identity set and the
-recurrence rule kind of §2a). Decision entry: **D73**.
+Design package P1, 2026-09-25. Implements `docs/PRINCIPLES.md` §8 item 2 ("a proposal that replaces
+a sub-term, e-classes over terms") and §8 item 3 (the identity set and the recurrence rule kind of
+§2a). Decision entry: **D73**.
 
-> **Written against `PRINCIPLES.md` §4 as amended at `f8849b4` (2026-09-25), which retires
-> bit-identity as a contract anywhere.** Two tiers and a test, not three: structural is exact
-> because it is a graph identity; mathematical is characterised error against the oracle and now
-> covers every execution path too; execution is not a tier. Nothing in this design admits a rewrite
-> *because* it preserves bits. §3.6 is what that retirement buys, measured. §7.4 is the open
-> question the owner has not answered — whether the layout rules stay in the search or become a
-> post-extraction pass — designed both ways, with a recommendation.
+> **This is a DESIGN. Nothing here is implemented.** The deliverable is this document plus interface
+> headers — `include/epykos/algebra/{term,rule,error,recurrence,egraph,reduce}.hpp` and
+> `include/epykos/ir/analysis.hpp` — so the shape can be reviewed before roughly six thousand lines
+> are written against it. One `.cpp` ships (`src/algebra/names.cpp`, six `to_string` tables) so the
+> enumerations are linkable and testable. No existing rule, pass, cost model or e-graph is touched.
 
-**This is a DESIGN. Nothing here is implemented.** The deliverable is this document plus interface
-headers — `include/epykos/rewrite/{term,term_rule,error_model,recurrence}.hpp` and
-`include/epykos/optimise/{term_egraph,term_extract}.hpp` — so that the shape can be reviewed
-before roughly six thousand lines are written against it. One `.cpp` ships (`src/rewrite/term_names.cpp`,
-three `to_string` tables) so the enumerations are linkable and testable; there is no other code.
+> **Written against `PRINCIPLES.md` §4 as amended at `f8849b4`, which retires bit-identity as a
+> contract anywhere.** Two tiers and a test: structural is exact because it is a graph identity;
+> mathematical is characterised error against the oracle and now covers every execution path too.
+> Nothing here admits a rewrite *because* it preserves bits. §3.6 is what that retirement buys,
+> measured. The oracle is real as of today (`epykos::Wide`, D72), and §5 is written against its
+> numbers rather than against a hypothesis.
 
 Throughout, **design** means a proposed mechanism, **assertion** means a claim I have not measured,
-and **measured** means a number taken from this repository's own records with its citation. §8
-separates them again at the end, and names the experiments.
+and **measured** means a number from this repository's own records with its citation. §9 separates
+them again and §8 names the experiments.
 
 ---
 
 ## 0. The one-paragraph summary
 
-A rewrite stops returning an `ir::Program` and starts returning a replacement for one **term** — a
-sub-DAG of one domain's `Group`, denoting one scalar per row of that domain. E-classes are over
-terms, anchored to a domain, with gathers as an explicit index-map term-former that rules (not
-congruence) commute across. The identity set is thirty-two named axioms over the existing twenty
-ops, classified three ways by exactness, with `Op::Sum` and `Op::Affine` deliberately excluded from
-associative-commutative matching. The recurrence kind of §2a turns out **not** to be a term rule at
-all — it restructures domains, so it fits the existing `Rule` interface, has five sites on the whole
-Stage A tape, and can be attempted *before* the term layer rather than after it. Extraction
-minimises cost subject to a per-output-class error budget, composing error by the adjoint the engine
-already has, because ulp counts do not compose and adjoint-weighted absolute perturbations do.
-Saturation is bounded by four mechanisms that between them replace D62's `RefirePolicy`, whose
-completeness loss this design recovers. The seven layout rules are wrapped, not ported, and where
-they *run* — inside the search or after it — is designed both ways in §7.4.
+**The term graph already exists and it is the tape.** `tape/tape.hpp` is a straight-line program in
+topological order, already hash-consed by `cse`, already rewritten in place by `tape/passes.cpp`,
+and `affine_collapse` is already an algebraic simplification on it. So this package adds a stage:
 
-And one finding that outranks all of it: **the ~48% of Stage A where the 250:1 telescoping win
-lives is code no rule is applied to.** §8.2.
+```
+record -> tape passes -> SYMBOLIC ALGEBRAIC REDUCTION -> ir::infer -> plan -> execute
+```
+
+A rewrite replaces one tape node's definition. E-classes are over tape nodes, which is the textbook
+case. The identity set is thirty axioms over the existing twenty ops, in three buckets, with
+`Op::Sum` and `Op::Affine` deliberately excluded from associative-commutative matching. The
+recurrence kind of §2a proves a telescope by **node-id identity** — `cse` has already merged equal
+computations, so "step k's denominator is step k+1's numerator" is an integer comparison, not a
+tolerance. Extraction minimises cost subject to a per-output-class error budget, composing error by
+the adjoint the engine already has. Saturation is bounded by four mechanisms, of which the load-
+bearing one is saturating over one representative per **shape class** — the same deep-hash partition
+that turns 517,036 tape nodes into 67 domains. Nothing below the stage changes: inference, planning
+and execution receive a smaller tape and run exactly as they do now, and with an empty rule set the
+stage is the identity.
+
+Two findings outrank the design, and both are in §8: the recurrence work does not depend on the
+e-graph and should be attempted first (§8.1), and **the ~48% of Stage A where the telescoping win
+lives is code no rule is applied to** (§8.2).
 
 ---
 
-## 1. What replaces `Proposal`
+## 0.1 What this document previously said, and why it was wrong
 
-### 1.1 What a term is, in this IR
+The first two versions of this design targeted **`ir::Program`** and proposed a term-level e-graph
+over it, replacing `rewrite::Proposal`, `MatchSite` and `optimise::EGraph`. That was one stage too
+late, and recording the correction is more useful than pretending it was always obvious.
 
-The domain IR is not a term DAG, and pretending otherwise is the fastest way to get this wrong.
-`ir::Program` is a list of `Domain`s, each with a `Group`: a short list of `Step`s evaluated once per
-**row**. A `Step`'s operands are `Slot`s — an earlier Step of the same group, a `Literal` (uniform
-across rows), a `Column` (one double per row), a `Gather` (one value id per row), a `Segment` (a
-per-row variadic member list), or an `Input`.
+**Why it was wrong.** `ir::infer` groups structurally identical nodes into classes and domains, so a
+step applies to every row of a domain at once. At that layer there are no terms left to rewrite,
+only arrays — which is the real reason `Proposal` has to return a whole `ir::Program`. **That is not
+a flaw in the interface. It is the interface being correct for the layer it sits at.** `Proposal`,
+`MatchSite` and the program tier are not replaced by this package and need no apology.
 
-So a group's steps already form a small DAG, and the definition falls out:
+**What the wrong layer forced into the design, all of which is now deleted:**
 
-> A **term** is the sub-DAG rooted at one `Step` of one `Group`. It denotes, for each row *r* of that
-> group's domain, one scalar. The domain is the term's **anchor**: a term is a row-indexed *vector*,
-> not a scalar.
+| carried at the IR layer | at the tape |
+|---|---|
+| an **anchor domain** in every e-node's identity, because a term was a row-indexed *vector* and two structurally identical terms in two domains denoted different values | gone: a node is one scalar |
+| **row-universality** — "a term rewrite applies to every row and a rule can never rewrite a subset" — and the whole argument that row-subset algebra must be a domain split first | gone as a constraint. It reappears as a driver *optimisation* a rule opts into (§2.3), which is a strictly better place for it |
+| **index maps**: a `Gather` is a per-row value id, so crossing a domain boundary meant composing with an index map, and `gather_push_unary` / `gather_push_binary` had to exist as rules with a quarantined saturation phase | gone: an operand is a node id. Two axioms deleted, one saturation bound deleted |
+| a **three-tier migration** (term / program / plan) and a wrapper strategy for the seven layout rules | gone: one new stage, one call site, nothing below it changes |
 
-Addressing is therefore complete at `TermRef{domain, step}` — steps are topological, so a step index
-names exactly one sub-DAG. There is no row index anywhere in the interface, and §1.3 is why.
+**The one argument that has to be retracted rather than simplified.** The IR-layer draft argued
+tractability from the 517,036 → 67-domain collapse: "the sharing has already happened before the
+optimiser is reached, so the term graph is ~10³ nodes". At the tape layer **that collapse has not
+happened yet — it is the thing we run before**, and the seed is the full 517,036 nodes. §2.3 is the
+replacement argument, and it is weaker: it uses the same repetition, but as an *optimisation the
+driver applies* rather than as a property of the input.
+
+**What transferred unchanged**, because it was never about the layer: the error model and its
+adjoint-weighted composition (§5), the identity set minus the two gather axioms (§3), the refusal to
+AC-match `Op::Sum` (§3.4), the saturation bounds (§6), and both of §8's findings. The recurrence
+kind transferred and got *better*: at the IR layer it could not be a term rule at all, because a
+closed form has one value per chain while a scan domain has one row per step; at the tape a chain is
+a chain of nodes and collapsing it is ordinary (§4.1).
+
+---
+
+## 1. What a rewrite is, at the tape
+
+### 1.1 A term is a node
+
+`tape/tape.hpp`, in its own words: *"A Tape is a straight-line program in topological order: node i
+only reads nodes < i. Constants are leaves, one node per distinct bit pattern. Variadic operands
+live in a side array."* That is a term DAG. `cse` already hash-conses it — nodes with the same op,
+operands (commutative operands in canonical order) and constant bit pattern are merged — and
+`tape/passes.cpp` already rewrites it in place. `affine_collapse` is already an algebraic
+simplification on it, and per `docs/PRIOR_ART.md` it is what recovers SwapEngine's hand-built
+W-cache exactly, 857 rows.
+
+So there is nothing to invent: `TermRef == node_id`, and the term is the sub-DAG under it.
 
 ### 1.2 The replacement
 
-`rewrite::Proposal` holds an `std::optional<ir::Program>`. Every match clones, validates and
-serialises an entire program. `rewrite::TermRewrite` holds an e-class id and a `TermExpr`: a small
-node arena whose operands may be
+`algebra::Rewrite` is an e-class id plus an `Expr`: a small node arena whose operands may be other
+arena nodes, **e-classes the match bound** (pattern holes — `mul(a, add(b,c)) → add(mul(a,b),
+mul(a,c))` names a, b and c three times and materialises nothing), an existing node verbatim, or a
+new constant. New constants are interned through the tape's own one-node-per-bit-pattern rule, so
+`+0.0` and `-0.0` stay distinct exactly as `Tape::constant` makes them.
 
-- other nodes of the same arena,
-- **e-classes the match bound** (`ExprRefKind::Bound`) — the pattern holes, which is how a rewrite
-  *reuses* structure instead of copying it: `mul(a, add(b,c)) → add(mul(a,b), mul(a,c))` names `a`,
-  `b`, `c` three times and materialises nothing,
-- an existing `ir::Slot`, verbatim,
-- **new data** — `new_literals`, `new_columns`, `new_gathers`, `new_segments`.
+`site` and `replacement` are an **equality claim**, not an instruction: the driver unions them and
+keeps both. Extraction chooses later.
 
-That last bullet is not decoration. A closed form usually needs data that does not exist yet: the
-arithmetic-series collapse `Σ(a + kd) = na + d·n(n−1)/2` needs a per-row *k*, which is a Column. A
-replacement language that could only rearrange existing nodes could express exactly one of
-`PRINCIPLES.md` §2a's four recurrence classes. This is a requirement discovered by working §2a
-through, not a generality added for its own sake.
+### 1.3 What the layer gives, and what it takes away
 
-`site_class` and `replacement` are an **equality claim**, not an instruction. The driver unions
-them and keeps both forms — D49's intent and `rule.hpp` point 2's own words, now at the tier where
-they are affordable.
+**Gives: `Node::tainted`.** Computed at record time — "depends on an Input". An untainted sub-DAG is
+a compile-time constant and may be *folded at rewrite time*. That is a capability the IR layer does
+not have in this form, `affine_collapse` already keys on it, and it is why `fold_untainted` is in
+the axiom set and in `axiom_improves_accuracy`: replacing a computed value with its exact constant
+removes rounding as well as work.
 
-### 1.3 What a rewrite of one step means for the rows, and whether a subset is possible
+**Gives: cheap, exact structural side conditions.** `cse` means equal constants are *one node*, so
+"are these two coefficients equal?" is an integer comparison. §4.2 leans on this hard.
 
-**A term rewrite applies to every row of its anchor domain.** That is not a restriction the design
-adds; it is what a domain *is* — `ir::infer`'s isomorphism class, "`rows` instances of one op
-sequence". Rewriting step 3 of group 7 rewrites it for all 16,103 rows at once, and that is precisely
-why a term rewrite is cheap where a whole-program `Proposal` is not: one edit, one e-node, 16,103
-rows of effect.
+**Takes away: array-level side conditions.** At the IR layer, "x > 0 for every row" was a scan of a
+`std::vector<double>` sitting in the Program — exact, cheap, and *strong*. At the tape there is no
+array of values, only structure and constants, so `provably_positive` is weaker: it can discharge
+`exp(anything)`, `x*x`, a positive Const, and not much else. Conditional axioms (`log_product`,
+`sqrt_product`, `exp_log`) will fire less often here than the IR-layer draft assumed. That is a real
+cost of the placement, it is not recoverable at this layer, and §8.7 records it as an open risk.
 
-**A rule can never rewrite a subset of rows.** There is no row predicate in the interface, deliberately.
-A per-row conditional rewrite would turn one group into a branchy one and destroy the property the
-executor is built on (one kernel per (op, operand kinds, lane width); D27's whole kill-path result
-rests on it). A rewrite valid for only some rows must **first split the domain** so those rows become
-their own domain — which is `r2.bucket_rows`' job, a program-tier rule. Row-subset rewriting is
-expressible as *(program-tier split) then (term-tier rewrite)*, never as one term rewrite.
+### 1.4 Composing with the passes that already run
 
-This has a consequence worth stating because it will look like a limitation and is closer to a
-safety property: the term layer cannot fragment the domain partition. D65 measured what happens when
-something can — R2 without its structural floor turned the M1 book's 10 domains into 19,624 and the
-e-graph died in two rounds. The term layer structurally cannot do that.
+`standard_passes` is cse, dce, fold_sum, affine_collapse, dce. The stage runs after all of it:
 
-### 1.4 Side conditions are row-universal, and the IR can usually discharge them exactly
-
-Because a rewrite applies to every row, every side condition is universally quantified over rows.
-That sounds worse than it is. When *x* is a Column, "x > 0 for every row" is a scan of a
-`std::vector<double>` sitting in the `ir::Program` — exact, cheap, no sampling. When *x* is a
-Gather, it is a scan of the producing domain's Column. `TermView` exposes four such predicates
-(`provably_positive`, `provably_nonzero`, `provably_finite`, `provably_not_negative_zero`), each
-returning false for "not shown", never for "false".
-
-The price is that the proof is about **this recording**. A rewrite licensed by "every entry of
-column 3 is positive" is not valid for a different book. That is exactly what a recording compiler
-is entitled to assume — D47 already frames a `Program` as one recording — but it must be said out
-loud, because it means a cached compiled program is keyed to its recording and not to its blueprint.
+- **`cse` is this graph's hash-consing, already done.** Seeding from a post-cse tape means no two
+  seeded nodes are congruent, so the initial e-graph is already canonical. This is a real saving and
+  it is why the stage goes *after* the passes rather than replacing them.
+- **`dce` is how a win is realised.** Collapsing a chain does not delete the nodes it replaced; it
+  makes them unreachable. The stage ends by re-running cse then dce, and the measured shrink is the
+  deliverable.
+- **`fold_sum` and `affine_collapse` have already normalised the shapes rules match against**, which
+  is a convenience — a rule can expect `Sum`/`Affine` rather than left-deep Add chains. It is also a
+  hazard: `affine_collapse` has already rewritten `1 + f·w` into an `Affine` before the recurrence
+  classifier sees it, which is why (P1) in §4.2 says "modulo the affine rearrangement the recorder
+  and `affine_collapse` left behind". A classifier written against the un-collapsed shape will
+  match nothing, and that is the most likely way the first implementation fails.
 
 ---
 
-## 2. E-classes over terms
+## 2. E-classes over tape nodes
 
-### 2.1 Nodes, classes, congruence
+### 2.1 The ordinary case
 
-An e-node is `(op, child e-classes, leaf payload, anchor domain)`. An e-class is a set of e-nodes
-asserted equal. Hash-consing makes two nodes with equal content literally one node. Congruence is
-the usual closure: if `a ≡ a'` and `b ≡ b'` then `op(a,b) ≡ op(a',b')`, maintained by deferred
-canonicalisation — a whole round's matches are queued, then one `rebuild()` hash-conses and unions
-them all. That is the pattern `optimise::EGraph` already uses and D49 already documented (egg,
-Willsey et al. 2021); nothing about it is new here, only the thing it ranges over.
+An e-node is `(op, child e-classes, constant, variadic operands)`. An e-class is a set of e-nodes
+asserted equal. Hash-consing makes two nodes with equal content one node; congruence is the usual
+closure, maintained by deferred canonicalisation — a whole round's matches are queued, then one
+rebuild hash-conses and unions them all. That is egg's pattern (Willsey et al. 2021), it is what
+`optimise::EGraph` already does at its own layer, and none of it is novel here. **An e-graph over
+tape nodes is the ordinary thing rather than the exotic one**, which is the point: the interesting
+content of this package is the rules (§3), the recurrence proof (§4), the error model (§5) and the
+bounds (§6), not the graph.
 
-### 2.2 The anchor is part of a node's identity
+### 2.2 D62's mechanisms
 
-Two structurally identical terms in two different domains denote **different row vectors** and must
-not be unioned. `mul(col0, gather0)` in domain 3 and `mul(col0, gather0)` in domain 5 are the same
-*shape* — that is what `ir::infer`'s signature pass is for, and what the catalogue keys on (D55/D61)
-— but not the same *value*. Shape equality and value equality are different relations and this tier
-is about value equality.
+D62 built an application memo, representative-only matching and a re-firing policy around
+whole-`Program` e-nodes. At this layer:
 
-`TermEGraph::anchors_consistent()` is the invariant: every class has exactly one anchor. It is the
-one most likely to be broken by a careless cross-domain rule, so it is a gate, not a comment.
+- **The memo survives, re-keyed** to `(e-node, rule, binding)`. E-nodes are immutable under
+  hash-consing; *classes* merge, so a class-keyed memo would go unsound on the first union. Bindings
+  are canonicalised to representatives at lookup, so a merge costs redundant work, never wrong work.
+  Sound for exactly D62's reason: rules are pure.
+- **Representative-only matching is true by construction.** Hash-consing leaves no congruent
+  duplicate to skip.
+- **`RefirePolicy` is not needed and is not ported.** It existed to bound D62's cause (B) — *"k
+  independent local edits cost k whole clones and, over the rounds, 2^k of them, because this is a
+  whole-program-valued e-graph"*. At the tape, k independent edits are k choice points: O(k) nodes.
+  The completeness D62 booked away — *"any genuine optimum that needs two different structural
+  rewrites composed after both have already fired once is no longer reachable at all"* — is simply
+  not given up here. **The problem is bypassed rather than solved**, and D62's own note that "a real
+  term-level e-graph is the proper fix" is satisfied by moving layers, not by rebuilding that graph.
 
-### 2.3 How this interacts with the domain structure — and why it is tractable
+### 2.3 Scale: the honest version
 
-The instinct is that a term e-graph over the Stage A tape means 517,036 e-nodes. It does not.
+**Measured** (D44, M3-gate-1): the Stage A tape is **517,036 nodes** after the E0 passes, down from
+27,459,283 recorded. That is a large seed, and §0.1 records that the IR-layer draft's tractability
+argument does not transfer.
 
-**Measured** (D35, D44, D65): `ir::infer` turns those 517,036 tape nodes into **67 domains** (80
-after R2 and R1 fire) of a few `Step`s each. `ir::shape_string` switches to the `"<op>[<steps>]"`
-abbreviation only past 24 steps, and the Stage A group shapes on record are short —
-`exp(mul(neg(@0),$0))`, `div(sub(div(@0,@1),#0),$0)`, `mul(mul($0,@0),@1)`.
+The replacement argument uses the same repetition differently. The tape is repetitive — that is
+*why* `ir::infer` finds 67 domains in it — so the deep-hash partition puts those 517,036 nodes into
+a few hundred distinct **shapes**. The driver saturates over **one representative per shape class**
+and applies the winner to every member. A rule opts in with `applies_class_uniformly()`, which is
+true for every axiom in §3 because an axiom is a fact about a term's shape, and false for a rule
+whose side condition depends on a particular node's constants.
 
-**Assertion, following from that**: a term e-graph over the groups is on the order of a **thousand**
-e-nodes *before saturation* — roughly 80 groups × ~10 steps of root terms, plus their sub-terms — not
-half a million. The 517,036 : 67 collapse *is* the sharing, and it has already happened, in a pass
-that predates the optimiser.
+Two things are worth naming precisely:
 
-**That is the seed size, not the saturated size, and the difference is where this could still go
-wrong.** Equality saturation grows each class by the alternative forms it learns, and associativity
-plus distributivity over a ten-node group is exactly the shape that grows fastest. If a saturated
-class averages 50 nodes the graph is ~35k; at 500 it is ~350k and past
-`TermSaturationLimits::max_nodes`. Neither number is measured and I am not going to pretend
-otherwise. What *is* structural, and is the claim worth relying on, is the **shape** of the growth:
-it is (number of groups) × (per-group saturation), where the second factor depends on the rule set
-and the depth bound and **not** on the tape's 517,036 nodes. That decoupling is the property the
-whole-program e-graph did not have. §6 bounds the second factor; §8.3's experiment is what would put
-a number on it.
-
-This is the single fact that separates this design from the whole-program e-graph it replaces, and
-it is worth being precise about what it dissolves. D62's cause (B) was: *"k independent local edits
-on one node still clone the whole Program k times and then 2^k times over the rounds, because this
-is a whole-program-valued e-graph."* At the term tier, k independent edits are k choice points in
-one graph: **O(k) nodes, not O(2^k)**. The problem is not mitigated, it is gone.
-
-### 2.4 Gathers: the index map is part of the term, and commuting it is a rule
-
-A `Gather` slot names one value id per row, and a value id is globally `(domain, row)`. A row's value
-is its group's *last* step, so a gather into domain *p* always denotes "the root term of group *p*,
-re-indexed by this gather's index vector":
-
-```
-Gath(g, t)      the term t of the producing domain, observed at the rows g names
-```
-
-Congruence handles `Gath(g,t) ≡ Gath(g,t')` when `t ≡ t'`. It does **not** handle
-
-```
-Gath(g, f(t)) = f(Gath(g, t))      f elementwise
-```
-
-which is a genuine mathematical fact about an index map and an elementwise function. That is a
-**rule** — `r4a.push_unary_through_gathers`, generalised — and it is the bridge every cross-domain
-identity goes over. Getting this boundary right is load-bearing in both directions: fold it into
-congruence and the graph is unsound (it would equate terms with different index maps); leave it out
-entirely and no algebra ever crosses a domain boundary, which is where the discount factors live
-relative to the coupons that use them. §6.4 is why it is also the main explosion risk.
-
-### 2.5 D62's three mechanisms: which survive
-
-| D62 mechanism | fate at the term tier |
-|---|---|
-| **(1) application memo** | **Survives, re-keyed.** The key becomes `(e-NODE, rule, binding)`, not `(program node, rule, site)`. E-nodes are immutable under hash-consing; *classes* merge, so a class-keyed memo would go unsound the instant two classes union. Bindings are canonicalised to class representatives at lookup, so a merge makes the memo do redundant work at worst, never wrong work. Sound for exactly D62's reason: `TermRule::search`/`build` are pure. |
-| **(2) match only a class representative** | **Unnecessary — true by construction.** Hash-consing means there is no congruent duplicate node to skip. D49's flagged "Known limitation" (plan tiers keyed per node rather than per class) disappears with it at this tier. |
-| **(3) `RefirePolicy::NoFreshCrossRule`** | **Unnecessary, and should be deleted here.** It existed solely to bound cause (B). D62 booked its cost honestly: *"any genuine optimum that needs two different structural rewrites composed after both have already fired once is no longer reachable at all."* That completeness is **recovered**. Long mixed chains are the normal case for algebra — factor, then cancel, then contract — and are what equality saturation is for. |
-| **(4) `RefirePolicy::PipelineOrderedPlans`** | **Survives unchanged, in the plan tier, which this design does not touch.** §7.3. |
-
-The honest way to read that table: this package recovers one of the two completeness losses D62
-recorded and leaves the other exactly where it was.
+1. **This is the IR layer's row-universality, reappearing as a choice.** At the IR layer the domain
+   structure *forced* every rewrite to apply to every row. Here the driver *elects* to exploit the
+   same repetition, and a rule that cannot take it is matched node by node instead. Same physics,
+   better place to put it — and it is evidence that row-universality was never an artefact of the
+   IR layer but the structure of the problem.
+2. **The numbers are not measured and I am not going to pretend otherwise.** "A few hundred shapes"
+   is inferred from the 67-domain count, not counted. And what the graph saturates *to* is a
+   different question from what it seeds at: associativity and distributivity over a ten-node term
+   is the shape that grows fastest and nobody has run it. What *is* structural is that the size is
+   (number of shapes) × (per-shape saturation) and the second factor does not depend on 517,036.
+   §8.9 is the experiment that would put a number on both.
 
 ---
 
 ## 3. The identity set
 
-Thirty-two axioms, enumerated in `rewrite::Axiom` (term_rule.hpp) so that the list is readable in one
-place and a test can assert the enum and this table have not drifted apart
-(`tests/rewrite/term_interface_test.cpp`). Three buckets.
+Thirty axioms, enumerated in `algebra::Axiom` (rule.hpp) so the list is readable in one place and a
+test can assert the enum and this table have not drifted apart (`tests/algebra/interface_test.cpp`).
+Three buckets. Two axioms from the IR-layer draft are **gone, not deferred** — `gather_push_unary`
+and `gather_push_binary` — because the tape has no gathers; `r4a` remains a perfectly good IR-layer
+rule and is unaffected. One is **new**: `fold_untainted`, which only this layer makes available.
 
 **Read the buckets as a statement about floating-point behaviour, not about admissibility.** Since
 `PRINCIPLES.md` §4 retired bit-identity, an axiom in §3.1 has **no privilege** over one in §3.3:
@@ -238,9 +238,8 @@ a rounding one.
 | `div_one` | `div(x,1) = x` | Div | |
 | `select_same_arms` | `select(p,x,x) = x` | Select | |
 | `select_push_unary` | `f(select(p,a,b)) = select(p, f(a), f(b))` | Select + any unary | exact because `Select` *picks*; D5 records both arms regardless. Can be a pessimisation (two `exp`s) or an optimisation (hoisting) — the cost model decides, which is the point of putting it in an e-graph rather than a greedy pass |
-| `commute_add_mul` | operand order of `Add`, `Mul`, `CmpEq` | | `op_is_commutative` already asserts this bitwise, and D61 already canonicalises it in `catalogue::Signature` |
-| `gather_push_unary` | `gath(g, f(t)) = f(gath(g, t))` | Gather + any unary | exact: a gather *re-indexes*, it does not compute. `r4a` already declares this exact and is the precedent. What differs between the two sides is only how many rows `f` runs on — a cost question, which is exactly why it belongs in an e-graph rather than a greedy pass |
-| `gather_push_binary` | `gath(g, f(s,t)) = f(gath(g,s), gath(g,t))` | Gather + binary, **same g both sides** | same argument; the same-gather condition is structural, checked on the table, not a value condition |
+| `commute_add_mul` | operand order of `Add`, `Mul`, `CmpEq` | | `op_is_commutative` asserts this bitwise, and `cse` already canonicalises it on the tape |
+| `fold_untainted` | an untainted sub-DAG → one `Const` leaf | any | the tape's own gift: `Node::tainted` is computed at record time, so a sub-DAG that does not depend on an Input has a value *now*. Exact by construction (the constant IS the value), removes work **and** rounding, which is why it is in `axiom_improves_accuracy`. `affine_collapse` already keys on untaintedness; this generalises it |
 
 ### 3.2 Admissible only once a row-universal side condition is discharged
 
@@ -405,69 +404,89 @@ and costs nothing, because it is a graph identity with no arithmetic in it.
 
 ## 4. The recurrence rule kind (`PRINCIPLES.md` §2a)
 
-### 4.1 It is not a term rule, and that is the finding
+### 4.1 Where chain detection comes from — the main structural question in this design
 
-§2a asks for "a rule KIND it does not have: one that analyses a detected scan's step and recognises
-it as a member of a known recurrence class, rather than pattern-matching a term". Working the shape
-through, the kind it needs is **not term-level**:
+At the tape a chain is a chain of **nodes**, and collapsing it replaces a sub-DAG with a smaller
+sub-DAG. Ordinary. `ir::infer` then simply does not find a scan there, because there is no longer a
+chain to find. (The IR-layer draft concluded the recurrence kind could not be a term rule at all,
+because a scan domain has one row per *step* while a closed form has one value per *chain*; that was
+correct for that layer and is moot at this one. §0.1.)
 
-> A scan domain's rows are the **steps** of its chains (D41: chain-major, `chain_offsets`). The closed
-> form of a chain has one value per **chain**, not one per step. So collapsing a recurrence deletes
-> rows, changes a domain's row count, and re-points every gather that read it. That is a
-> **domain-level** edit — the same kind `r5.group_formation` and `r7.block_linmap` make — and it is
-> exactly what a term rewrite is defined not to do (§1.3).
+But the stage must know a chain is there, and the tape does not say. `Inference::detect_chains`
+(`src/ir/signature.cpp:408`) does exactly that job over tape nodes — and **it is not a function of
+the tape.** Audited: it runs as phase five of `Inference::run`, after `compute_uses`,
+`initial_boundaries`, `compute_deep` and `promote_shared`, and it both *reads* `boundary_` (it walks
+"stopping at boundaries", D41) and *writes* it (marking each chain step and the chain's initial
+value as boundaries, clearing the inner nodes). It is a function of **(tape, boundary set)** that
+**mutates the boundary set**. That coupling is the finding and everything else follows from it.
 
-So the recurrence kind slots into the **existing `rewrite::Rule` interface**, whole-Program `Proposal`
-and all. And that is fine, because `PRINCIPLES.md` §6 item 1's combinatorial objection does not apply
-to it: it has exactly **one site per scan domain**, and the full Stage A tape has **five** scan
-domains (**measured**, D35/D44). Five programs, not 10,111.
+The same prefix also produces the second thing the stage needs: the deep-hash partition that §2.3's
+class-uniform saturation rests on. Both wanted things come out of one place, which is why a clean
+answer exists.
 
-**Consequence for sequencing, and the owner should see it plainly:** `PRINCIPLES.md` §8 orders
-term-level rewriting (item 2) before the recurrence kind and telescoping (items 3 and 4). The
-recurrence kind does not depend on item 2 at all. Telescoping — the 250:1 worked example — can be
-attempted **first**, on the interface that already exists, and would then be the evidence that
-decides whether the term layer is worth its six thousand lines. §8.1.
+**Three options.**
+
+| | what | verdict |
+|---|---|---|
+| (a) | **Factor the prefix out** and let both consume it | **recommended**, in the cheap form below |
+| (b) | **Duplicate** a weaker detector using only use counts, not inference's promoted boundaries | rejected: it would find a *different* set of chains than `infer` will, with no test able to say which is right. D41's rules are subtle enough (a cut under an Add whose target is single-use is a reduction and never a scan; the carry searched at most four operands deep; three steps minimum) that a second implementation drifts |
+| (c) | **Run `ir::infer` twice** — once as analysis, rewrite, then again for real | correct and wasteful: Stage A inference is ~1.0 s of a 7.8 s record, and `Program` carries no node-id backlink, so mapping scan domains back to tape nodes needs new plumbing anyway. If plumbing is needed regardless, (a) is the better place for it |
+
+**The cheap form of (a), which `include/epykos/ir/analysis.hpp` proposes.** Do not refactor
+`Inference` into pieces. Add **one** entry point, `ir::analyse(tape)`, that runs the existing phases
+up to and including `detect_chains` and returns what they found, leaving `infer` byte-for-byte
+unchanged and still computing everything from scratch. `analyse` and `infer` then share an
+implementation by construction rather than by discipline.
+
+**There is no staleness risk**, and it is worth saying why: the stage *rewrites* the tape, after
+which `infer` recomputes uses, boundaries, hashes, chains and domains from the rewritten tape as it
+always has. The analysis is **advisory input to the rewriter**, never a contract the rewritten tape
+must honour. A chain the rewriter collapses is simply not there the second time.
+
+**What it costs.** One extra pass of the analysis prefix per compilation, plus the risk that a
+future change to `Inference`'s phase order silently changes what `analyse` returns. The second is
+the real one, and the mitigation is that it is the *same code*: a change that breaks `analyse`
+breaks `infer` too, and `infer` has M1/M3 round-trip gates on it.
 
 ### 4.2 How a match is PROVED rather than pattern-matched
 
-Shape matching is necessary and nowhere near sufficient. Take the class this engine was built for.
-`maths/swap/compounding.hpp` records
+`maths/swap/compounding.hpp` records, and says so in its own header:
 
 ```
 acc_{k+1} = acc_k · (1 + f_k·w_k),     f_k = (DF(t_rate_k) / DF(t_next_k) − 1) / τ_k
 ```
 
-and says in its own header that "with r_i = (DF(s_i)/DF(e_i) − 1)/τ_i it collapses to DF(s)/DF(e) on
-paper". *On paper.* Whether it collapses in **this recording** is three separate facts, and all three
-are decidable **exactly**, from integer and double tables the `ir::Program` already holds, with no
-sampling and no numerical experiment:
+*"with r_i = (DF(s_i)/DF(e_i) − 1)/τ_i it collapses to DF(s)/DF(e) on paper"*. On paper. Whether it
+collapses in **this recording** is three facts, all decidable exactly from the tape:
 
-- **(P1) Shape.** The scan group's step is `mul(carry, X)` and *X* reduces to `div(g_num, g_den)`
-  modulo the affine rearrangement the recorder left behind. Ordinary matching, and the weakest of
-  the three.
+- **(P1) Shape.** The step is `mul(carry, X)` and X reduces to `div(num, den)` modulo the affine
+  rearrangement the recorder and `affine_collapse` left behind (§1.4 — this is the part most likely
+  to be got wrong first). Ordinary matching, and the weakest of the three.
 
-- **(P2) The index condition — the telescope itself.** The factor must be a ratio of *consecutive*
-  terms of one indexed family: row *k*'s denominator must be row *k+1*'s numerator.
+- **(P2) The index condition — the telescope itself.** Step *k*'s denominator must be step *k+1*'s
+  numerator:
 
   ```
-  gathers[g_den].index[r] == gathers[g_num].index[r + 1]      for every row r inside a chain
+  denominator_node(step k) == numerator_node(step k + 1)
   ```
 
-  This is an equality of `std::int32_t` **value ids** in a table the program already holds. It is a
-  *proof*, not a pattern: it establishes that the two discount factors are literally the **same
-  recorded value**, so their ratio cancels exactly in ℝ. No numerics are involved and none can be
-  wrong.
+  **Identical node ids, not merely equal values.** `cse` has already merged every node with the same
+  op, operands and constant bit pattern, so if the two discount factors are the same computation
+  they *are* the same node, and the check is an integer comparison. This is cleaner than the
+  IR-layer form, which compared two gather index arrays, and cleaner than any numerical test could
+  be: it establishes that the ratio cancels exactly in ℝ **by identity rather than by tolerance**.
 
 - **(P3) The coefficient condition.** `1 + f_k·w_k` equals `DF_k/DF_{k+1}` only when the compounding
-  weight equals the forward's accrual, `w_k == τ_k`, for every row. These are two different Columns
-  (`ObsDay::weight` and `ObsDay::tau_rate`, `maths/instrument/tables.hpp`) and the check is a bitwise
-  comparison of two double vectors.
+  weight equals the forward's accrual, `w_k == τ_k`. These are two `Const` leaves per step
+  (`ObsDay::weight`, `ObsDay::tau_rate`) and — again because of `cse` — equal constants are *one
+  node*, so this too is an identity check.
 
-And one about the surroundings rather than the recurrence:
+- **(P4) Liveness** is a use count from `ir::Analysis::uses`: collapsing to endpoints is legal only
+  when nothing outside reads an intermediate step.
 
-- **(P4) Liveness.** Replacing 90 rows by 1 is legal only if nothing outside the domain reads an
-  intermediate row. Decidable by scanning every other domain's gather index arrays and the output
-  list.
+That all four obligations reduce to integer comparisons on a hash-consed graph is the single
+strongest argument for doing this at the tape. At the IR layer (P2) and (P3) were array scans; here
+`cse` has already done the work.
 
 ### 4.3 (P3) is not a formality — the Stage A book is a mix
 
@@ -535,21 +554,24 @@ their asymptotic win, and keeps the one that matters.**
 
 ### 4.5 What the rule emits
 
-Two closures, both offered whenever both are legal, because which one pays is the cost model's
-question and not the rule's:
+Two closures, both offered whenever both are legal, because which one pays is extraction's question
+and not the rule's:
 
-- **`ChainFinal`** — one row per chain replaces the chain's steps. Requires (P4). The 250:1 form.
-- **`PerRow`** — one row per step, each the closed form at that step (`x_k = a_0/a_k`). Same row
-  count, worse arithmetic per row (a divide instead of a multiply), but **no sequential dependency**:
-  a parallel domain instead of D41's wave-by-wave scan. Always available when the proof holds, and
-  the interesting one when (P4) fails.
+- **`Endpoints`** — replace the chain's steps with the endpoint expression. Requires (P4). The
+  250:1 form.
+- **`PerStep`** — one node per step, each the closed form at that step (`x_k = a_0/a_k`). Same node
+  count, a divide instead of a multiply, but **no sequential dependence**. That is worth more than
+  it sounds, and it is a tape-layer-only option: `ir::infer` will no longer see a chain, so those
+  rows stop being a scan domain, and **"a scan is never fused or inlined" (D41)**.
 
-Both are whole-`ir::Program` `Proposal`s. The rule additionally exposes `classify()` returning a
-`RecurrenceProof` with every obligation as a separate boolean and a written `account` — so that D53's
-requirement ("a package's gate must state whether its deliverable actually fires") is satisfiable
-with "it did not fire, and here is the obligation that failed", which is the useful form.
+  The measurement that makes this interesting: on Stage A the compounding scan domain d10 is
+  **255,687 rows, 1,102 chains, 262 waves — 69% of the B=64 run and 74% at B=1** (M3-gate-1 planner
+  coverage). So the single largest block of interpreter time is the one structure the planner is
+  forbidden to touch, and `PerStep` hands it to the planner even when (P4) fails.
 
----
+Both are ordinary `Rewrite`s. The rule additionally exposes `classify()` returning a `Proof` with
+every obligation as a separate boolean and a written `account`, so D53's requirement is satisfiable
+with "it did not fire, and here is the obligation that failed" — the useful form.
 
 ## 5. Extraction with two objectives
 
@@ -603,7 +625,7 @@ agree, which is the order the whole model is stated at.
 
 ### 5.3 How a candidate carries its error, and why this is a constraint not an objective
 
-A candidate carries `CandidateError`: the **list** of per-rewrite `ErrorTerm`s with their sites, not a
+A candidate carries `algebra::CandidateError`: the **list** of per-rewrite `ErrorTerm`s with their sites, not a
 running total. Two reasons. The composition needs the per-site adjoint weight, which is not known
 when the rewrite is made. And a failed oracle check must be attributable to a specific rewrite rather
 than to a number.
@@ -633,12 +655,60 @@ bisecting a regression and as a test fixture, and it is **not** "the safe settin
 rejects `fma_contract`, `mul_recip_as_div` and the telescope, every one of which is strictly *more*
 accurate than what it replaces.
 
-### 5.5 The slow/fast path agreement test
+### 5.4 The oracle is real, and these are its numbers
+
+`epykos::Wide` (D72, landed today on `p0/oracle`) is an in-repo double-double at 106 significand
+bits — 2^53 finer than a double ulp — and the templated maths instantiates at it unchanged, which is
+D3's dividend banked. **The naive path's own error is now measured rather than assumed:**
+
+| | Stage A valuation | Stage A sensitivity |
+|---|---|---|
+| leg PV | **1.616e-13** | **2.064e-10** |
+| trade PV | 7.854e-14 | 5.154e-11 |
+| aggregates | 1.465e-13 | 1.209e-13 |
+
+Three consequences, and they are why §5 is now written against numbers:
+
+1. **The headroom is known.** A rewrite whose composed error lands at or below the naive path's own
+   does not move the answer by more than the answer was already moving. That is ~1.6e-13 for
+   valuation. `ErrorBudget::naive_path_stage_a()` names it as a reference point — deliberately a
+   function, not a default, so re-measuring updates one place, and deliberately not the default,
+   because a library default becomes the contract (§0 of PRINCIPLES.md).
+2. **Sensitivities have about three more decades of room** (2.1e-10 against 1.6e-13, a factor of
+   656 on the leg PVs). §4's "valuation is held tight; sensitivities are allowed more" was a policy;
+   it is now a measurement.
+3. **That 656× is itself the cancellation this design exists to remove.** The recorded forward rate
+   is `(DF_s/DF_e − 1)/τ` with the ratio within ~1e-4 of 1, so the subtraction discards roughly
+   thirteen digits and amplifies by ~1e4 — which is the order of the 656×. **A successful telescope
+   should move that number down.** If it does not, the error model is wrong, and that is a sharper
+   falsification test than anything the design could assert about itself.
+
+### 5.5 What extraction prices
+
+Not the term. A rewrite's value is usually not local: collapsing a 90-step compounded coupon removes
+89 multiplies and then makes ~88 of the 91 discount factors that fed it unreachable, and those are
+`exp` nodes. So extraction lowers each candidate to a tape, runs cse and dce, and prices *that*.
+
+**The metric is node count, not nanoseconds, and that is a real limitation.** At this layer there is
+no plan and no interpreter, so `optimise::estimate_program` cannot be called without inferring
+first. `CostMetric::WeightedNodes` weights reachable nodes by op (an `exp` is not a `neg`) and is
+enough to rank candidates that differ by orders of magnitude — which, if the telescope works at all,
+is the case that matters. `CostMetric::InferAndEstimate` runs `ir::infer` per candidate and prices
+the Program properly; it is strictly better information at ~1.0 s per candidate on Stage A, worth it
+when two candidates are close and wasteful when one is 250× smaller.
+
+This is an improvement on the IR-layer draft's position, worth noting because it cuts against one of
+that draft's risks: §8.5 worried that the cost model (58.6%/49.7% mean relative error, modelling
+`exec::Interpreter` only) could not see a telescope's win. At the tape the first-pass metric does not
+consult the cost model at all — it counts nodes — so the search's ability to *find* the win no longer
+depends on the instrument that has been the programme's weakest link.
+
+### 5.6 The slow/fast path agreement test
 
 `PRINCIPLES.md` §4 replaces the execution tier with a test, in the owner's words: *"we need to test
 if our slow and fast paths agree to within floating point tolerance."* Generic interpreter against
 catalogued kernel, unfused against fused, batched against unbatched, reference against release.
-`rewrite::PathAgreement` (error_model.hpp) is the shape, and three things about it are deliberate:
+`algebra::PathAgreement` (error.hpp) is the shape, and three things about it are deliberate:
 
 - **It carries the number, not a boolean.** §4: the test "measures conditioning for free — agreement
   at 1e-16 says the expression is well conditioned, agreement at 1e-9 says one path is losing
@@ -659,29 +729,6 @@ point, **the test is not testing the algebra, it is testing that the code implem
 which is a claim about the construction rather than a consequence of it. Both of this week's
 relevant defects were in that gap and neither was an algebra failure (D61's catalogue fingerprint,
 canonical by design and not in fact; D65's harness sizing a buffer from the wrong vector).
-
-### 5.4 Extraction prices the whole program, not the term
-
-A term rewrite's value is usually not local. Telescoping a 90-step compounded coupon removes 89
-multiplies from the scan domain — and then kills about 88 of the 91 discount factors that fed it,
-which are rows of the `exp(mul(neg(@0),$0))` domain (16,917 rows on Stage A), and `exp` was **54% of
-the M1 book's B=64 time** (D27, measured). That win is a **dead-code consequence** downstream of the
-rewrite, in a different domain, and a local cost delta cannot see any of it.
-
-So extraction lowers each candidate to a whole `ir::Program`, runs DCE, and prices *that* with
-`optimise::estimate_program`. That is affordable precisely because the term tier emits a handful of
-candidates (one per error tier), not one per match — the exact inversion of the property that killed
-the whole-program e-graph.
-
-**A note on the cost model, since `PRINCIPLES.md` §6 flags it.** §6's last paragraph is right that the
-instrument is better suited to algebra than to layout: "its fit puts essentially all predicted time
-into the per-op rates, which is exactly why it is useless for layout … and roughly right for algebra.
-Removing 249 multiplies of 250 would register strongly." But note what §5.4 has just established:
-the *large* part of a telescope's win is not the 249 multiplies, it is the 88 dead `exp`s, and those
-show up as removed **rows of another domain** — which is a rate × rows term the model does price.
-So the mechanism is favourable. Whether the *magnitude* comes out right is §8.5.
-
----
 
 ## 6. Saturation control
 
@@ -715,180 +762,87 @@ round *k* may have been the one that mattered; saturation is no longer confluent
 banning. Mitigated by the log naming every ban, so "the search found nothing" and "the search was
 banned from looking" are distinguishable — which, on M4's record, is the distinction that matters.
 
-### 6.4 Per-group scoping and a quarantined cross-domain phase
+### 6.4 Class-uniform saturation
 
-Within-group rules saturate first, per group, independently. Cross-domain rules
-(`TermRule::crosses_domains()`) then run in their own phase for at most `max_cross_domain_rounds`,
-and only through a gather whose producing domain has **one reader** (`r5.group_formation`'s own
-condition).
+§2.3's mechanism, and the load-bearing one: saturate over one representative per shape class rather
+than over 517,036 nodes. **Given up:** a rewrite that is valid for one member of a shape class and
+not another. A rule that could be in that position says `applies_class_uniformly() == false` and is
+matched node by node, which costs speed and nothing else — the conservative direction is the default
+and the driver never guesses.
 
-This is the main explosion risk and the bound is the least satisfying of the four. Pushing a term
-through a gather **copies a sub-DAG into another group**; a producer read by five gathers can be
-inlined five ways, and that is the inlining lattice again, now in the term tier. The single-reader
-restriction bounds it hard. **Given up:** an identity spanning three domains through two shared
-gathers is unreachable. Since the discount factors are shared by construction (CSE gives one DF node
-per date, read by both the coupon that starts on it and the one that ends on it), **this restriction
-may block the very shape the telescope needs** — and if it does, the telescope must come from the
-recurrence rule at the program tier, where no such restriction applies. That is a second, independent
-reason §4.1's finding matters.
+This *replaces* the IR-layer draft's fourth bound, "per-group scoping with a quarantined
+cross-domain phase", which existed to stop `gather_push_unary` copying a sub-DAG into another group.
+The tape has no gathers, so that bound and its completeness loss are both gone. It was the least
+satisfying of the four and the draft flagged that it "may block the very shape the telescope needs";
+that worry is now moot.
 
 ### 6.5 What completeness means here, honestly
 
 With all four on, saturation is **not** complete with respect to the rule set. It reaches a fixpoint
-over: within-group derivations of any length and any mixture of rules, at pattern depth ≤ 4, with no
-Sum reordering, plus at most two rounds of single-reader cross-domain propagation, minus whatever
-banning cut. Compared with D62's `NoFreshCrossRule` this is strictly *more* complete in the dimension
-that was hurting (mixed rule chains) and newly restricted in a dimension D62 did not have
-(cross-domain depth), because D62's tier had no cross-domain notion at all.
+over: derivations of any length and any mixture of rules, at pattern depth ≤ 4, with no Sum
+reordering, over one representative per shape class, minus whatever banning cut.
+
+Compared with D62's `NoFreshCrossRule` this is strictly *more* complete in the dimension that was
+hurting — mixed rule chains, which are the normal case for algebra (factor, then cancel, then
+contract) — and newly restricted only where a rule declines class uniformity.
 
 ---
 
-## 7. Migration
+## 7. What happens to the existing optimiser
 
-### 7.1 Three tiers, not two
+**Nothing is rebuilt and nothing is ported.** That is the main practical consequence of the layer
+correction, and it is worth stating as flatly as possible.
 
-| tier | holds | rules | status |
-|---|---|---|---|
-| **TERM** (new) | e-classes of terms within one program | algebraic identities (§3) | this design |
-| **PROGRAM** (kept) | whole `ir::Program` alternatives | domain-restructuring rules | unchanged |
-| **PLAN** (kept) | `PlanAnnotations` per program node | `r6`, the five `planner.*` rules | unchanged |
-
-The relation is the important part, and it is what keeps the program tier from re-inflating: **the
-term tier is a sub-solver, not a producer of program nodes per match.** It saturates, then extracts
-*once per error tier*, contributing O(number of tiers) program nodes — not O(matches).
-
-### 7.2 The seven layout rules: wrapped, not ported
-
-| rule | kind | disposition |
-|---|---|---|
-| `r1.fold_uniform_columns` | changes the domain partition | **stays** on `rewrite::Rule`, program tier |
-| `r2.bucket_rows` | splits domains | **stays**. Also becomes the *enabler* for row-subset algebra (§1.3) |
-| `r3.elide_trivial_maps` | *is* a term rewrite | **should move**, later |
-| `r4a.push_unary_through_gathers` | *is* the cross-domain bridge (§2.4) | **should move**, later |
-| `r4b.shared_reciprocal` | inserts a domain | **stays** |
-| `r5.group_formation` | merges domains | **stays** |
-| `r6.materialise_boundaries` | annotation | **stays**, plan tier, untouched |
-| `r7.block_linmap` | splits a domain | **stays** |
-
-Recommendation: **wrap, do not port.** A `ProgramRuleAdapter` presents the old `Rule` at the program
-tier while the term tier runs beneath each program node. Nothing in `rewrite/` or
-`src/optimise/egraph.cpp` changes.
-
-**The cost of wrapping, stated:**
-
-- R3 and R4a will exist twice — once as program-tier rules, once as term-tier axioms
-  (`select_same_arms`/`mul_one` overlap R3; `gather_push_unary` is R4a). Two rules producing the same
-  content is not a correctness problem (the program tier hash-conses on `ir::serialize`, exactly as
-  it does today), but it is wasted work and a confusing log. Mitigation: the driver disables the
-  program-tier copy when the term tier is enabled, which is a one-line policy, not a rewrite.
-- The program tier keeps `RefirePolicy::NoFreshCrossRule` and its completeness loss for the layout
-  rules. Since those rules are **demoted** (`PRINCIPLES.md` §7) and worth 1.73×–1.88× only on
-  workloads with that structure, paying a search-completeness cost on them is the right trade.
-
-### 7.3 What this design does NOT fix
-
-**The plan tier is still a whole-`PlanAnnotations`-valued e-graph with a 2^k lattice**, *if it
-survives at all*. D62 measured it: 105,977 plan nodes and 10.5 GiB on 60 trades to saturate, which is
-why `PipelineOrderedPlans` exists. Term-level rewriting does nothing for that, because a plan is not
-a term. Fixing it *within* the search needs the same treatment applied to `PlanAnnotations` —
-per-domain choice points instead of whole-plan clones — and that is a separate package.
-
-§7.4 proposes not fixing it but **deleting it**, which is the open question. Given D68's measurement
-(the whole plan stage is worth 1.027×–1.042× on Stage A, and a *perfect* plan-level cost model is
-worth ~0.08% of Stage A's wall clock), spending a package on a better plan-tier data structure is
-the worst of the three options. Recorded here so the decision is deliberate either way.
-
----
-
-### 7.4 OPEN: does planning stay in the search, or become a post-extraction pass?
-
-**The owner has not answered this, so it is designed both ways and the interface does not assume
-one.** `optimise::PlanningMode` selects; `TermExtractResult::plan` is populated either way, so
-nothing downstream needs to know which ran. That symmetry is the point — the question can stay open
-without stalling the packages behind it.
-
-**Option A — `InSearch` (D49/D62's shape, unchanged).** Plans are e-graph candidates. Extraction
-scores (program, plan) pairs jointly, so a plan can pay for a program that is worse on its own.
-
-**Option B — `PostExtractionPass`.** Extraction ranks *programs* under the default plan; the winner
-is planned once, deterministically, by `plan_after_extraction(program, model, params)`. The plan
-tier disappears. The pass may hill-climb on the cost model internally — a local search over one
-program, not a dimension of the global one — and that flag is **off by default**.
-
-#### What the record says
-
-| evidence | bearing |
+| | disposition |
 |---|---|
-| D62: the plan tier is "a pure 2^k subset lattice over the k ≈ 12 independent per-domain deltas", **105,977 plan nodes and 10.5 GiB on 60 trades** to saturate | Option A's cost, measured. It is why `PipelineOrderedPlans` exists, and that policy gives up "every plan that needs one rule applied twice, or two rules out of the caller's declared order" |
-| D62: term-level rewriting dissolves the 2^k problem **in the term tier only** — a plan is not a term, so Option A keeps the lattice | This design does not fix Option A's cost. §7.3 |
-| D68: the whole plan stage is worth **1.027×–1.042×** on Stage A, and a *perfect* plan-level cost model is worth **~0.08% of Stage A's wall clock** | The prize Option A is searching for is very small on the current fixture |
-| D63: rediscovery's 1.02× clause "passes **BY IDENTITY** — the extracted candidate is the default plan's own execution, not something better than it" | The joint search has never actually found a plan better than the default one |
-| D63: the cost model captures **31% of reduction fusion and 11% of inlining** | The instrument Option A searches with cannot rank the decisions it is searching over |
-| `PRINCIPLES.md` §7: the layout rules are worth **1.73×–1.88× on a workload that has that structure** | The prize is not small *in general*, only on Stage A. §5's arithmetic-dominated workload may change this |
+| `rewrite::Rule`, `Proposal`, `MatchSite` | **kept, unchanged, no apology.** They are correct for a layer where `ir::infer` has already turned terms into arrays (§0.1) |
+| the seven layout rules R1–R7 | **kept, unchanged in what they do.** Only the driver above them changes |
+| `optimise::EGraph` and `src/optimise/egraph.cpp` | **not rebuilt.** D62's whole-program-e-node problem is **bypassed, not solved**: algebra no longer happens at that layer, and layout rewrites do not need a saturating search to find |
+| the plan tier | **retired as a search; becomes a deterministic compilation pass** |
 
-#### Recommendation: Option B, with one condition
+**Recommendation on the plan tier, which was an open question and is now easy.** The interpreter
+needs a plan regardless, so planning is compilation, not search. D63 records that the joint search
+*"passes BY IDENTITY — the extracted candidate is the default plan's own execution, not something
+better than it"*. D68 prices a perfect plan-level cost model at **~0.08% of Stage A's wall clock**.
+And D62 measured the plan tier as the binding constraint on saturation: a 2^k subset lattice over
+~12 per-domain decisions, **105,977 plan nodes and 10.5 GiB on a sixty-trade fixture**. Retiring it
+deletes `RefirePolicy::PipelineOrderedPlans` and the completeness that policy gave up, and costs
+nothing any measurement can find.
 
-**Take the post-extraction pass.** The reasoning, in order of weight:
+**The condition, stated rather than buried:** this assumes program choice and plan choice are
+separable. The failure shape is a rewrite that makes a domain *fusable* which was not — worth much
+more with the fusion than without, so mediocre when priced under the default plan. At this layer the
+mitigation is cheap and I would take it: when `CostMetric::InferAndEstimate` is used, price each
+candidate under the plan its own program would get, not under a fixed one. §8.8 settles it in an
+afternoon either way.
 
-1. **The interpreter needs a plan regardless.** Planning is not optional work the search might skip;
-   it is compilation. Modelling a mandatory, deterministic function of the program as a *search
-   dimension* is a category error, and it is the one that produced a 2^k lattice over twelve
-   independent boolean decisions.
-2. **The joint search has never paid.** D63 is explicit that the rediscovery clause passes by
-   identity. Every measurement in the record is consistent with "the default plan is the answer",
-   and none shows a plan paying for a worse program.
-3. **It removes a completeness loss instead of adding one.** `PipelineOrderedPlans` exists only to
-   bound the plan tier. Delete the tier and the policy goes with it — and a local hill-climb over
-   one program can apply a rule twice or out of order, which is exactly what that policy forbade.
-4. **It makes the cost model's weakness matter less.** A 58.6%/49.7% model ranking twelve interacting
-   decisions is a bad instrument doing a hard job. The same model choosing between a handful of
-   local moves on one fixed program is the same instrument doing an easy one, and if it gets a move
-   wrong the cost is bounded by that move.
-
-**The condition, and it is the real risk:** Option B assumes **the best plan for the best program is
-also the best plan reachable independently of it** — that program choice and plan choice are
-separable. That is not a theorem, and there is one concrete shape where it plausibly fails: a term
-rewrite that makes a domain *fusable* which was not (say, by removing the gather that forced
-materialisation) is worth much more *with* the fusion than without it. Priced under the default
-plan, such a program looks mediocre and loses the extraction. Option A would find it; Option B would
-not.
-
-Two mitigations, both cheap, and I would take the first:
-
-- **Price each candidate under `plan_after_extraction`, not under the default plan** — i.e. run the
-  deterministic pass inside the scoring loop rather than only on the winner. That restores
-  separability by construction (every program is scored under *its own* best plan) at a cost of one
-  planning pass per candidate, and the term tier emits a handful of candidates, not thousands. This
-  is the version I recommend; `TermExtractOptions` already permits it, since `planning` is read by
-  extraction and not only after it.
-- Failing that, keep `InSearch` available behind the enum for the arithmetic-dominated workload of
-  §5, where the layout rules' 1.73×–1.88× may make the joint search worth its cost again. Deleting
-  the code would be premature; defaulting away from it is not.
-
-**How to settle it cheaply** (§8.8): on the existing 60-trade fixture, extract twice — once under
-`InSearch` with `PipelineOrderedPlans`, once under `PostExtractionPass` — and compare the winners
-and their measured wall clock. If they are the same program and the same plan, which every number in
-the record predicts, Option B is free and the 10.5 GiB goes away.
-
----
+**What this package does NOT fix and does not claim to:** the cost model's 58.6%/49.7% error, its
+blindness to the catalogue and the reverse ladder, and the fact that it models `exec::Interpreter`
+only. §5.5 argues the stage's first-pass metric routes around that rather than depending on it.
 
 ## 8. Where I think this breaks, and the cheapest experiments
 
 Ordered by how likely each is to kill the programme, cheapest test first within each.
 
-### 8.1 The sequencing is backwards, and this is the cheapest thing to fix
+### 8.1 The sequencing is still backwards, and this is cheaper than ever to fix
 
-**Finding, not a risk.** §4.1 establishes that the recurrence kind is a program-tier rule with five
-sites on the whole Stage A tape. It does not need the term layer. So `PRINCIPLES.md` §8's order —
-term rewriting (item 2), then identities and recurrences (item 3), then telescoping end to end (item
-4) — puts roughly six thousand lines of interface ahead of the one deliverable with a 250:1 claim
-attached to it.
+**Finding, not a risk.** §4 establishes that the recurrence kind needs exactly two things: chain
+detection (`ir::analyse`, §4.1) and the ability to replace a sub-DAG. **It does not need the
+e-graph.** A telescope is a local rewrite on a chain the analysis already found, applied to at most
+a few hundred chains (Stage A has 1,102), and it can be written as a direct tape pass in the shape
+`tape/passes.cpp` already uses — rebuild the node table, return a remap — with no saturation, no
+extraction and no cost model.
 
-**Recommendation:** do item 4 first, on the existing `Rule` interface. It is a single rule with a
-classifier, a whole-Program `Proposal`, and five sites. If it lands and the number is real, the term
-layer has a measured justification. If it lands and the number evaporates, the term layer's business
-case has to be made some other way — and that is much better learned for the cost of one rule than
-for the cost of the interface.
+So `PRINCIPLES.md` §8's order (term rewriting, then identities and recurrences, then telescoping end
+to end) puts several thousand lines of e-graph ahead of the one deliverable with a 250:1 claim on
+it, and the layer correction makes that gap *wider*, not narrower: at the IR layer the recurrence
+kind at least needed the program tier's machinery, and here it needs almost nothing.
+
+**Recommendation: do telescoping first, as a fifth tape pass.** It needs `ir::analyse` (§4.1, which
+is the one piece of shared plumbing either route requires) and the classifier of §4.2. If it lands
+and the number is real, the e-graph has a measured justification. If it lands and the number
+evaporates, that is much better learned for the cost of one pass than for the cost of the
+interface.
 
 ### 8.2 The win lives where no rule is applied — the largest finding in this package
 
@@ -912,8 +866,11 @@ telescoping win "about 250:1 **on the calibration side**". So:
 > The 250:1 cannot be realised by any amount of term-rewriting work, because the programs it would
 > apply to are constructed and executed without ever passing through the optimiser.
 
-The fix is small — `ResidualProgram`'s constructor takes an optional optimisation pass and applies it
-to `program_` before building the interpreter — and it is **in scope** under `PRINCIPLES.md` §3, which
+The fix is now **one line**, and smaller than it was at the IR layer: `ResidualProgram` already
+calls `standard_passes(slice_.tape)` immediately before `ir::infer(slice_.tape)`, so the algebraic
+stage goes between them exactly as it does on the main path — `algebra::reduce(slice_.tape, rules)`.
+No new plumbing, no Program-level hook, no optional-pass parameter threading. It is **in scope**
+under `PRINCIPLES.md` §3, which
 excludes "the solver itself — Jacobian policy, iteration strategy, convergence criteria" but
 explicitly includes "the arithmetic the engine was handed". Rewriting the residual's *expression* is
 arithmetic, not solver policy: same iterates, same convergence, cheaper residual.
@@ -926,23 +883,26 @@ else in this design.
 ### 8.3 The telescope's preconditions may not hold on the actual tape — the single best experiment
 
 §4.3's table is read off blueprints and builder code. It has **not** been checked against a recorded
-tape, and three things could each falsify it: the tape passes (`fold_sum`, `affine_collapse`, D39)
-may have rearranged `1 + f·w` so that (P1) no longer matches; CSE may not have shared `DF(t_next_k)`
-with `DF(t_rate_{k+1})`, breaking (P2) even though the values are equal; or the intermediate
-accumulator rows may be read somewhere, breaking (P4).
+tape, and three things could each falsify it: `affine_collapse` may have rearranged `1 + f·w` so
+that (P1) no longer matches (§1.4 — the most likely of the three); `cse` may not in fact have shared
+`DF(t_next_k)` with `DF(t_rate_{k+1})`, breaking (P2) even though the values are equal; or an
+intermediate accumulator may be read somewhere, breaking (P4).
+
+The experiment is *cheaper at this layer than it was at the IR layer*, because every check is now an
+integer comparison on the node table rather than a scan of gather and column arrays.
 
 **Cheapest experiment, and the one I would run first (one afternoon, no new machinery):** a throwaway
-tool over the existing Stage A fixture that, for each of the five scan domains,
+tool over the existing Stage A fixture that, for each chain `Inference::detect_chains` finds,
 
-1. prints `ir::shape_string`,
-2. checks `gathers[den].index[r] == gathers[num].index[r+1]` inside every chain, and reports the
-   longest prefix on which it holds,
-3. bitwise-compares the two candidate coefficient columns,
-4. scans every other domain's gathers and the output list for reads of non-final rows,
-5. reports the domain's share of measured wall clock from the existing `EPYKOS_EXEC_PROFILE` table
-   (D63/D68 already built it).
+1. dumps the step's node shape,
+2. checks `denominator_node(step k) == numerator_node(step k+1)` — an integer comparison — and
+   reports the longest prefix on which it holds,
+3. checks whether the two coefficient constants are the same node (they are, if equal, after `cse`),
+4. reads `use_counts` for every intermediate step,
+5. reports the owning domain's share of measured wall clock from the existing `EPYKOS_EXEC_PROFILE`
+   table — for the compounding scan this is already known to be **69% at B=64**.
 
-Four booleans and a number per domain. It answers, before any interface is written: *is the worked
+Four booleans and a number per chain. It answers, before any interface is written: *is the worked
 example of `PRINCIPLES.md` §8 item 4 actually available, and is it worth anything here?* If (2) fails,
 the recurrence library's first citizen is wrong and §8 item 4 needs re-picking. If (5) is small, §8.2
 and `PRINCIPLES.md` §5's re-grading are confirmed and the arithmetic-dominated workload must come
@@ -959,20 +919,27 @@ beyond a single scalar tolerance is over-engineering.
 loose budget and diff the results. If they differ in fewer than a handful of places, ship the budget
 as a scalar and delete the propagator.
 
-### 8.5 The cost model may not see the win (this is M4's failure mode, repeating)
+### 8.5 The cost model may not see the win — reduced by the layer change, not eliminated
 
-`PRINCIPLES.md` §6's last paragraph argues the cost model is "roughly right for algebra". Its mean
-relative error is **58.6%/49.7%** after D63's repricing (target <25%, **measured**), it models
-`exec::Interpreter` only, and D68 measured the whole-program interpreter at **2.513% of Stage A**. So
-even a perfect algebraic rewrite inside the interpreter is bounded by that share on the current
-fixture. §5.4 argues the *mechanism* is favourable (dead rows in a big domain are priced); the
-*magnitude* is unverified.
+At the IR layer this was a serious risk: the cost model's mean relative error is **58.6%/49.7%**
+after D63 (target <25%, measured), it models `exec::Interpreter` only, and D68 measured the
+whole-program interpreter at **2.513% of Stage A**. A search that could only rank candidates through
+that instrument was repeating M4's failure mode.
 
-**Cheapest experiment:** hand-construct the telescoped program once (by editing the tape, not by
-writing a rule), price it with `estimate_program`, then run it. Two numbers: predicted speedup and
-measured speedup. If the model predicts a large win and the wall clock does not move, the problem is
-§8.2's plumbing, not the model. If the model predicts nothing and the wall clock moves, the model is
-the problem and `PRINCIPLES.md` §6's optimism about it is misplaced.
+The tape layer routes around it. `CostMetric::WeightedNodes` counts reachable nodes after cse+dce
+and does not consult the cost model at all, so *finding* a 250:1 collapse no longer depends on the
+programme's weakest instrument. What still depends on it is deciding between two candidates that are
+close — and if the telescope works, nothing is close.
+
+**What remains, and it is the sharper version of the old worry:** node count is not time. Removing
+89 multiplies from a scan and 88 `exp` nodes is obviously good; removing 5% of nodes may be worth
+nothing or may be worth a cache level, and node count cannot tell. The mitigation is that the shapes
+this design targets are order-of-magnitude shapes.
+
+**Cheapest experiment:** hand-construct the telescoped tape once — edit the node table directly, no
+rule — then infer, run, and compare against the un-telescoped tape end to end. Two numbers: node
+count ratio and wall-clock ratio. The gap between them is exactly how much node count is lying by,
+and it is worth knowing before any ranking is built on it.
 
 ### 8.6 The frozen op set: what §2's stance costs, stated plainly
 
@@ -999,18 +966,21 @@ constant-factor to asymptotic. That is a note for a future decision, not a reque
 
 ### 8.7 Smaller risks, recorded
 
-- **Cross-domain quarantine may block the telescope's own shape** (§6.4). Independent reason to do
-  §4.1 first.
-- **First-order error propagation across `Select`** is invalid and handled by a fallback that is
-  conservative but possibly so conservative that no inexact rewrite under a `Select` is ever selectable.
-  Unmeasured.
-- **Side conditions are recording-specific** (§1.4), so a compiled program is keyed to its recording.
-  Fine today; a trap if anything ever caches compiled programs across books.
-- **`TermExpr` can introduce new Columns**, which means a rewrite can grow the program's *data*, not
-  just its structure. A per-row `k` Column on a 16,917-row domain is 135 KB. The cost model prices
-  bytes; nothing currently bounds a rule's data growth. Worth a limit before the first such rule.
-
----
+- **`affine_collapse` has already eaten the shape the classifier looks for** (§1.4). `1 + f·w` is an
+  `Affine` node by the time the stage runs. This is the single likeliest way a first implementation
+  finds nothing, and §8.3's experiment catches it on day one.
+- **Side conditions are weaker here than at the IR layer** (§1.3). There is no Column array to scan,
+  so `provably_positive` can discharge little beyond `exp(·)`, `x*x` and positive constants. The
+  conditional axioms (`log_product`, `sqrt_product`, `exp_log`) will fire less often than the
+  IR-layer draft assumed. Unmeasured, and not recoverable at this layer.
+- **`ir::analyse` couples the stage to inference's phase order** (§4.1). Mitigated by it being the
+  same code, which has M1/M3 round-trip gates on it.
+- **First-order error propagation across `Select`** is invalid and handled by a fallback that may be
+  so conservative no inexact rewrite under a `Select` is ever selectable. Unmeasured.
+- **Node count is not time** (§8.5).
+- **A rewrite may duplicate a multiply-used node.** At the tape, replacing a shared sub-DAG can turn
+  one node into several. `ir::Analysis::uses` is in the interface for this reason, but nothing yet
+  bounds a rule's node growth, and the e-graph's node budget is a blunt instrument for it.
 
 ### 8.8 The planning question, settled in an afternoon
 
@@ -1031,28 +1001,60 @@ Cost: no new machinery. Both modes run through the same entry point.
 
 ---
 
-## 9. Summary of what is design and what is measured
+### 8.9 Does the e-graph actually fit? — the experiment §2.3 owes
 
-**Measured, cited:** the domain collapse (517,036 → 67/80, D35/D44/D65); five scan domains on Stage A;
-R2's 36–68-ulp adjoint failure from reordering gather-table entries, and the rest of §3.6's audit of
-what bit-identity was costing (D52 finding 3; `adjoint.hpp`, `bucket_split_edit.hpp`,
-`r4b_shared_reciprocal.hpp`, `planner_rules.hpp`, `verifier.hpp`); §4a's 14 sources / 37 tests /
-~9,700 lines; the plan tier's 105,977 nodes and 10.5 GiB, and D63's rediscovery passing by identity;
-R2's 10,111 sites / 700 s / blown bound (D65); D62's memo, representative-matching and refire policy
-with their costs; `exp` at 54% of M1's B=64 (D27); the cost model's 58.6%/49.7% error and the
-interpreter's 2.513% share (D63/D68); `ResidualProgram` constructing an interpreter with no rewrite
-pass (`src/solver/residual.cpp:73–77`); the Stage A trade mix and the observation-method definitions
-(blueprints, `src/conventions/rfr.cpp`, `src/maths/instrument/builder.cpp`).
+§2.3 claims the graph seeds at ~10³ nodes under class-uniform saturation and declines to claim
+anything about what it saturates *to*. Both halves are checkable before any rule is written:
 
-**Design:** the term definition and `TermRef` addressing; `TermExpr` and `TermRewrite`; the anchor as
-part of node identity; gather-commutation as a rule; the thirty-two-axiom set and its three-way
-exactness split; the recurrence proof obligations (P1)–(P4) and the two closures; adjoint-weighted
-error composition; the constrained-single-objective extraction; the four saturation bounds; the
-three-tier migration; the two planning modes and the recommendation in §7.4.
+1. **Count the shapes.** Run the deep-hash partition over the Stage A tape and report the number of
+   distinct shape classes and the size distribution. This is `ir::analyse`'s own output and needs no
+   rules at all. If it is a few hundred, §2.3 holds; if it is tens of thousands, class-uniform
+   saturation does not save us and the whole placement needs rethinking.
+2. **Saturate with associativity and distributivity only**, on one representative, with the node
+   budget set high and the round cap low, and plot nodes against rounds. Those two axioms are the
+   fastest-growing pair in the set, so they bound the rest. If a ten-node term goes to 10⁵ in three
+   rounds, `max_pattern_depth` and banning are not enough and the rule set needs a normal form
+   rather than a search.
 
-**Assertion, not yet measured:** that the term graph SEEDS at ~10³ nodes (and, more importantly, no
-number at all for what it SATURATES to — §2.3 says so plainly); that the Stage A mix telescopes
-50/10/40; that observation shift telescopes (contra the `tables.hpp` comment); that the cost model
-would register a telescope's magnitude correctly; and — the one §7.4 turns on — that program choice
-and plan choice are **separable**, which is a condition of the post-extraction recommendation and
-not a result. §8.3, §8.5 and §8.8 test all five.
+Cost: (1) is an afternoon and reuses existing machinery. (2) needs a minimal e-graph — a few hundred
+lines, no rules beyond two, no extraction, no error model — and is the cheapest honest test of the
+central tractability assumption. **I would run (1) before committing to this design and (2) before
+committing to the e-graph specifically**; note that §8.1's recommendation (telescoping as a direct
+tape pass) needs neither.
+
+---
+
+## 9. Summary of what is design, what is measured, and what was discarded
+
+**Discarded, with the reasoning recorded in §0.1:** the IR-layer targeting; the term e-graph over
+`ir::Program`; the anchor domain; row-universality as a constraint; index maps and the two gather
+axioms; the quarantined cross-domain saturation phase; the three-tier migration and the wrapper
+strategy; and — the one that has to be *retracted* rather than simplified — the tractability
+argument from the 517,036 → 67-domain collapse, which does not apply at a layer that runs before
+that collapse. `rewrite::Rule`, `Proposal`, `MatchSite` and the seven layout rules are **not**
+replaced by this package: they are correct for their layer.
+
+**Measured, cited:** the tape is a hash-consed term DAG already rewritten in place (`tape/tape.hpp`,
+`tape/passes.hpp`); `affine_collapse` recovers SwapEngine's W-cache, 857 rows (`PRIOR_ART.md`);
+Stage A is **517,036 nodes** after the E0 passes from 27,459,283 recorded, **67 domains, 5 scan
+domains, 1,102 chains** (D44, M3-gate-1); the compounding scan d10 is **255,687 rows and 69% of the
+B=64 run, 74% at B=1**, and a scan is never fused or inlined (M3-gate-1, D41);
+`Inference::detect_chains` reads and writes `boundary_` (`src/ir/signature.cpp:408`);
+`ResidualProgram` builds an interpreter with no rewrite pass between `standard_passes` and
+`ir::infer` (`src/solver/residual.cpp:73–77`); the oracle's measured naive-path error, **1.616e-13
+valuation and 2.064e-10 sensitivity** on Stage A leg PVs (D72); R2's 36–68-ulp adjoint failure and
+the rest of §3.6's audit; the cost model's 58.6%/49.7% and the interpreter's 2.513% share (D63/D68);
+D62's 105,977 plan nodes and 10.5 GiB; the Stage A trade mix and the observation-method definitions.
+
+**Design:** the stage and its placement; `TermRef == node_id` and the `Expr`/`Rewrite` shape; the
+thirty-axiom set and its three-way split; `fold_untainted` as a tape-only axiom; the recurrence
+obligations (P1)–(P4) as integer comparisons on a hash-consed graph, and the two closures;
+adjoint-weighted error composition; constrained single-objective extraction with node count as the
+first-pass metric; the four saturation bounds; `ir::analyse` as the cheap form of factoring
+inference's prefix; and the recommendation to retire the plan tier as a search.
+
+**Assertion, not yet measured:** that the shape-class count is a few hundred (§2.3, §8.9 counts it);
+that the graph saturates to something bounded (§8.9 measures it); that the Stage A mix telescopes
+50/10/40 and that observation shift telescopes contra the `tables.hpp` comment (§8.3); that
+`affine_collapse` has not eaten the classifier's shape (§8.3); and that node count ranks candidates
+well enough to matter (§8.5). Five claims, five named experiments, none of them expensive.

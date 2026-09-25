@@ -3575,3 +3575,142 @@ in the record predicts, means Option B is free and the 10.5 GiB goes away.
 Gate count 11 -> 14 (exactness advisory and defaulting to Unknown; path agreement carrying the
 number; both planning modes expressible with hill-climbing off by default, per D68). Still no
 mutant: still no behaviour to mutate.
+
+**SECOND AMENDMENT (2026-09-25, same package, before merge): THE DESIGN WAS AT THE WRONG LAYER, and
+is retargeted from `ir::Program` to the TAPE.** Everything above that names `ir::Program`,
+`rewrite::Proposal`, `MatchSite`, `optimise::EGraph` or a term e-graph over programs describes the
+superseded version; `docs/TERM_REWRITING.md` §0.1 records the correction in full and this entry
+records why, because a document that shows the wrong layer and the correction is more useful than
+one pretending the correction was obvious.
+
+**Why the first version was wrong.** `ir::infer` groups structurally identical nodes into classes
+and domains, so a step applies to every row of a domain at once. At that layer there are no terms
+left to rewrite, only arrays — **which is the real reason `Proposal` has to return a whole
+`ir::Program`. That is not a flaw in the interface; it is the interface being correct for the layer
+it sits at.** `rewrite::Rule`, `Proposal`, `MatchSite` and the seven layout rules are NOT replaced by
+this package and need no apology. Point 1 of this entry, and point 6's claim that the recurrence
+kind "is NOT a term rule", were both artefacts of targeting one stage too late.
+
+**The term graph already exists and it is the tape.** `tape/tape.hpp`: a straight-line program in
+topological order where node i reads only nodes below i, constants are leaves one per distinct bit
+pattern, variadic operands in a side array. It is already hash-consed (`cse`), already rewritten in
+place (`tape/passes.cpp`), and `affine_collapse` is already an algebraic simplification on it that
+`PRIOR_ART.md` records as recovering SwapEngine's hand-built W-cache exactly, 857 rows. So the
+package becomes a STAGE: `record -> tape passes -> SYMBOLIC ALGEBRAIC REDUCTION -> ir::infer -> plan
+-> execute`. An e-graph over tape nodes is the ordinary thing rather than the exotic one, and
+nothing below the stage changes — inference, planning and execution receive a smaller tape and run
+exactly as they do now. With an empty rule set the stage is the identity, which is how it lands
+without touching a single existing gate.
+
+**What the wrong layer had forced into the design, now deleted.** The ANCHOR DOMAIN in every
+e-node's identity (a term was a row-indexed vector, so two structurally identical terms in two
+domains denoted different values); ROW-UNIVERSALITY as a constraint, and the whole argument that
+row-subset algebra must be a domain split first; INDEX MAPS, with `gather_push_unary` /
+`gather_push_binary` as axioms and a quarantined cross-domain saturation phase to bound them; and
+the THREE-TIER MIGRATION with its wrapper strategy. Thirty axioms now, not thirty-two.
+
+**One argument is RETRACTED rather than simplified, and it is the load-bearing one.** The first
+version argued tractability from the 517,036 -> 67-domain collapse: "the sharing has already
+happened before the optimiser is reached". **At the tape that collapse has not happened — it is the
+thing we run before** — and the seed is the full 517,036 nodes (D44: from 27,459,283 recorded). The
+replacement argument uses the same repetition differently and is weaker: the deep hash partitions
+those nodes into a few hundred SHAPES, so the driver saturates over one representative per shape
+class and applies the winner to every member (`Rule::applies_class_uniformly`, default false, the
+conservative direction). Note what that is: **the IR layer's row-universality, reappearing as a
+driver OPTIMISATION a rule opts into rather than a constraint the interface imposes** — which is
+evidence it was never an artefact of the IR layer but the structure of the problem. The shape count
+is inferred from the domain count, not counted, and what the graph saturates TO is unmeasured; §8.9
+is the experiment for both.
+
+**What transferred unchanged**, being layer-independent: the error model and adjoint-weighted
+composition; the identity set minus the two gather axioms; the refusal to AC-match `Op::Sum` (the
+objection was unbounded error and an infinite family, not bits); the four saturation bounds with
+class-uniformity replacing cross-domain quarantine; and both findings of point 14 and point 12.
+**One axiom is NEW and only this layer offers it: `fold_untainted`.** `Node::tainted` is computed at
+record time, so an untainted sub-DAG has a value NOW and folds to one `Const` — removing work AND
+rounding, hence its place in `axiom_improves_accuracy`. `affine_collapse` already keys on
+untaintedness; this generalises it.
+
+**The recurrence kind transferred and got BETTER.** At the tape a chain is a chain of nodes and
+collapsing it replaces a sub-DAG with a smaller one; `ir::infer` then finds no scan because there is
+none. And the proof obligations become integer comparisons on a hash-consed graph: (P2), the index
+condition, is `denominator_node(step k) == numerator_node(step k+1)` — **identical node ids**, since
+`cse` has already merged equal computations, so it establishes exact cancellation in R BY IDENTITY
+rather than by tolerance; (P3), the coefficient condition, is likewise node identity because equal
+constants are one node; (P4) is a use count. At the IR layer (P2) and (P3) were array scans. A
+`PerStep` closure is also newly worth having: it keeps the node count but removes the sequential
+dependence, so `ir::infer` stops seeing a scan — **and the Stage A compounding scan d10 is 255,687
+rows, 69% of the B=64 run and 74% at B=1 (M3-gate-1), a structure D41 forbids the planner to fuse or
+inline.** The single largest block of interpreter time is the one the planner may not touch.
+
+**THE MAIN STRUCTURAL QUESTION, and it is new: where chain detection comes from.** Audited:
+`Inference::detect_chains` (`src/ir/signature.cpp:408`) operates over tape nodes but runs as phase
+five of `Inference::run`, and it both READS `boundary_` (it walks "stopping at boundaries", D41) and
+WRITES it (marking each chain step and the chain's init as boundaries, clearing inner nodes). **It is
+not a function of the tape. It is a function of (tape, boundary set) that mutates the boundary set.**
+The same prefix also produces the deep-hash partition class-uniform saturation needs, so both wanted
+things come from one place. Three options: (a) factor the prefix out; (b) duplicate a weaker
+detector from use counts alone — rejected, it would find a DIFFERENT chain set than `infer` with no
+test able to say which is right, and D41's rules are subtle enough that a second implementation
+drifts; (c) run `infer` twice — correct and wasteful (~1.0 s of a 7.8 s Stage A record) and needing
+a node-id backlink `Program` does not carry, so if plumbing is needed anyway (a) is the better place
+for it. **Recommended: (a) in its cheap form** — `ir::analyse(tape)` (new
+`include/epykos/ir/analysis.hpp`, declaration only) runs the existing phases up to and including
+`detect_chains` and returns what they found, leaving `infer` byte-for-byte unchanged. No staleness
+risk: the stage rewrites the tape and `infer` then recomputes everything from the rewritten tape, so
+the analysis is advisory input to the rewriter, never a contract. Cost: one extra prefix pass, plus
+coupling to inference's phase order — mitigated by it being the SAME code, which has M1/M3
+round-trip gates on it.
+
+**The old e-graph is NOT rebuilt and D62's whole-program-e-node problem is BYPASSED, not solved**:
+algebra no longer happens at that layer, and layout rewrites do not need a saturating search to
+find. Recommendation, and the open question from the first amendment now resolves easily: **retire
+the program tier as a search and make the plan tier a deterministic compilation pass.** The
+interpreter needs a plan regardless, so planning is compilation; D63 records rediscovery "passes BY
+IDENTITY"; D68 prices a perfect plan-level cost model at ~0.08% of Stage A's wall clock; and D62
+measured the plan tier as the binding constraint (105,977 plan nodes, 10.5 GiB on 60 trades).
+Retiring it also deletes `RefirePolicy::PipelineOrderedPlans` and the completeness it gave up.
+`RefirePolicy` generally is not ported: at the tape, k independent edits are k choice points, O(k).
+
+**The oracle is real as of today and §5 is rewritten against its numbers** (D72, `p0/oracle`):
+`epykos::Wide`, 106 significand bits, the templated maths instantiated at it unchanged. Measured
+naive-path error on Stage A: **valuation 1.616e-13 (leg PV), sensitivity 2.064e-10**. Three
+consequences. The headroom is now a number, not a hypothesis. Sensitivities have about three more
+decades of room than valuation, so §4's "valuation is held tight; sensitivities are allowed more" is
+an empirical fact rather than a policy. And the 656x spread IS the cancellation this design exists
+to remove — `(DF_s/DF_e - 1)` with the ratio within 1e-4 of 1 discards ~13 digits and amplifies by
+~1e4 — so **a successful telescope should move that number down, which is a sharper falsification
+test than anything the design asserts about itself.** `ErrorBudget::naive_path_stage_a()` names the
+measurement as a reference point and deliberately is not a default.
+
+**Extraction's metric changes, and it REDUCES the programme's biggest standing risk.** At this layer
+there is no plan and no interpreter, so `estimate_program` cannot be called without inferring first.
+`CostMetric::WeightedNodes` counts reachable nodes after cse+dce and does not consult the cost model
+at all — so FINDING a 250:1 collapse no longer depends on the 58.6%/49.7% instrument that has been
+the programme's weakest link. `InferAndEstimate` remains for candidates that are close. What remains
+is that node count is not time, and §8.5's experiment measures the gap.
+
+**Point 12 stands and its fix is now ONE LINE.** `ResidualProgram` already calls
+`standard_passes(slice_.tape)` immediately before `ir::infer(slice_.tape)`
+(`src/solver/residual.cpp:73-77`), so the stage drops between them exactly as on the main path:
+`algebra::reduce(slice_.tape, rules)`. No Program-level hook, no optional-pass threading. That is
+where the calibration solve's ~48% of Stage A lives.
+
+**Point 14's ranking is superseded. Recommended order now:** (a) count the shape classes with the
+existing deep hash — an afternoon, no rules, and it decides whether class-uniform saturation saves
+the placement at all (§8.9); (b) check the telescope's four obligations on the real Stage A tape, now
+all integer comparisons rather than array scans, and report the compounding domain's measured share
+(§8.3); (c) confirm the residual-program finding by dumping one `ResidualProgram`'s tape; then (d)
+**write telescoping as a fifth tape pass, not as an e-graph rule.** §8.1: the recurrence kind needs
+`ir::analyse` and a classifier and nothing else — no saturation, no extraction, no cost model — so
+the one deliverable with a 250:1 claim on it can be attempted for the cost of one pass, and the
+e-graph earns its several thousand lines only if that number is real. A minimal two-axiom saturation
+experiment (§8.9 step 2) is the cheapest honest test of the e-graph specifically.
+
+**Deliverable after this amendment.** `docs/TERM_REWRITING.md` rewritten; six headers under
+`include/epykos/algebra/` (`term`, `rule`, `error`, `recurrence`, `egraph`, `reduce`) plus
+`include/epykos/ir/analysis.hpp`; `src/algebra/names.cpp` (six `to_string` tables, no design logic);
+`tests/algebra/interface_test.cpp`, 14/14, adding a gate that no axiom names a gather — if one
+reappears the design has drifted back to the wrong layer. The six IR-layer headers, the old name
+table and the old test are DELETED. No existing rule, pass, cost model or e-graph source is touched.
+Still no mutant: still no behaviour to mutate.

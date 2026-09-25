@@ -223,10 +223,13 @@ the calibration residuals and the book, no discount factor computed twice.
 > below are *data-movement* rewrites and that not one of them can collapse a product, which is the failure M4's
 > post-mortem exists to prevent. They are **kept and demoted** (PRINCIPLES.md §7): still correct, still tested, worth
 > 1.73×–1.88× on a workload with that structure, no longer what the optimiser *is*. The algebraic layer that replaces
-> them as the optimiser's centre is designed in **`docs/TERM_REWRITING.md` (D73)** — a rewrite that replaces a *term*
-> rather than a whole `ir::Program`, e-classes over terms, an identity set over the existing twenty ops, and the
-> recurrence rule kind of PRINCIPLES.md §2a. That design is an interface only; nothing implements it yet, and the table
-> below is the pipeline as built.
+> them as the optimiser's centre is designed in **`docs/TERM_REWRITING.md` (D73)**, and it is a NEW STAGE rather than a
+> replacement for these rules: `record -> tape passes -> symbolic algebraic reduction -> ir::infer -> plan -> execute`.
+> The term graph it rewrites is the TAPE, which is already a hash-consed term DAG (`tape/tape.hpp`) that
+> `tape/passes.cpp` already rewrites in place. The rules below are unaffected in what they do, and the R1-R7 /
+> `rewrite::Proposal` interface is kept unchanged — a `Proposal` returns a whole Program because by this stage
+> `ir::infer` has turned terms into arrays, which is correct for this layer. That design is an interface only; nothing
+> implements it yet, and the table below is the pipeline as built.
 
 Applied in order. Each has an **exactness class**: *E0* bit-identical, *E1* ≤ 1 ulp per op (tolerance-gated; for a value
 that is a difference of terms, such as a swap PV, the tolerance is relative to the scale of the terms, D26).

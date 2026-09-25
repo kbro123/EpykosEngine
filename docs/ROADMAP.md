@@ -152,6 +152,19 @@ delta vs bump at 1e-4 relative; absolute timing target stated as an estimate unt
 The same bundle, instruments, portfolio and scenarios on SwapEngine as a black box, one fingerprint, each engine's
 own timing harness; an informational table with like-for-like caveats under `bench/compare/`. No gate.
 
+**Stage 1 done ahead of Stage C, on the risk ladder alone (D71, 2026-09-25).** Run on a single USD SOFR OIS
+curve rather than the Stage C desk, because that is what can be made like-for-like without reading the other
+engine's source: `fixtures/compare_ois.hpp` writes the problem in a purely time-based exchange form,
+`tools/compare/compare_ois` produces it and this engine's answers, and `scripts/compare_swapengine.py` feeds it
+to the other engine's public JSON interface and diffs the two. The two engines agree on the O3 ladder
+d(book PV)/d(quote) to **2.747e-13** relative, and on discount factors, model par rates and per-trade PVs to
+between 4e-14 and 3e-12; `bench/compare/README.md` is the matched-versus-unmatched statement D21 asks for.
+**No timing has been taken**: it is deferred to a reserved machine, and the largest caveat on whatever ratio it
+produces is already known — the two engines can be made to agree on the answer but not to do the same
+arithmetic, because their bundle can only express the telescoped coupon and ours evaluates the daily product
+(D71 §6a). Stage C breadth (GBP, JPY, xccy, the G10 desk) is untouched and needs five more currencies'
+conventions.
+
 ## Later
 Payoff scripting language targeting the op set; vol surfaces/cubes; SIMM and marginal (pre-trade) analytics; portable
 kernel serialisation; GPU backend for the batch axis.

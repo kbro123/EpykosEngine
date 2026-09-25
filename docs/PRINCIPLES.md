@@ -107,6 +107,45 @@ is a bug in the pricing code, not something the optimiser fixes.
 The oracle is the templated maths instantiated at wider precision. That the maths is templated on
 `Scalar` was decided on day one (D3) and is what makes this nearly free.
 
+**The oracle is a DIAGNOSTIC, not a gate** (owner, 2026-09-25: "I don't see why it is necessary at
+all if the simple rules of algebra are followed"). He is right, and the reasoning that put it in the
+contract was weaker than it sounded:
+
+  * a rewrite's correctness is established by its identity, once, when the identity is written —
+    re-checking it at runtime against a high-precision reference is re-checking algebra already
+    known to be true;
+  * an implementation bug in the rewriter shows up as DISAGREEMENT between the paths, which needs
+    no notion of truth;
+  * so does a cancelling form. Truth only adds something when two paths disagree and you must know
+    which to believe, and a person can settle that on the rare occasion it happens;
+  * a bug-detection tolerance does not need to be principled or tight. Something loose never fires
+    on legitimate rounding and still catches a genuinely broken rewriter.
+
+**The operative contract is therefore: verified identities, path-to-path agreement within a loose
+tolerance, and determinism.** `epykos::Wide` is kept and is not deleted — its one measurement (§4b)
+is worth having — but it does not run routinely, it is not part of any gate, and no rewrite waits on
+it.
+
+**Rigour moves from testing to the rule definitions.** When the engine holds "a scan multiplying by
+consecutive ratios collapses to the ratio of its endpoints" as a general fact, someone must have
+established that correctly, and the cost of getting it wrong is every program that matches. That is
+a proof obligation discharged once, on paper, by whoever writes the rule. It is a better place for
+rigour than a runtime instrument and it is cheaper.
+
+### 4b. The measurement that was worth making anyway
+
+Naive path against truth, fingerprint `d448afd70180`, all measured (D72):
+
+| | valuation | sensitivities |
+|---|---|---|
+| M1 book | 1.0e-15 to 1.8e-15 | 7.2e-15 to 1.1e-13 |
+| Stage A | 7.9e-14 to 1.6e-13 | **5.2e-11 to 2.1e-10** |
+
+Sensitivities are 62x worse than valuation on the M1 book and 656x worse on Stage A. §4's
+per-output-class split is therefore measured rather than judged. And the bitwise contract retired
+earlier today was demanding exact reproduction of a risk number good to about ten significant
+figures.
+
 **Tolerances are per output class, not global** (owner, 2026-09-25). Valuation is held tight;
 sensitivities are allowed more, because risk numbers tolerate error that P&L does not. The specific
 numbers belong in `PROBLEM.md` beside the outputs they govern, not here.

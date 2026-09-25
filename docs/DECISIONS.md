@@ -2569,8 +2569,21 @@ no mutant selected**, and both of this entry's mutants are caught, each by
 should look like. Stated precisely rather than rounded up: this entry swept its own two mutants, not the full
 registry of 50; the other 48 are disjoint from every file it touches (`src/optimise/cost.cpp`,
 `src/optimise/plan_bridge.cpp`) except through `optimise::estimate_program`, which no other mutant's gate reaches,
-and CI's ubuntu mutation job runs the merged registry in full on the landed commit — it did, and passed, on
-`f9d55dc` (run `36068790900`), which carries this entry's (a)-(d) and both mutants.
+and CI's ubuntu mutation job runs the merged registry in full on the landed commit.
+
+**CI, all four jobs, on each of this entry's three code commits** (`ubuntu-latest / release`,
+`macos-latest / release`, `ubuntu-latest / reference`, `ubuntu-latest / mutation`, the last running the whole
+50-mutant registry):
+
+| commit | what it carries | run | conclusion |
+|---|---|---|---|
+| `f9d55dc` | (a)-(d): step pairing priced, `infer_plan` = `default_plan` | `36068790900` | **success**, 4/4 |
+| `aa6643d` | (c2): the bridge models a short `domain` vector | `36070890432` | **success**, 4/4 |
+| `fdd07a5` | (d2): the fit plans at the interpreter's real `Lt` | `36075811323` | **success**, 4/4 |
+| `28343a7` | HEAD; the two trailing commits are docs-only and carry identical code to `fdd07a5` | `36077144720` | **success**, 4/4 |
+
+GCC and Apple clang have diverged twice in this project (D46 on FMA contraction, D61 on unsequenced operand
+evaluation), so "green on Apple clang" was not taken as green: every row above includes the two GCC jobs.
 
 Exactness: this package declares none and changes none. It adds no rewrite, so there is no arithmetic to classify
 — the same precedent D49 and D62 set. No `-ffast-math`. No SwapEngine file opened.

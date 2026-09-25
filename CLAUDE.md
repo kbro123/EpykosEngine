@@ -57,8 +57,9 @@ the M1 book's 10 domains and 3 of the full Stage A tape's 67, and R1, given that
 and 16 of the 80 domains Stage A becomes. The e-graph search is provably untouched by it -- R2's site count is 0 then 0 on the M1 book and 1 then 1 on the
 bounded book, so the extraction moves only for D63's reasons -- which is the same conclusion again: rules firing
 and the search finding a win are different claims.
-The repriced model now captures 93% of the pairing effect but only 31% of reduction fusion and 11% of
-inlining, which is where the next package should start. M5
+The repriced model now gets step pairing right to within the spread of the measurement itself (1.0297x predicted
+against 1.021-1.032x measured) but captures only 31% of reduction fusion and 11% of inlining, which is where the
+next package should start. M5
 onward awaits the owner's decision on this failed exit gate. Nothing merges to `main` without the owner.
 
 ## Rules

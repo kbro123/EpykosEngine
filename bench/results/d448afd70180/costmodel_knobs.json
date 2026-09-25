@@ -165,7 +165,8 @@
   "fuse_pairs": {
    "measured": 1.032,
    "predicted": 1.0297,
-   "share_seen_pct": 93.0
+   "share_seen_pct": 93.0,
+   "comment": "Two independent measurements of this contrast exist: the 2-repetition knob sweep above (1.032x) and the dedicated 3-repetition A/B (1.021x). The predicted 1.0297x is 93% of the first and 142% of the second, so the safe statement is that the model now gets step pairing right to within the spread of the measurement itself. Before D63 it predicted 1.000x by construction."
   },
   "fuse_reductions": {
    "measured": 1.618,

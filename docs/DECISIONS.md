@@ -2491,7 +2491,14 @@ what §3 measured:
 | `fuse_reductions` | 1.618x | 1.1948x | **31%** |
 | `inline_producers` | 1.124x | 1.0139x | **11%** |
 
-**The model now sees almost all of the SMALLEST decision and roughly a tenth to a third of the two large ones.**
+Read the `fuse_pairs` row with §3's two independent measurements of it side by side: the 2-repetition knob sweep
+says 1.032x and the dedicated 3-repetition A/B says 1.021x, and the model predicts 1.0297x — so "93%" is against
+the first and would be 142% against the second. The safe statement is that the model now gets step pairing right
+to within the spread of the measurement itself, where before this entry it predicted 1.000x by construction. The
+`fuse_reductions` and `inline_producers` rows are not close calls of that kind: those are 3x and 9x
+under-predictions of effects measured at 61.8% and 12.4%.
+
+**The model now sees essentially all of the SMALLEST decision and roughly a tenth to a third of the two large ones.**
 It is no longer blind — every data-movement coefficient but `intermediate_ns` came off zero in this fit — but it
 under-prices reduction fusion by about 3x and inlining by about 9x, and those are the decisions worth 62% and 12%
 of the M1 book. A search ranking candidates that differ in materialisation is therefore still ranking them with a

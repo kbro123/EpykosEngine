@@ -3702,3 +3702,14 @@ re-expressed in positive integers with a documented quantisation. None of that w
 added, so this package declares no exactness class and registers no mutant — the same precedent D49 and D62 set
 for packages that add no arithmetic. `src/optimise/`, `src/rewrite/`, the cost model and the pricing maths are
 untouched. No `-ffast-math`. **No SwapEngine file opened.**
+
+**CI on the landed commit (`25a8108`, run
+[36198254392](https://github.com/kbro123/EpykosEngine/actions/runs/36198254392), 2026-09-25): `ci_green` = true,
+all four jobs.** macos-latest/release, ubuntu-latest/release and ubuntu-latest/reference all success, and
+ubuntu-latest/mutation reports "50 mutant(s), 57 gate test(s) ... every mutant caught" on GCC 13 — which is the
+count this branch inherits from the `mx/head-to-head` merge, unchanged by this package, exactly as expected of a
+package that adds no rewrite. Polled for that SHA rather than for the branch. Local, fingerprint `d448afd70180`:
+`ctest --preset release` 112/112 and `--preset reference` 112/112, 0 failed each. Note for whoever reads this
+next: the GCC 13 result that matters for the CANDIDATE is not this CI run — `egraphs.cpp` is not in the build, so
+CI never compiles it. That verification is §3's separate `gcc:13` container probe (GCC 13.5.0, `-std=c++20`),
+and it is the only GCC evidence for the library itself.

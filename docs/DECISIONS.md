@@ -2995,7 +2995,7 @@ gate and no mutant: this entry changes nothing any program computes or any searc
 
 ### 1. What was built: `costmodel_collect` as a wall-clock instrument
 
-Two additions, both in `tools/costmodel/collect_main.cpp`.
+Three additions, all in `tools/costmodel/collect_main.cpp`.
 
 **(a) Every run times its own rep loop** and prints `wall_us_per_rep` with the 1-minute load before and after
 (D9). The line is printed in EVERY preset, outside the `EPYKOS_EXEC_PROFILE` `#ifdef`, so a contrast can be taken
@@ -3130,7 +3130,7 @@ interpreters of §2 are counted in the solve cost, where they belong, because no
   * The whole-program interpreter's share of one O4 scenario-lane batch — `BM_Evaluate` over `BM_Run`, the
     interpreter alone over the whole lane including its block solves — is **8.91%** at B=1, **5.15%** at B=8 and
     **5.20%** at B=64. The other ~95% is the calibration solves, which no M4 rule touches.
-  * Its share of the O3 reverse risk ladder is **0%** (§2). Those three bullets are measured ratios of committed
+  * Its share of the O3 reverse risk ladder is **0%** (§2). Those two bullets are measured ratios of committed
     benchmark medians, nothing else.
   * **Estimated, and labelled as an estimate per CLAUDE.md**, because the committed benchmarks measure 64-lane
     batches and `PROBLEM.md` §4's Stage A is bigger than one batch: scaling each measured batch linearly to the
@@ -3146,7 +3146,7 @@ Multiply the ceiling by the share. The plan stage is worth 3.195% of the whole-p
 Stage A B=64 lane_tile 8 (the 1.0330x of §3, expressed as a saving). That is **0.166% of one O4 lane batch** —
 two measured quantities multiplied, no extrapolation anywhere in it — and, on the estimated whole-problem split
 above, **about 0.080% of the whole Stage A problem's wall clock**. A perfect plan-level cost model — zero error,
-not the <25% target, zero — buys two tenths of one percent of an O4 batch and under a tenth of one percent of
+not the <25% target, zero — buys under a fifth of one percent of an O4 batch and under a tenth of one percent of
 the problem. Nothing in the recommendation below turns on the second figure's precision: the first is enough.
 
 **Correction to a number that has been circulating.** The brief that commissioned this work read D55's 9.56% as

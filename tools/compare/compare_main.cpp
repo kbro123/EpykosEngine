@@ -1,7 +1,7 @@
 // tools/compare/ — the MX head-to-head driver (ROADMAP.md §MX, D21, D71).
 //
 //   compare_ois --exchange <path> --results <path> [--trades N] [--noise-bp X] [--seed S]
-//               [--valuation YYYY-MM-DD] [--samples N] [--obs-days]
+//               [--valuation YYYY-MM-DD] [--samples N] [--obs-days] [--tenors 1Y,2Y,...] [--start-years N]
 //
 // Builds the `fixtures::compare_ois` problem, records it as ONE tape, calibrates it through the
 // implicit node, prices the book and takes the O3 ladder through the IFT; writes
@@ -19,6 +19,8 @@
 // exchange file to the other engine's own public JSON interface and diffs the two answer sets.
 //
 // Like everything under tools/, this is a measurement tool, not a gate and not a ctest target.
+#include <algorithm>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -78,6 +80,20 @@ int main(int argc, char** argv) {
     else if (a == "--valuation") opt.valuation = next();
     else if (a == "--samples") n_samples = std::stoi(next());
     else if (a == "--obs-days") obs_days = true;
+    else if (a == "--start-years") opt.max_start_offset_years = std::stoi(next());
+    else if (a == "--tenors") {
+      // A comma-separated calibration tenor set, one instrument and ONE KNOT each (the fixture
+      // keeps the block square), overriding fixtures::compare_ois_default_tenors()'s sixteen.
+      // e.g. --tenors 1Y,2Y,...,50Y for a twenty-five-knot curve.
+      opt.tenors.clear();
+      const std::string list = next();
+      for (std::size_t b = 0; b <= list.size();) {
+        const std::size_t e = std::min(list.find(',', b), list.size());
+        if (e > b) opt.tenors.push_back(list.substr(b, e - b));
+        b = e + 1;
+      }
+      if (opt.tenors.empty()) usage("--tenors given an empty list");
+    }
     else usage(("unknown argument " + a).c_str());
   }
   if (exchange_path.empty() || results_path.empty()) usage("--exchange and --results are both required");

@@ -4150,3 +4150,144 @@ quantity, and it turns a 42x deficit against a specialist into a 2.8x lead.
 No SwapEngine source file was opened. Only its built binaries were executed, per D21. The telescoped form remains
 test-only spike code (D74) and must not become production maths: `PRINCIPLES.md` §2 requires the engine to find
 this itself.
+
+## D78 — The representative head-to-head: both engines in one process, one clock. We lose calibration, we win risk above ~32 trades, and D77's 2.82x does not survive (2026-09-27)
+
+**This entry supersedes D77's headline and relaxes D11/D21 for exactly one file.**
+
+### 1. Why it was needed
+
+D76 and D77 measured this engine through Google Benchmark and the other engine through its JSON CLI,
+one fresh process per sample. Two clocks, two processes, one of them cold. D77 could therefore only
+bound its own answer — "their `risk_us` is one cold sample per process, ours is a warm in-process
+median, so 2.82x is an UPPER bound" — and it inherited its agreement check from a separate run of
+`scripts/compare_swapengine.py` against a separate exchange file. It was also taken on sixteen knots
+and sixty-four trades, on a book whose trades all spot-start and therefore share twenty-five
+schedules between them. None of that is a desk problem.
+
+The owner asked for the comparison to be made properly: one local test, both engines, the same
+single-curve calibration, a thousand swaps, a risk ladder, calibration timed cold AND hot, twenty-five
+knots, the same interpolation.
+
+### 2. The D11 / D21 relaxation, and its exact extent
+
+D11 forbids reading the other engine's source; D21 permits building and running it as a black box.
+The four quantities above cannot be got from the black box: its stateless JSON CLI reports
+`portfolio_risk.risk_us` and nothing else — no calibration time, no pricing time, and no way to reach
+the warm re-solve at all (`api/api_surface.py` marks `calibrate`, `recalibrate` and `resolve`
+`verb: None`, i.e. pybind-only). The owner directed, in terms, that the code be read as far as needed
+to write a C++ test outside the CLI.
+
+So D78 relaxes D11 for `tools/h2h/h2h_main.cpp` **and nothing else**. What that buys and what it costs:
+
+* **Extent.** `tools/h2h/` is the only directory in this repository that compiles against another
+  engine's headers. It is behind `-DEPYKOS_H2H=ON`, OFF by default, requires `-DSWAPENGINE_ROOT=`,
+  and is never configured in CI. `include/epykos/`, `src/`, `tests/` and every other target are
+  untouched, so the clean-room claim for the ENGINE is intact: nothing under measurement here was
+  written with knowledge of that engine's internals.
+* **What was read**, in full, and it is the public facade only — no solver, no curve, no coupon and
+  no schedule implementation: the top-level `CMakeLists.txt` (for flag parity),
+  `include/swaps/api/bundle_api.hpp`, declarations from `include/swaps/api/codec.hpp`, the
+  `CalibrationResult` struct in `include/swaps/calibration/lm.hpp`, the `flat_x0` and `market()`
+  signatures in `include/swaps/calibration/bundle_problem.hpp`, the `MultiCurveBook::Position`
+  fields in `include/swaps/portfolio/portfolio.hpp`, `build/generated/swaps/simd_config.hpp` and
+  `build/CMakeCache.txt` for the detected ISA, plus directory listings. `bench/compare/README.md` §0
+  carries the same list.
+* **Cost.** The clean-room boundary is now one-way rather than absolute: this session has seen that
+  engine's public API shape. Any future design decision that resembles it must be justified from
+  `docs/` and not from that reading.
+
+### 3. Flag parity — the reason the numbers are comparable at all
+
+Measured, not assumed. Both engines compile to **`-O3 -march=x86-64-v3 -fno-math-errno`** under the
+same Apple clang 21 on fingerprint `d448afd70180`: ours from `build/release/epykos_flags.txt`, theirs
+from `CMAKE_CXX_FLAGS_RELEASE` plus the `-march=x86-64-v3` its own `DetectISA` selected and recorded
+in `simd_config.hpp`. Neither side is measured under kinder flags. Both vendor Eigen 3.4.0.
+
+### 4. The fixture, and the two defects found while making it representative
+
+Twenty-five calibration instruments on twenty-five knots (1Y–20Y annual, then 25Y, 30Y, 35Y, 40Y,
+50Y), one USD SOFR curve, a thousand OIS trades. The curve is log-DF piecewise linear on both sides —
+every knot in the other engine's `meeting` region with `back` empty, which is the setting in which
+its bundle curve is the same piecewise-constant-instantaneous-forward family. The interpolation is
+therefore not assumed to match; it is the same family by construction (D71).
+
+**(a) The thousand-trade book was degenerate, and now is not.** With every trade spot-starting, a book
+of N trades has only as many distinct schedules as there are tenors — twenty-five — so the E0 passes
+collapse the whole book and this engine's book-side cost is understated. `max_start_offset_years`
+(new) forward-starts a trade by a whole number of years: **189 distinct schedules over 1,000 trades**.
+It moved the answer very little (risk 5.59x → 5.16x, price 49.5x → 40.0x), which is the point — the
+win is now measured not to be an artefact of schedule sharing, where before it was merely hoped.
+
+**(b) The forward-start disagreement was NOT a stub, and the fixture's own comment said the wrong
+thing.** Turning the offsets on broke agreement at 1e-4 relative while the curve still agreed at
+5e-15. Localised per trade: **every disagreeing trade started on Saturday 2027-09-25 and every trade
+on a business day agreed to 1e-15.** Business-day-ADJUSTING the anniversary only shrank it to 5e-6,
+because the other engine rolls its schedule backward from maturity on the unadjusted annual grid, so
+a moved effective date becomes a two-day front stub. Walking the offset down to the nearest
+anniversary that is ALREADY a business day fixes it outright: book NPV 9.18e-14, ladder 6.24e-15,
+per-trade NPV 2.05e-13. About five offsets in seven survive.
+
+### 5. The gate
+
+`tools/h2h` refuses to report a timing unless the two engines agree **in the same process, on the
+objects about to be timed**, at `scripts/compare_swapengine.py`'s own tolerances. On the reported
+run: naive book NPV 1.37e-14 / ladder 4.64e-15, telescoped 1.55e-14 / 7.28e-15. The two coupon forms
+agree with each other to 2.92e-14.
+
+### 6. The measurement
+
+Fingerprint `d448afd70180`, `release`, one process, one `std::chrono::steady_clock`, ours and theirs
+interleaved round-robin inside each repetition, 20 repetitions, medians, 1-minute load 2.76 before and
+2.71 after. `ours naive` is the engine's own maths — the product loop of
+`maths/instrument/coupon.hpp`. `ours telesc` is the D74 hand-written spike, which is the SAME
+ARITHMETIC the other engine is given: one endpoint discount-factor ratio per accrual. The telescoped
+column is the like-for-like comparison of the two engines' machinery; the naive column is what this
+engine is today.
+
+| phase, median us | ours naive | ours telesc | theirs | telesc ratio |
+|---|---|---|---|---|
+| calibrate_cold | 59,104.4 | 448.9 | 236.9 | **0.53x** |
+| calibrate_hot | 13,203.3 | 113.7 | 16.1 | **0.14x** |
+| price 1,000 trades | 348.5 | 73.6 | 2,946.2 | 40.02x |
+| risk ladder | 14,437.6 | 441.5 | 2,278.5 | **5.16x** |
+
+And the risk ladder against book size, the same protocol at each size:
+
+| trades | ours telesc | theirs | ratio |
+|---|---|---|---|
+| 16 | 137.2 | 126.9 | 0.93x |
+| 64 | 149.6 | 223.6 | 1.49x |
+| 256 | 216.7 | 698.7 | 3.22x |
+| 1,000 | 441.5 | 2,278.5 | 5.16x |
+
+### 7. What it says
+
+1. **D77's 2.82x does not survive an in-process comparison, and the direction of the error is the one
+   D77 named.** Its own caveat was right: the other engine's cold-per-process sample (166.0 us) is
+   roughly three times its warm in-process time on the same quantity. At sixty-four trades, D77's own
+   book size, the honest number is **1.49x**, not 2.82x. This is the third time a cross-process or
+   cross-run number has overstated a result here (D63's 1.066x, D76's 21x, now D77's 2.82x) and the
+   first time the protocol rather than the arithmetic has been fixed.
+2. **We lose calibration outright, at every book size.** Cold 1.9x slower, hot **7.1x** slower. Their
+   warm re-solve is a frozen-Newton tick on a compiled W-cache at 16 us; our warm+chord path is 114 us
+   and rebuilds its Jacobian on every call (`jacobians=1` on every row, the same counter D77 flagged).
+   Calibration cost is flat in book size on both sides, so this is a pure engine-against-engine loss
+   and it is the clearest open target in the repository.
+3. **We win the risk ladder above about thirty-two trades, and the mechanism is the IFT.** Ours grows
+   3.2x for 62.5x more trades because a ladder through the implicit function theorem scales with the
+   twenty-five knots, not the book; theirs grows 18x. This is the design claim of `DESIGN.md`
+   measured against a specialist for the first time, and it holds.
+4. **The 250:1 representation handicap is the whole of the rest.** The naive column loses every phase,
+   by 250x on cold calibration and 33x on the risk ladder against our own telescoped column. The
+   engine cannot currently derive the collapse — `PRINCIPLES.md` §2a — so every number in the
+   `ours naive` column is what a user would get today.
+
+### 8. What it does not say
+
+The fixture is one currency, one curve, one product: fixed versus compounded SOFR OIS, which is the
+best case for the telescoping rewrite. Stage A's averaged RFR coupons do not telescope at all and are
+not measured here. The other engine's `risk_us` excludes forming the risk operator M where our ladder
+builds its Jacobian inside the timed region; the table above uses the OUTER clock on both sides, which
+is the honest comparison, and its own self-reported figure (2,146.9 us) is quoted in the run log as the
+floor. Informational under D9: nothing here gates anything.

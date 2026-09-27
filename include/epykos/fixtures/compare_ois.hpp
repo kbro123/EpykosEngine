@@ -71,6 +71,18 @@ struct CompareOisOptions {
   // built on one annual grid, so its trades share structure, and this engine's book-side cost is
   // understated relative to a real book. That caveat runs in THIS engine's favour.
   int max_start_offset_days = 0;
+  // Forward-start a trade by a WHOLE NUMBER OF YEARS, drawn in [0, min(this, term - 1)]. Unlike
+  // `max_start_offset_days` this does NOT create a front stub: the effective date lands on the
+  // same annual roll grid the termination already sits on, so both engines generate the same
+  // schedule and the agreement check still passes (measured -- D78).
+  //
+  // Why it exists. With every trade spot-starting, a book of N trades has only as many DISTINCT
+  // schedules as there are calibration tenors, so the E0 passes collapse the whole book to a
+  // handful of coupon chains and this engine's book-side cost is understated relative to a real
+  // desk book -- a caveat bench/compare/README.md §4 item 1 records as running in OUR favour.
+  // Whole-year starts turn T tenors into O(T^2) distinct (effective, termination) schedules and
+  // put that caveat under measurement instead of leaving it as prose.
+  int max_start_offset_years = 0;
   int max_batch = 64;
 };
 

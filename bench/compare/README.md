@@ -19,6 +19,27 @@ Precisely what was read of it, since "black box" is a claim and not a mood (D71)
 | `conventions/conventions.json` | D37, and it was already imported into `blueprints/` |
 | directory listings | to find the above |
 
+**That was true of `bench/compare/` and remains true of it.** It is NO LONGER true of the repository
+as a whole: **D78 (2026-09-27) relaxed D11 for `tools/h2h/h2h_main.cpp` alone**, the representative
+head-to-head that links both engines into one process so the four phases can be timed on one clock.
+The black box could not supply them — its stateless CLI reports `portfolio_risk.risk_us` and nothing
+else, and the warm re-solve is not reachable statelessly at all. Read for D78, in full, public facade
+only, no solver / curve / coupon / schedule implementation:
+
+| read for D78 | why |
+|---|---|
+| top-level `CMakeLists.txt` | flag parity — both engines are `-O3 -march=x86-64-v3 -fno-math-errno` |
+| `include/swaps/api/bundle_api.hpp` | `BundleSession`: calibrate / recalibrate / price_portfolio / price_portfolio_risk |
+| `include/swaps/api/codec.hpp` (declarations) | `bundle_from_json`, `book_from_json` — building its problem from OUR exchange file |
+| `include/swaps/calibration/lm.hpp` (`CalibrationResult`) | `solve_micros` |
+| `include/swaps/calibration/bundle_problem.hpp` (two signatures) | `flat_x0`, `market()` |
+| `include/swaps/portfolio/portfolio.hpp` (`MultiCurveBook::Position`) | the book type the two entry points take |
+| `build/generated/swaps/simd_config.hpp`, `build/CMakeCache.txt` | the ISA its build detected |
+
+`tools/h2h/` is behind `-DEPYKOS_H2H=ON`, OFF by default, never configured in CI, and is the only
+target here that compiles against those headers. Everything under `include/epykos/` and `src/` is
+still clean-room.
+
 **Not read: any `.cpp` or `.hpp`, anywhere in that checkout** — including `bench/risk_bench.cpp`,
 which is where its own risk fixture lives and is exactly why this comparison runs in the direction
 it does (§4 and D71 §1). Most of the request schema was not read at all but recovered by probing

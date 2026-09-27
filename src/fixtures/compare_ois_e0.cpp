@@ -214,6 +214,36 @@ CompareOis make_compare_ois(const CompareOisOptions& options) {
     const int max_offset = std::min(options.max_start_offset_days, term_days / 2);
     const int offset = max_offset > 0 ? static_cast<int>(pb.uniform() * static_cast<double>(max_offset)) : 0;
     t.effective = anchor.effective + offset;
+    // A whole-year forward start (D78). The draw is taken ONLY when the option is on, so that
+    // `max_start_offset_years == 0` leaves the random stream -- and therefore every notional,
+    // side and fixed rate of the default book -- bit-identical to what D71, D74, D76 and D77
+    // measured. A fixture that silently re-rolls its own book when an unrelated option is added
+    // would invalidate every number already recorded against it.
+    const int term_years = static_cast<int>(std::lround(static_cast<double>(term_days) / 365.25));
+    const int year_cap = std::max(0, std::min(options.max_start_offset_years, term_years - 1));
+    if (options.max_start_offset_years > 0 && year_cap > 0) {
+      const double year_draw = pb.uniform();
+      const int k = std::min(year_cap - 1, static_cast<int>(year_draw * static_cast<double>(year_cap)));
+      if (k > 0) {
+        // The anniversary must be a business day ON ITS OWN, not one adjusted onto a business
+        // day. Measured, D78, in two steps:
+        //   * a RAW anniversary that lands on a weekend is the whole cause of a forward-started
+        //     book disagreeing -- every trade whose effective fell on a Saturday was wrong by
+        //     1e-6 to 1e-4 relative, every trade on a business day agreed to 1e-15;
+        //   * ADJUSTING it (Saturday -> Monday) only shrinks the error to 5e-6, because the other
+        //     engine rolls its schedule backward from maturity on the unadjusted annual grid, so
+        //     a moved effective date becomes a two-day front stub -- the same stub effect the
+        //     `max_start_offset_days` knob above runs into, and the reason that knob defaults to 0.
+        // So the offset is walked DOWN to the nearest anniversary that is already a business day,
+        // which is on the grid and needs no adjustment. About five in seven offsets survive,
+        // which is ample structural diversity; k = 0 (spot) is the terminating case.
+        const InstrumentConvention& oconv = s.registry.instrument(s.blueprints.blueprint("USD-SOFR-OIS").convention);
+        const Calendar& ocal = s.registry.calendar(oconv.calendar);
+        int kk = k;
+        while (kk > 0 && !ocal.is_business_day(conventions::add_years(t.effective, kk))) --kk;
+        if (kk > 0) t.effective = conventions::add_years(t.effective, kk);
+      }
+    }
     t.termination = anchor.termination;   // a knot, by construction
     const double lo = std::log(1.0e6), hi = std::log(2.0e8);
     t.notional = std::exp(pb.uniform_range(lo, hi));

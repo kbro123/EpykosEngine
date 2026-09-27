@@ -42,6 +42,7 @@ option(EPYKOS_BUILD_BENCH "Build the Google Benchmark executables under bench/" 
 option(EPYKOS_WERROR      "Treat warnings as errors in epykos targets (not third_party)"       OFF)
 option(EPYKOS_MUTATIONS   "Compile the registered mutants (include/epykos/mutation) into libepykos; EPYKOS_MUTANT=<name> selects one at run time. The mutation preset only, never a gated build (D32)" OFF)
 option(EPYKOS_EXEC_PROFILE "Compile exec::Interpreter's per-domain wall-clock timers (src/exec/interpreter.cpp); prints to stderr at process exit. The profile preset only (tools/costmodel/'s calibration): never a gated or perf-gated build, the instrumentation adds overhead to every run()" OFF)
+option(EPYKOS_H2H         "Build tools/h2h, the representative head-to-head that links a SECOND engine (D78). OFF by default and never in CI: needs -DSWAPENGINE_ROOT=<a configured build of it>. The only target here that compiles against another engine's headers" OFF)
 option(EPYKOS_BUILD_TOOLS "Build the executables under tools/ (tools/costmodel/'s cost-model calibration; D9 numbers, never engine API)" ON)
 
 # ---------------------------------------------------------------------------------------------

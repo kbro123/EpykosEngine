@@ -570,8 +570,7 @@ PassResult affine_collapse(Tape& tape) {
 
 // ---- composition ---------------------------------------------------------------------------
 
-namespace {
-
+// Declared in the header (epykos/tape/passes.hpp) because `compile` composes passes too.
 void compose(PassResult& total, const PassResult& step) {
   for (node_id& m : total.remap) {
     if (m != invalid_node) m = step.remap[idx(m)];
@@ -580,7 +579,118 @@ void compose(PassResult& total, const PassResult& step) {
   total.changed += step.changed;
 }
 
+// ---- simplify: algebraic peepholes, ABOVE THE PIN -------------------------------------------
+//
+// PRINCIPLES.md §10 steps 4-6. Every rule here is an identity in R and NOT in floating point:
+// each removes a rounding, which is precisely what the pin licenses above it and forbids below.
+// `docs/PRINCIPLES.md` §5.2 is the contract; §3a is the measurement that motivated the rule set.
+//
+// WHY PEEPHOLES AND NOT MACHINERY. Telescoping looked like it needed a recurrence solver, or an
+// e-graph, or creative telescoping (D74, D75 -- both retracted by D79). It needs neither. The
+// recorded coupon is
+//
+//     acc <- acc * (1 + ((DF(s)/DF(e) - 1) / tau) * w)          with w the same double as tau
+//
+// so `tau` is ONE hash-consed node appearing in both the divide and the multiply, and the whole
+// collapse is four local rewrites applied in one forward sweep:
+//
+//     mul(div(x, c), c)            -> x           the tau cancellation
+//     add(a, sub(x, a))            -> x           the +1/-1 cancellation
+//     mul(one, x)                  -> x           acc starts at 1
+//     mul(div(p, q), div(q, s))    -> div(p, s)   THE TELESCOPE
+//
+// The accumulator is left-associated, so at step i the tape holds `mul(div(d0,di), div(di,di+1))`
+// and the last rule fires once per day, linearly, with no search. Measured on the real
+// compare_ois tape before this pass existed: 94,942 additive cancellations, exactly the recorded
+// observation-day count.
+//
+// PRECONDITIONS, stated rather than hidden. `mul(div(x,c),c) -> x` and the telescope both need
+// the cancelled operand to be non-zero and finite, and `div(x,x) -> 1` needs x non-zero. Where
+// it is not, the ORIGINAL expression is already dividing by zero and is undefined in R, which is
+// the reference §5.2 names. So the rewrite changes behaviour only where the recorded maths was
+// already undefined. That is the same trade every compiler makes for these identities and it is
+// a decision, not an oversight.
+//
+// ONE FORWARD SWEEP REACHES THE FIXPOINT for this rule set, because the tape is in topological
+// order and a node is emitted only after its operands: every rule's inputs are already reduced.
+// `compile` still iterates, because cse and affine_collapse can expose matches this pass could
+// not see the first time.
+namespace {
+
+// The rewritten node for `op(a, b)` on the tape being built, or invalid_node for "no rule".
+// `t` is the OUTPUT tape, so `a` and `b` are already-reduced ids and their structure is final.
+node_id simplify_binary(Tape& t, Op op, node_id a, node_id b) {
+  const Node& na = t[a];
+  const Node& nb = t[b];
+  const auto konst_is = [&](node_id x, double v) {
+    const Node& n = t[x];
+    return n.op == Op::Const && n.konst == v;
+  };
+  switch (op) {
+    case Op::Mul:
+      if (konst_is(a, 1.0)) return b;
+      if (konst_is(b, 1.0)) return a;
+      // mul(div(x, c), c) -> x, either operand order.
+      if (na.op == Op::Div && na.b == b) return na.a;
+      if (nb.op == Op::Div && nb.b == a) return nb.a;
+      // THE TELESCOPE: mul(div(p, q), div(q, s)) -> div(p, s), either operand order.
+      if (na.op == Op::Div && nb.op == Op::Div) {
+        if (na.b == nb.a) return t.binary(Op::Div, na.a, nb.b);
+        if (nb.b == na.a) return t.binary(Op::Div, nb.a, na.b);
+      }
+      break;
+    case Op::Div:
+      if (konst_is(b, 1.0)) return a;
+      if (a == b) return t.constant(1.0);
+      // div(mul(x, c), c) -> x, either operand order inside the Mul.
+      if (na.op == Op::Mul && na.b == b) return na.a;
+      if (na.op == Op::Mul && na.a == b) return na.b;
+      // div(div(p, q), r) -> div(p, mul(q, r)) is NOT done: it trades a divide for a multiply
+      // and a divide, which is not fewer operations. Only rules that remove work are here.
+      break;
+    case Op::Add:
+      if (konst_is(a, 0.0)) return b;
+      if (konst_is(b, 0.0)) return a;
+      // add(a, sub(x, a)) -> x, either operand order.
+      if (nb.op == Op::Sub && nb.b == a) return nb.a;
+      if (na.op == Op::Sub && na.b == b) return na.a;
+      break;
+    case Op::Sub:
+      if (konst_is(b, 0.0)) return a;
+      if (a == b) return t.constant(0.0);
+      // sub(add(x, a), a) -> x, either operand order inside the Add.
+      if (na.op == Op::Add && na.b == b) return na.a;
+      if (na.op == Op::Add && na.a == b) return na.b;
+      break;
+    default:
+      break;
+  }
+  return invalid_node;
+}
+
 }  // namespace
+
+PassResult simplify(Tape& tape) {
+  const Tape old = tape;
+  Rebuilder rb(old);
+  std::size_t changed = 0;
+  const auto& nodes = old.nodes();
+  for (std::size_t i = 0; i < nodes.size(); ++i) {
+    const node_id o = static_cast<node_id>(i);
+    const Node& n = nodes[i];
+    node_id rewritten = invalid_node;
+    if (op_arity(n.op) == 2 && n.op != Op::Const && n.op != Op::Input) {
+      rewritten = simplify_binary(rb.out(), n.op, rb.mapped(n.a), rb.mapped(n.b));
+    }
+    if (rewritten != invalid_node) {
+      rb.set(o, rewritten);
+      ++changed;
+    } else {
+      rb.copy(o);
+    }
+  }
+  return rb.finish(tape, changed);
+}
 
 PassResult standard_passes(Tape& tape, FoldSumOptions fold) {
   PassResult total = cse(tape);

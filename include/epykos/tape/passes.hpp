@@ -1,10 +1,17 @@
-// EpykosEngine — scalar-tape passes: CSE, DCE, fold-sum, affine collapse (DESIGN.md §5.2, D14).
+// EpykosEngine — scalar-tape passes: CSE, DCE, fold-sum, affine collapse, simplify.
 //
 // Every pass rewrites the tape in place into a fresh, compacted, topologically ordered node
 // table and returns the old -> new node map. Input ordinals and output ordinals are preserved;
-// node ids held by Rec values become stale. All four passes are exactness class E0 (D8): the
-// replay of the tape after a pass is bit-identical to the replay before it, provided the
-// evaluator does not contract multiply-adds (the reference preset / *_e0_test.cpp TUs).
+// node ids held by Rec values become stale.
+//
+// THE FOUR DATA-MOVEMENT PASSES — cse, dce, fold_sum, affine_collapse — are value-preserving:
+// the replay of the tape after one is bit-identical to the replay before it, provided the
+// evaluator does not contract multiply-adds. That was once stated as "exactness class E0 (D8)"
+// and held for every pass there was. It is now a property of these four and not a contract on
+// the file: D79 replaced the per-pass class with the pin (PRINCIPLES.md §1).
+//
+// `simplify` IS NOT ONE OF THEM. It is the algebra phase, it changes the arithmetic on purpose,
+// and it is what the pin exists to license. A pass added here must say which it is.
 //
 //   cse             hash-cons: nodes with the same op, operands (commutative operands in
 //                   canonical order) and constant bit pattern are merged into the first one.
@@ -57,6 +64,16 @@ struct FoldSumOptions {
 PassResult fold_sum(Tape& tape, FoldSumOptions options = {});
 
 PassResult affine_collapse(Tape& tape);
+// Algebraic peepholes: cancellation and the telescope. ABOVE THE PIN (PRINCIPLES.md §1) — every
+// rule is an identity in R and removes a rounding, so unlike the four passes above this one the
+// replay after it is NOT bit-identical to the replay before. That is the point. See the rule set
+// and its stated preconditions in src/tape/passes.cpp.
+PassResult simplify(Tape& tape);
+
+// Folds `step` into `total`: composes the two remaps and carries nodes_after / changed forward,
+// so a sequence of passes reports one honest old -> new map. `standard_passes` and `compile` are
+// both built out of it.
+void compose(PassResult& total, const PassResult& step);
 
 // cse, dce, fold_sum, affine_collapse, dce — in that order. Returns the composed remap.
 PassResult standard_passes(Tape& tape, FoldSumOptions fold = {});

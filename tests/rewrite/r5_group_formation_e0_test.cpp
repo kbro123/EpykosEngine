@@ -145,7 +145,21 @@ TEST(R5GroupFormation, FiresOnTheStageATapeAndVerifiesE0) {
   std::cout << "[ r5       ] " << applications << " producer/consumer pairs merged on the Stage A tape ("
             << program.domains.size() << " -> " << working.domains.size() << " domains, "
             << program.num_values() << " -> " << working.num_values() << " recorded values)\n";
-  EXPECT_GT(applications, 0) << "expected at least the measured single-reader-into-a-reduction pairs to fire";
+  // ZERO on the collapsed tape, where it used to fire (PRINCIPLES.md §5.2a case 3). R5 merges a
+  // single-reader producer into the reduction that consumes it, and the producer/consumer pairs
+  // it found on Stage A were the compounding scan feeding its coupon sum -- the exact structure
+  // `simplify` telescopes away. R1 and R2 went the same way in the same commit (0 sites on both
+  // fixtures, where R2 had 3 of Stage A's 67 domains), which is the measurement behind §7.1's
+  // quarantine: the layout rules' entire non-synthetic input was the near-duplicate structure
+  // the algebra phase exists to remove.
+  //
+  // Not deleted, because the rule is not wrong -- it has no input on THIS fixture. §6's
+  // arithmetic-dominated workload is the one that would feed it, and whether it earns its place
+  // there is a measurement nobody has taken. The synthetic cases above still gate the rule
+  // itself, so its four mutants keep their catcher.
+  EXPECT_EQ(applications, 0)
+      << "R5 fires on the collapsed Stage A tape again: re-measure, and re-state this gate and "
+         "PRINCIPLES.md §7.1's claim that the algebra removed the layout rules' input";
 
   // Not rewrite::compare_programs / verify_rule here: Stage A's own tape embeds an implicit
   // calibration solve, and comparing a SINGLE-state reference run (B=1) against a BATCHED

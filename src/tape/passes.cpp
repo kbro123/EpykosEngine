@@ -640,9 +640,15 @@ node_id simplify_binary(Tape& t, Op op, node_id a, node_id b) {
       if (na.op == Op::Div && (cancel_mismatched || na.b == b)) return na.a;
       if (nb.op == Op::Div && (cancel_mismatched || nb.b == a)) return nb.a;
       // THE TELESCOPE: mul(div(p, q), div(q, s)) -> div(p, s), either operand order.
+      //
+      // The operand ids are copied out FIRST. `t.binary` appends to the node table and may
+      // reallocate it, which would dangle `na` and `nb`. Argument evaluation happens before the
+      // call so the direct form is safe today; it is one careless edit away from not being, and
+      // this is the only place in the pass that mutates the tape it is reading.
       if (na.op == Op::Div && nb.op == Op::Div) {
-        if (na.b == nb.a) return t.binary(Op::Div, na.a, telescope_wrong_end ? na.b : nb.b);
-        if (nb.b == na.a) return t.binary(Op::Div, nb.a, telescope_wrong_end ? nb.b : na.b);
+        const node_id pa = na.a, qa = na.b, pb = nb.a, qb = nb.b;
+        if (qa == pb) return t.binary(Op::Div, pa, telescope_wrong_end ? qa : qb);
+        if (qb == pa) return t.binary(Op::Div, pb, telescope_wrong_end ? qb : qa);
       }
       break;
     case Op::Div:

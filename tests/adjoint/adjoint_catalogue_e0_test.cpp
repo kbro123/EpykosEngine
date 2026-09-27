@@ -130,15 +130,14 @@ TEST(AdjointCatalogueE0, M1Book) {
 // collides two signatures so the catalogue "silently stops matching one of them"
 // (include/epykos/mutation/mutation.hpp). A floor would let that drop through; an equality on
 // the measured number catches it exactly as the old full-coverage equality did.
-TEST(AdjointCatalogueE0, DefaultStageAStillDispatchesThroughTheStaleCatalogue) {
+TEST(AdjointCatalogueE0, DefaultStageADispatchesThroughTheCatalogue) {
   const fixtures::StageA s = fixtures::make_stage_a();
   const fixtures::StageATape tape = fixtures::record_stage_a(s);
   const ir::Program program = ir::infer(tape.tape);
   ASSERT_FALSE(epykos::ir::scan_domains(program).empty()) << "Stage A's compounding scan is the whole point of this gate";
   const epykos::catalogue::Coverage cov = check_catalogue_e0(program, program.input_values, 1, "Stage A (default)");
-  EXPECT_EQ(cov.groups_total, 72u) << "the candidate-domain count of this instance moved";
-  // Back to FULL coverage — see the note in tests/exec/interpreter_catalogue_e0_test.cpp. It
-  // read 56u for one commit against the pre-algebra registry; regenerating restored 72/72.
+  EXPECT_EQ(cov.groups_total, 66u) << "the candidate-domain count of this instance moved";
+  // FULL coverage — see the note in tests/exec/interpreter_catalogue_e0_test.cpp.
   EXPECT_EQ(cov.groups_catalogued, cov.groups_total)
       << "the catalogue no longer covers every eligible group of the workload it was generated "
          "from: re-run scripts/catalogue_regen.sh";

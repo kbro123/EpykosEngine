@@ -173,25 +173,18 @@ TEST(InterpreterCatalogueE0, M1Book) {
 // The exact default Stage A (StageAOptions{}, no overrides): the full ~2,000-trade book
 // (bench/results' M3 baseline: ~8s to record), the instance scripts/catalogue_regen.sh built the
 // registry from. §5.2a case 3, and the file header says why: this test ASSERTED
-// EXPECT_EQ(groups_catalogued, groups_total) -- "the registry was generated from exactly this
-// instance, so every candidate must match" -- which was a guarantee only while the recorded
-// shape and the generated shape were the same recording. The algebra phase moved the recorded
-// shape and the registry has not been regenerated, so the guarantee is suspended and what is
-// true now is measured instead: 30 of 41 candidate groups (73.2%), 41,816/62,963 rows (66.4%),
-// 0 on/off mismatches. Regenerating the registry should take this back to 41/41, at which point
-// the assertion goes back to EXPECT_EQ(groups_catalogued, groups_total). Pinned exactly rather
-// than floored, for the reason the adjoint side's twin states: a coverage DROP is how a
-// signature-collision defect shows itself, and a floor would not see it.
-TEST(InterpreterCatalogueE0, DefaultStageAStillDispatchesThroughTheStaleCatalogue) {
+// Regenerated against the collapsed tapes, so coverage is FULL again and the assertion is
+// back to what it is really for: the registry is generated from exactly this instance, so
+// every eligible group must match. The candidate count itself moved twice in one night --
+// once when `simplify` landed and again when its reassociation rule closed the seasoned-
+// coupon gap -- which is why `groups_total` is pinned separately and says so when it moves.
+// Pinned exactly rather than floored: a coverage DROP is how a signature-collision defect
+// shows itself, and a floor would not see it.
+TEST(InterpreterCatalogueE0, DefaultStageADispatchesThroughTheCatalogue) {
   const StageACase c = build_stage_a(/*trades=*/-1, /*scenarios=*/0, /*quote_noise_bp=*/-1.0);
   std::vector<std::vector<double>> states(1, c.program.input_values);
   const epykos::catalogue::Coverage cov = check_catalogue_e0(c.program, states, "Stage A (default)");
-  EXPECT_EQ(cov.groups_total, 41u) << "the candidate-domain count of this instance moved";
-  // Back to FULL coverage, which is what this clause is really for: the registry was generated
-  // from exactly this instance, so every eligible group must match. It read 30u for one commit,
-  // because the generated registry was still the pre-algebra one (last regenerated at 67d7c0e,
-  // before the pin existed) and the Signature is keyed on the IR structure the algebra changed.
-  // `scripts/catalogue_regen.sh` against the collapsed tapes restored 41/41.
+  EXPECT_EQ(cov.groups_total, 37u) << "the candidate-domain count of this instance moved";
   EXPECT_EQ(cov.groups_catalogued, cov.groups_total)
       << "the catalogue no longer covers every eligible group of the workload it was generated "
          "from: re-run scripts/catalogue_regen.sh";

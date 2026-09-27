@@ -159,7 +159,11 @@ TEST(SampleRoundtrip, RecordingAfterPassesIsAScanOverTheCompoundedCoupons) {
   // seasoned coupon is its own step; the averaged coupons never form a chain (a running sum is
   // fold_sum's reduction, D41).
   EXPECT_GE(sc.domains, 1) << ir::to_string(p);
-  EXPECT_GE(sc.chains, 20);
+  // 17 chains, not the 20+ this asserted before the pin: `simplify`'s reassociation closes the
+  // seasoned coupons too, so only the realised-fixings chains and the coupon kinds that do not
+  // telescope are left. The property this test exists for -- the compounded coupons ARE recorded
+  // as scans -- still holds; the count is smaller because fewer of them survive the algebra.
+  EXPECT_GE(sc.chains, 17);
   EXPECT_LE(sc.chains, n.compounded_chains);
   EXPECT_LE(sc.rows, n.compounded_days);
   EXPECT_GE(sc.min_steps, 3);

@@ -129,8 +129,15 @@ TEST(StageARoundtrip, RoundTripIdentityAfterThePasses) {
   // the compounding is still laid out as scan domains, every DF domain is still shared by the
   // residuals and the book, and no discount factor is computed twice.
   EXPECT_GE(st.scan_domains, 1u) << "the compounded coupons must be laid out as scan domains";
-  EXPECT_GT(st.chains, 100u);
-  EXPECT_GT(st.scan_rows, 10000u);
+  // 44 chains over 136 scan rows, against >500 / >100,000 before the pin and >100 / >10,000 for
+  // the one commit between `simplify` landing and its reassociation rule. What survives is the
+  // realised-fixings chain of each seasoned coupon (a product of unrelated constants, with no
+  // identity to apply) and the coupon kinds that do not telescope -- averaged RFR above all,
+  // which PRINCIPLES.md §6 records as not telescoping at all. These are floors on a quantity
+  // that the algebra is SUPPOSED to drive down, so they are deliberately loose: what the gate is
+  // for is that the compounding is still laid out as scans, not that there are many of them.
+  EXPECT_GT(st.chains, 20u);
+  EXPECT_GT(st.scan_rows, 50u);
   EXPECT_EQ(st.df_domains, 3u) << "the two DF buckets of D22 / D40 and the telescoped endpoints'";
   EXPECT_LT(st.domains, 200u) << "the scan class must not have been split by level";
   std::cout << ir::to_string(p);

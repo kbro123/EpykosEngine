@@ -75,6 +75,39 @@ ir::Program transpose_commutative_operands(ir::Program p, std::size_t* transpose
   return p;
 }
 
+// splitmix64: a per-step coin that is reproducible on every platform and depends on nothing but
+// the seed and the step's position.
+std::uint64_t splitmix64(std::uint64_t x) {
+  x += 0x9E3779B97F4A7C15ull;
+  x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
+  x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+  return x ^ (x >> 31);
+}
+
+// The same transposition applied to a pseudo-random SUBSET of the commutative steps (D69).
+//
+// `transpose_commutative_operands` above flips every one of them at once, which is one point of a
+// space with 2^N members: `Class::emit_swapped` is a bit PER CLASS PER STEP, so two recordings of
+// the same maths can disagree about any subset of them, not only about all or none. Real compilers
+// land inside that space rather than at its corners -- measured, not assumed: on the default Stage
+// A tape GCC 13.5.0 and Apple clang 21 produce different `ir::Domain::name`s (the emitted operand
+// order) for SOME domains and the same for others (D69). Flipping a seeded subset samples it.
+ir::Program transpose_subset(ir::Program p, std::uint64_t seed, std::size_t* transposed) {
+  *transposed = 0;
+  std::uint64_t k = 0;
+  for (ir::Group& g : p.groups) {
+    for (ir::Step& st : g.steps) {
+      if (!epykos::op_is_commutative(st.op)) continue;
+      if (st.a.kind == ir::SlotKind::None || st.b.kind == ir::SlotKind::None) continue;
+      if (st.a == st.b) continue;
+      if ((splitmix64(seed + k++) & 1u) == 0u) continue;
+      std::swap(st.a, st.b);
+      ++*transposed;
+    }
+  }
+  return p;
+}
+
 std::vector<double> run_all(const ir::Program& program, bool use_catalogue, catalogue::Coverage* cov) {
   exec::Options o;
   o.use_catalogue = use_catalogue;
@@ -131,12 +164,58 @@ void check_commutative_invariance(const ir::Program& program, const std::string&
   EXPECT_EQ(bad_b, 0u) << label << ": the catalogue evaluates the transposed operand order to different bits";
 }
 
+// D69: the same gate over a SUBSET of the commutative steps rather than all of them, which is the
+// space `Class::emit_swapped` actually ranges over (see `transpose_subset`). Several seeds, so the
+// M1 book's 6 and Stage A's 25 transposable steps are sampled in mixed combinations and not only
+// at the two corners the test above covers.
+void check_subset_invariance(const ir::Program& program, const std::string& label) {
+  const std::vector<double> generic = run_all(program, /*use_catalogue=*/false, nullptr);
+  catalogue::Coverage base_cov;
+  const std::vector<double> base_cat = run_all(program, /*use_catalogue=*/true, &base_cov);
+  std::size_t total_flipped = 0;
+  for (std::uint64_t seed : {std::uint64_t(0xD69A), std::uint64_t(0xD69B), std::uint64_t(0xD69C),
+                             std::uint64_t(0xD69D), std::uint64_t(0xD69E)}) {
+    std::size_t flipped = 0;
+    const ir::Program q = transpose_subset(program, seed, &flipped);
+    total_flipped += flipped;
+    ASSERT_NO_THROW(ir::validate(q)) << label << ", seed " << seed;
+    for (std::size_t d = 0; d < program.domains.size(); ++d) {
+      const ir::domain_id did = static_cast<ir::domain_id>(d);
+      if (!catalogue::is_cataloguable(program, did)) continue;
+      const catalogue::Signature a = catalogue::signature_of(program, did);
+      const catalogue::Signature b = catalogue::signature_of(q, did);
+      ASSERT_TRUE(a == b) << label << ", seed " << seed << ", domain " << d << ": " << a.to_string() << " vs "
+                          << b.to_string();
+      ASSERT_EQ(a.hash(), b.hash()) << label << ", seed " << seed << ", domain " << d;
+      ASSERT_EQ(catalogue::lookup(a), catalogue::lookup(b)) << label << ", seed " << seed << ", domain " << d;
+    }
+    catalogue::Coverage cov;
+    const std::vector<double> cat = run_all(q, /*use_catalogue=*/true, &cov);
+    EXPECT_EQ(base_cov.groups_catalogued, cov.groups_catalogued) << label << ", seed " << seed;
+    EXPECT_EQ(base_cov.groups_total, cov.groups_total) << label << ", seed " << seed;
+    EXPECT_EQ(base_cov.rows_catalogued, cov.rows_catalogued) << label << ", seed " << seed;
+    ASSERT_EQ(generic.size(), cat.size()) << label << ", seed " << seed;
+    std::size_t bad = 0, bad_base = 0;
+    for (std::size_t k = 0; k < generic.size(); ++k) {
+      if (bits(generic[k]) != bits(cat[k])) ++bad;
+      if (bits(base_cat[k]) != bits(cat[k])) ++bad_base;
+    }
+    EXPECT_EQ(bad, 0u) << label << ", seed " << seed << ": the catalogue evaluates this subset to different bits";
+    EXPECT_EQ(bad_base, 0u) << label << ", seed " << seed << ": this subset differs from the untransposed program";
+  }
+  std::cout << "[ commutative ] " << label << ": " << total_flipped
+            << " commutative step transposition(s) over 5 seeded subsets\n";
+  EXPECT_GT(total_flipped, 0u) << label << ": no subset flipped anything -- this case would pass vacuously";
+}
+
 }  // namespace
 
 TEST(CatalogueSignatureCommutativeE0, M1Book) {
   const fixtures::Book book = fixtures::make_m1_book();
   const epykos::Tape tape = fixtures::record_m1(book);
-  check_commutative_invariance(ir::infer(tape), "M1 book");
+  const ir::Program p = ir::infer(tape);
+  check_commutative_invariance(p, "M1 book");
+  check_subset_invariance(p, "M1 book");
 }
 
 TEST(CatalogueSignatureCommutativeE0, StageA) {
@@ -145,5 +224,7 @@ TEST(CatalogueSignatureCommutativeE0, StageA) {
   opt.scenarios = 0;
   const fixtures::StageA s = fixtures::make_stage_a(opt);
   const fixtures::StageATape tape = fixtures::record_stage_a(s);
-  check_commutative_invariance(ir::infer(tape.tape), "Stage A (60 trades)");
+  const ir::Program p = ir::infer(tape.tape);
+  check_commutative_invariance(p, "Stage A (60 trades)");
+  check_subset_invariance(p, "Stage A (60 trades)");
 }

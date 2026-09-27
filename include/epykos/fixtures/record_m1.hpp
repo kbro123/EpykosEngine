@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <vector>
 
+#include "epykos/compile.hpp"
 #include "epykos/fixtures/m1_book.hpp"
 #include "epykos/fixtures/m1_price.hpp"
 #include "epykos/scalar/rec.hpp"
@@ -30,18 +31,14 @@ namespace epykos::fixtures {
 // Node counts along the pipeline (informational; the tape itself is the source of truth).
 struct RecordM1Stats {
   std::size_t recorded = 0;         // right after recording, before any pass
-  std::size_t after_cse = 0;
-  std::size_t after_dce = 0;
-  std::size_t after_fold_sum = 0;
-  std::size_t after_affine = 0;
-  std::size_t after_final_dce = 0;  // == the returned tape's size() when the passes run
   std::size_t num_inputs = 0;       // n_knots
   std::size_t num_outputs = 0;      // n_swaps + 1
+  std::size_t after_compile = 0;    // the pinned tape == the returned tape's size()
 };
 
 struct RecordM1Options {
-  // Run cse, dce, fold_sum, affine_collapse, dce after recording (each is E0; this is exactly
-  // standard_passes). When false the raw recording is returned.
+  // Run everything above the pin (`epykos::compile`, PRINCIPLES.md §1) after recording. When
+  // false the raw recording is returned.
   bool run_passes = true;
   FoldSumOptions fold = {};  // min_terms = 2: every Add becomes a Sum
 };
@@ -75,19 +72,16 @@ inline Tape record_m1(const Book& book, RecordM1Stats* stats = nullptr, RecordM1
   s.num_inputs = tape.num_inputs();
   s.num_outputs = tape.num_outputs();
   if (options.run_passes) {
-    cse(tape);
-    s.after_cse = tape.size();
-    dce(tape);
-    s.after_dce = tape.size();
-    fold_sum(tape, options.fold);
-    s.after_fold_sum = tape.size();
-    affine_collapse(tape);
-    s.after_affine = tape.size();
-    dce(tape);
-    s.after_final_dce = tape.size();
+    // One call, so this fixture exercises the SAME pipeline the engine runs (PRINCIPLES.md §10
+    // step 2). It used to open-code cse/dce/fold_sum/affine_collapse/dce and report a node count
+    // after each; those four intermediate counts were informational only (the M1 record test
+    // printed them) and are not worth a second pipeline to keep. Per-pass behaviour is tested
+    // where it belongs, on the passes, in tests/tape/passes_test.cpp.
+    compile(tape);
+    s.after_compile = tape.size();
     tape.validate();
   } else {
-    s.after_cse = s.after_dce = s.after_fold_sum = s.after_affine = s.after_final_dce = s.recorded;
+    s.after_compile = s.recorded;
   }
   if (stats != nullptr) *stats = s;
   return tape;

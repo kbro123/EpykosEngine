@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "epykos/compile.hpp"
 #include "epykos/fixtures/m1_book.hpp"
 #include "epykos/fixtures/m1_price.hpp"
 #include "epykos/fixtures/m1_reference.hpp"
@@ -328,39 +329,25 @@ TEST(M1RecordE0, BatchStateZeroReplaysAsTheRecordPoint) {
 
 // ---- the record_m1 helper -------------------------------------------------------------------------------
 
-TEST(M1RecordE0, HelperEqualsTheManualPipelineAndStandardPasses) {
+TEST(M1RecordE0, HelperEqualsRawRecordingThenCompile) {
   const Fixture& f = fixture();
-  // Manual: raw recording then the five passes.
+  // The claim: record_m1 is exactly "record the book, then run everything above the pin".
+  // Stated against `epykos::compile` rather than against a hand-rolled list of passes, so it
+  // stays true as passes are added above the pin (PRINCIPLES.md §10 steps 4-6) instead of
+  // needing an edit each time. The four intermediate per-pass node counts this test used to
+  // assert are gone with RecordM1Stats' per-pass fields: they tested the passes, which
+  // tests/tape/passes_test.cpp does directly.
   Tape manual = fixtures::record_m1_raw(f.book);
   const std::size_t n_raw = manual.size();
-  epykos::cse(manual);
-  const std::size_t n_cse = manual.size();
-  epykos::dce(manual);
-  const std::size_t n_dce = manual.size();
-  epykos::fold_sum(manual);
-  const std::size_t n_fold = manual.size();
-  epykos::affine_collapse(manual);
-  const std::size_t n_affine = manual.size();
-  epykos::dce(manual);
-  const std::size_t n_final = manual.size();
+  epykos::compile(manual);
 
   fixtures::RecordM1Stats stats;
   const Tape helper = fixtures::record_m1(f.book, &stats);
   EXPECT_EQ(stats.recorded, n_raw);
-  EXPECT_EQ(stats.after_cse, n_cse);
-  EXPECT_EQ(stats.after_dce, n_dce);
-  EXPECT_EQ(stats.after_fold_sum, n_fold);
-  EXPECT_EQ(stats.after_affine, n_affine);
-  EXPECT_EQ(stats.after_final_dce, n_final);
-  EXPECT_EQ(stats.after_final_dce, helper.size());
+  EXPECT_EQ(stats.after_compile, helper.size());
   EXPECT_EQ(stats.num_inputs, 12u);
   EXPECT_EQ(stats.num_outputs, 1001u);
   EXPECT_EQ(epykos::to_string(helper), epykos::to_string(manual));
-
-  // standard_passes on a fresh raw recording is the same tape.
-  Tape standard = fixtures::record_m1_raw(f.book);
-  epykos::standard_passes(standard);
-  EXPECT_EQ(epykos::to_string(standard), epykos::to_string(helper));
 
   // run_passes = false is the raw recording.
   fixtures::RecordM1Options no_passes;
@@ -369,7 +356,7 @@ TEST(M1RecordE0, HelperEqualsTheManualPipelineAndStandardPasses) {
   const Tape raw = fixtures::record_m1(f.book, &raw_stats, no_passes);
   EXPECT_EQ(raw.size(), n_raw);
   EXPECT_EQ(raw_stats.recorded, n_raw);
-  EXPECT_EQ(raw_stats.after_final_dce, n_raw);
+  EXPECT_EQ(raw_stats.after_compile, n_raw);
   EXPECT_EQ(epykos::to_string(raw), epykos::to_string(fixtures::record_m1_raw(f.book)));
 
   // Recording is deterministic: two recordings of the same book are the same tape.
@@ -377,7 +364,6 @@ TEST(M1RecordE0, HelperEqualsTheManualPipelineAndStandardPasses) {
 
   // And the helper's tape is the E0 tape.
   EXPECT_EQ(replay_mismatches(helper, "record_m1"), 0u);
-  std::cout << "[  counts  ] record_m1: recorded " << stats.recorded << ", cse " << stats.after_cse << ", dce "
-            << stats.after_dce << ", fold_sum " << stats.after_fold_sum << ", affine " << stats.after_affine
-            << ", final dce " << stats.after_final_dce << '\n';
+  std::cout << "[  counts  ] record_m1: recorded " << stats.recorded << " -> pinned " << stats.after_compile
+            << '\n';
 }

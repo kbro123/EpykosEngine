@@ -2,6 +2,7 @@
 // preset, D25): the generating curves, quotes, trade rates and the record-point oracle are the
 // same bits in every preset. SYNTHETIC: quotes, fixings, trades and scenarios come from the seed;
 // the definitions are blueprints/problems/stage_a.json and the data of G0 / G2.
+#include "epykos/compile.hpp"
 #include "epykos/fixtures/stage_a.hpp"
 
 #include <algorithm>
@@ -564,7 +565,7 @@ StageATape record_stage_a(const StageA& s, bool passes) {
   r.stats.df_memo_hits = memo_entries;
   if (passes) {
     const clock_type::time_point t_p = clock_type::now();
-    standard_passes(r.tape);
+    compile(r.tape);
     r.tape.validate();
     r.stats.seconds_passes = seconds_since(t_p);
   }

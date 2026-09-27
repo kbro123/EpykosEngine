@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 
+#include "epykos/compile.hpp"
 #include "epykos/conventions/fixings.hpp"
 #include "epykos/conventions/registry.hpp"
 #include "epykos/maths/curve/linear.hpp"
@@ -105,7 +106,7 @@ inline Tape record_sample(const InstrumentSample& s, bool run_passes = true) {
   }
   tape.validate();
   if (run_passes) {
-    standard_passes(tape);
+    compile(tape);
     tape.validate();
   }
   return tape;

@@ -19,6 +19,7 @@
 #include <cstddef>
 #include <vector>
 
+#include "epykos/compile.hpp"
 #include "epykos/fixtures/rfr_book.hpp"
 #include "epykos/maths/calendar.hpp"
 #include "epykos/maths/curve/linear.hpp"
@@ -143,7 +144,7 @@ inline Tape record_rfr(const RfrBook& b, bool run_passes = true) {
   }
   tape.validate();
   if (run_passes) {
-    standard_passes(tape);
+    compile(tape);
     tape.validate();
   }
   return tape;

@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include "epykos/compile.hpp"
 #include "epykos/fixtures/m1_book.hpp"
 #include "epykos/fixtures/m1_price.hpp"
 #include "epykos/maths/calendar.hpp"
@@ -196,7 +197,7 @@ inline CalibratedM1 record_m1_calibrated(const Book& book, std::span<const doubl
   c.iterations_output = b.diag_iterations_output;
   c.tape.validate();
   if (run_passes) {
-    standard_passes(c.tape);
+    compile(c.tape);
     c.tape.validate();
   }
   return c;
@@ -361,7 +362,7 @@ inline CalibratedTwoCurves record_two_curves(std::span<const double> quotes, std
   }
   c.tape.validate();
   if (run_passes) {
-    standard_passes(c.tape);
+    compile(c.tape);
     c.tape.validate();
   }
   return c;

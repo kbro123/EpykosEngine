@@ -1,5 +1,6 @@
 // The residual sub-program, the factorised Jacobian (Eigen, double side only: D12, D14) and the
 // per-lane Gauss–Newton / Levenberg–Marquardt solve. See include/epykos/solver/residual.hpp.
+#include "epykos/compile.hpp"
 #include "epykos/solver/residual.hpp"
 
 #include <Eigen/Dense>
@@ -43,7 +44,7 @@ ResidualProgram::ResidualProgram(const Tape& tape, const ImplicitBlock& block, b
   roots.reserve(idx(n_r_));
   for (int o : block.residuals) roots.push_back(tape.outputs().at(idx(o)));
   slice_ = epykos::slice(tape, roots);
-  if (passes) standard_passes(slice_.tape);
+  if (passes) compile(slice_.tape);
   const std::vector<int>& ords = slice_.input_ordinals;  // sub ordinal -> tape ordinal
   const int n_sub = static_cast<int>(ords.size());
   z_slot_.assign(idx(n_z_), -1);

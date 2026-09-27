@@ -17,6 +17,7 @@
 //   * the ACCURACY figures the test reports are measured with both coupon forms instantiated in
 //     one translation unit under one set of flags, so the comparison between the forms is fair;
 //     the absolute error of either form is a property of those flags and is quoted with them.
+#include "epykos/compile.hpp"
 #include "epykos/fixtures/spike_telescoped.hpp"
 
 #include <algorithm>
@@ -174,7 +175,7 @@ CompareOisTape record_compare_ois_spike(const CompareOis& s, Form form, bool pas
   r.tape.validate();
   r.nodes_raw = r.tape.size();
   if (passes) {
-    standard_passes(r.tape);
+    compile(r.tape);
     r.tape.validate();
   }
   r.nodes_after_passes = r.tape.size();

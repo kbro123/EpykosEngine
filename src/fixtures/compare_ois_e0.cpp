@@ -4,6 +4,7 @@
 //
 // SYNTHETIC throughout: quotes and trades come from the seed of `CompareOisOptions`, exactly as
 // `docs/WORKLOADS.md` requires. Nothing here is derived from any other engine (D11).
+#include "epykos/compile.hpp"
 #include "epykos/fixtures/compare_ois.hpp"
 
 #include <algorithm>
@@ -301,7 +302,7 @@ CompareOisTape record_compare_ois(const CompareOis& s, bool passes) {
   r.tape.validate();
   r.nodes_raw = r.tape.size();
   if (passes) {
-    standard_passes(r.tape);
+    compile(r.tape);
     r.tape.validate();
   }
   r.nodes_after_passes = r.tape.size();

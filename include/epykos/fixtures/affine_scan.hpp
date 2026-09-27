@@ -24,6 +24,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "epykos/compile.hpp"
 #include "epykos/rng/philox.hpp"
 #include "epykos/scalar/rec.hpp"
 #include "epykos/tape/passes.hpp"
@@ -120,7 +121,7 @@ inline Tape record_affine_scan(const AffineScanFixture& f, bool output_path, boo
   }
   tape.validate();
   if (run_passes) {
-    standard_passes(tape);
+    compile(tape);
     tape.validate();
   }
   return tape;

@@ -1,28 +1,65 @@
-# RESUME — EpykosEngine overnight run (launched 2026-09-22, Mac Pro)
+# RESUME — EpykosEngine handoff
 
-This is the launch brief for the M1–M5 run and the handoff for the morning. Agents: read §0–§3 before touching code.
+**State as of 2026-09-28.** §0 and §1 are STATE and are rewritten in place (PRINCIPLES.md §9).
+Everything from §2 down is the historical log of the M1–M5 run launched 2026-09-22: it is a record
+of what happened, not a description of where things are, and it is not maintained.
 
-## 0. Read first
-`CLAUDE.md` → `docs/DESIGN.md` → `docs/ROADMAP.md` → `docs/DECISIONS.md` (D1–D34) → `docs/WORKLOADS.md`.
-`docs/PRIOR_ART.md` is informational only.
+## 0. Read first, in this order
+
+1. **`docs/PRINCIPLES.md`** — the contract, and it outranks every other document including
+   `CLAUDE.md`. §1 is the pin, which is the single idea the engine is now organised around.
+2. `CLAUDE.md` → `docs/DESIGN.md` → `docs/WORKLOADS.md` → `docs/ROADMAP.md`.
+3. `docs/DECISIONS.md` is an append-only **ledger**, D1–D81. **Cite it; do not read it end to
+   end.** The current state is in PRINCIPLES.md and CLAUDE.md's Status, not in the ledger.
+4. `docs/PRIOR_ART.md` is informational.
+
+Where the work is: branch **`integrate/rebuild`**, not `integrate/m1-m5`. Tag `v1.0-m4` is the
+engine as M4 left it, before the algebra phase.
 
 ## 1. Rules for every agent
-- **No SwapEngine (D11).** Do not open `../SwapEngine` or any other checkout. Everything is written from these docs.
-- Maths once, templated on `Scalar`; recording discipline as in `CLAUDE.md`; verification before features (D10).
-- Fixtures come from the seed in `WORKLOADS.md`; no data files, except definitions under `blueprints/` (D36:
-  conventions registry, calendar rule lists, curve definitions, instrument blueprints as JSON; mechanics in code).
-- Dependencies are fixed by D12: Eigen (double side only), GoogleTest, Google Benchmark, nothing else.
-- Numbers: fingerprinted (`scripts/fingerprint.sh`), load-checked, flags stated; estimates labelled (D9, D13).
-- Git: work on a package branch cut from `integrate/m1-m5`; commit as `type(scope): summary`; no model identifiers;
-  merge back only when the package's own tests pass; never touch `main` (D18).
-- Docs: op-set / pipeline / milestone changes update `DESIGN.md` / `ROADMAP.md` in the same commit; new decisions
-  append to `DECISIONS.md`; each package appends one line to §5 of this file when it merges.
-- Report honestly: a failed gate is reported as failed with the numbers, never softened.
-- **Layout is by library structure, never by milestone.** Engine code under `include/epykos/<component>/` and
-  `src/<component>/`; seeded fixture books, record helpers and oracles under `include/epykos/fixtures/` and
-  `src/fixtures/` (test-only, not engine API); hand-written reference kernels under `bench/hand/`. Milestone names
-  appear only as fixture names (`fixtures/m1_book.hpp`) and in test/bench file names. M2/Q0 consolidated what M1
-  left under `maths/m1/`, `tape/record_m1.hpp` and `hand/` (D28; §2 below is the layout as it stands).
+
+- **`PRINCIPLES.md` is the contract.** A rewrite is licensed by which side of THE PIN it is on
+  (§1), not by a declared exactness class. Above the pin — canonicalise, simplify, solve
+  recurrences — the engine chooses WHICH expression to evaluate and is judged against the recorded
+  expression in exact real arithmetic. Below it — inference, planning, execution, the adjoint — it
+  chooses HOW, and is bit-identical to the pinned tape under the declared contraction and
+  transcendental policy (§5.3).
+- **`epykos::compile(Tape&)` is everything above the pin.** New passes go inside it; do not add
+  another entry point.
+- **When an existing gate fails, classify it by §5.2a before touching it.** Three cases. If both
+  sides evaluate the pinned tape, it stays bitwise and a failure is a REAL DEFECT — that rule found
+  a live interpreter bug on the night it was written (D81 §6a). Never loosen a case-1 gate.
+- **No SwapEngine code (D11).** Never copy, port or vendor anything from that checkout. **One
+  exception, owner-granted (D78): `tools/h2h/` alone** may compile against its public facade, behind
+  `-DEPYKOS_H2H=ON`, off by default, never in CI. `bench/compare/README.md` §0 lists every file read.
+  Nothing under `include/epykos/` or `src/` may follow it.
+- Maths once, templated on `Scalar`; recording discipline as in `CLAUDE.md`; verification before
+  features (D10).
+- Fixtures come from the seed in `WORKLOADS.md`; no data files except definitions under
+  `blueprints/` (D36).
+- Dependencies are fixed by D12: Eigen (double side only), GoogleTest, Google Benchmark, nothing
+  else. Adding one needs a decision entry.
+- **Renaming a test file can silently shrink the mutation gate.** `scripts/mutation_test.sh`
+  selects the gate set by FILENAME regex and `scripts/mutation_catchers.tsv` records catchers by
+  name. Check both before renaming anything under `tests/`.
+- Numbers: fingerprinted (`scripts/fingerprint.sh`), load-checked, flags stated; estimates
+  labelled (D9, D13). Nothing else runs during a timing.
+- Git: package branch cut from `integrate/rebuild`; `type(scope): summary`; no model identifiers;
+  merge back only when the package's own tests pass; **never touch `main`** (D18).
+- Docs: a change to the op set, the pipeline or a milestone updates `DESIGN.md` / `ROADMAP.md` in
+  the same commit. A change to a PRINCIPLE rewrites `PRINCIPLES.md` in place and lands a ledger
+  entry in the same commit (§9).
+
+## 1a. Known-stale, and whose call it is
+
+- **The perf baselines are meaningless.** `bench/results/d448afd70180/baseline.json` predates the
+  algebra phase, so everything is 10–160x faster than it and the >1.25x regression gate cannot fire.
+  Re-baselining asserts what normal is: owner's call.
+- **No CI evidence for anything after 2026-09-27.** Nothing has been pushed; all results are Apple
+  clang 21 on `d448afd70180`. No GCC, no arm64.
+- 92 branches and 21 worktrees await pruning: owner's call.
+
+---
 
 ## 2. Repository layout (fixed by M1/P0; consolidated by M2/Q0, D28)
 ```

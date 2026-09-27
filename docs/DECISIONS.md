@@ -5736,3 +5736,80 @@ interpreter, the planner, the catalogue, the adjoint, the IFT solver, the conven
 and both comparison harnesses are kept as they are (~21,500 lines, all measured). The pre-rebuild engine is
 tagged `v1.0-m4`. A v2 branch was considered and rejected: 95% of the tree is unchanged, so a long-lived
 divergent branch would cost a fork's maintenance for a fifth of the code — a tag gives the same safety net.
+
+## D80 — Consolidation: twelve branches merged, and what the never-landed review probes turned out to say (2026-09-27)
+
+Owner-directed, before any rebuild work: "consolidate the branches first". The repository stood at
+**86 branches, 0 tags, `main` 267 commits behind, 12 branches unmerged.** Every branch is now merged
+into `integrate/rebuild`; `main` and the branch pruning are left to the owner.
+
+### 1. What merged
+
+`mx/head-to-head` (D76), `p0/oracle` (D72 CI evidence), `eval/egraph-library` (D75),
+`m5/c1-gcc-fix` (D69), `ci/mutation-budget` (D70), `p1/term-rewriting-design` (D73) and the four
+never-landed review branches. The ledger goes from a state where **D73 and D75 were missing entirely**
+and D76 was absent while D77 cited it, to a contiguous D1–D80.
+
+Conflicts were all append-vs-append and were resolved by rule, not by choice: `DECISIONS.md` entries
+merged in numeric order, `RESUME.md` lines de-duplicated keeping the later revision (CI evidence is
+appended to those lines after the fact), `tools/CMakeLists.txt` keeping both subdirectory blocks, and
+`DESIGN.md`'s verification list keeping D70's revised mutation bullet plus D72's new oracle bullet.
+The two resolvers are in the session scratchpad and should be committed as scripts if this recurs.
+
+`p1/term-rewriting-design` is merged despite D79 retracting its "tape is the right layer" steer,
+because `include/epykos/algebra/{term,rule,reduce,recurrence,error}.hpp` is the interface design
+`PRINCIPLES.md` §10 steps 5–6 need. Only `algebra/egraph.hpp` is superseded outright.
+
+### 2. The review probes: three findings already fixed, two standing
+
+The four review branches were `not a gate, not landed` adversarial probes from M1–M4. Merged, they
+gave **six failing assertions**, and the failures are the interesting part.
+
+**Already fixed since the probe was written — inverted and kept as regression tests:**
+
+* `NodeIdFromAnotherTapeIsSilentlyReinterpreted`: using a `Rec` from another tape used to record
+  silently against the wrong node id, so the replay computed `5*2` while the value side said `100*2`.
+  The cross-tape serial guard now refuses it. Renamed `...IsRefused`.
+* `ValueOnForeignIdThrowsOutOfRangeNotRecordError`: used to escape as a bare `std::out_of_range` from
+  `vector::at`; now throws `RecordError` naming both serials. Renamed `...ThrowsRecordError`.
+* `SameClassChainThroughASharedNodeIsRejectedAsRecurrent`: `exp(exp(x))` is an acyclic DAG that the
+  signature pass used to flag recurrent and the interpreter used to refuse. Both now accept it.
+  Renamed `...IsAccepted`.
+
+**Cannot be reproduced, and says so:**
+
+* `LongGroupNameBreaksDeserialize` can no longer BUILD its own precondition — the passes fold its
+  chain below the 24-step boundary that makes `shape_string()` emit a name containing a space. Now
+  `GTEST_SKIP` with that explanation. The underlying question is unproven either way, not answered.
+
+**Standing, and both now have a home in the contract:**
+
+* **`FmaContractionRule`'s E1 bound is unsound.** `a*b + c` against `fma(a,b,c)` has no bound in ulps
+  when the Sum cancels against the Mul's own rounding: at `a = 2^27+1`, `b = 2^27-1`, `c = -2^54` the
+  two forms differ by **1.0, about 4.5e15 ulps**, against a declared bound of 4. This is exactly why
+  `PRINCIPLES.md` §5.3 makes contraction a **declared build policy** rather than an E1 peephole
+  carrying a bound it cannot honour. The test now asserts the violation, so it passes and pins §5.3's
+  justification; it fails the day someone relaxes the rule without re-deriving it.
+* **`ExpMode::poly` is not lane-width independent.** The same program gives different bits at
+  different lane tiles (14,664 mismatches). §5.2 requires everything below the pin to be bit-identical
+  to the pinned tape, so this is **tier 2's entry criterion**: `poly` cannot open until it is fixed.
+  The test asserts the defect and will fail deliberately when it is repaired, at which point it is
+  inverted back and §2 updated.
+
+Neither was a new defect and neither is fixed here. What changed is that both were invisible on
+unmerged branches and are now asserted, in CI, with the contract clause each one justifies.
+
+### 3. Bit-rot found and fixed
+
+The M1 probes referenced `epykos/maths/m1/book.hpp`, `epykos/tape/record_m1.hpp` and the namespace
+`epykos::m1`, all of which D28 moved to `epykos/fixtures/`. Three mechanical renames. Worth recording
+only because it is the measurable cost of an unmerged branch: these probes could not have compiled at
+any point in the last three milestones and nobody would have known.
+
+### 4. State
+
+`ctest --preset release`: **127/127, 0 failed**, on `d448afd70180` with `-DEPYKOS_H2H=ON`. The tree
+carries the whole M1–M4 history, both comparison harnesses, the oracle, the telescoping spike, the
+term-rewriting design and the rewritten contract. `v1.0-m4` tags the pre-consolidation engine.
+Nothing merged to `main`; 74 branches already contained in the integration line are candidates for
+pruning and are the owner's call.

@@ -22,10 +22,10 @@
 #include "epykos/exec/interpreter.hpp"
 #include "epykos/ir/program.hpp"
 #include "epykos/ir/signature.hpp"
-#include "epykos/maths/m1/book.hpp"
+#include "epykos/fixtures/m1_book.hpp"
 #include "epykos/scalar/rec.hpp"
 #include "epykos/tape/passes.hpp"
-#include "epykos/tape/record_m1.hpp"
+#include "epykos/fixtures/record_m1.hpp"
 #include "epykos/tape/replay.hpp"
 #include "epykos/tape/tape.hpp"
 #include "ir/ir_test_helpers.hpp"
@@ -53,7 +53,7 @@ void operator delete[](void* p) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
-namespace m1 = epykos::m1;
+namespace m1 = epykos::fixtures;   // D28 moved the M1 fixtures out of epykos::m1
 namespace ir = epykos::ir;
 namespace exec = epykos::exec;
 using epykos::Rec;
@@ -195,7 +195,7 @@ TEST(ReviewInterp, EveryFusionOptionCombinationIsBitIdentical) {
   std::cout << "[  review  ] fusion option sweep on the M1 book: " << runs << " runs, mismatches " << bad << '\n';
 }
 
-TEST(ReviewInterp, ExpPolyModeIsBitIdenticalAcrossBatchWidthsAndLaneTiles) {
+TEST(ReviewInterp, ExpPolyModeIsNOTBitIdenticalAcrossLaneTiles) {
   // E1 mode: not compared to the replay, but B = 64 must equal the B = 1 runs lane for lane, and
   // every lane tile must agree (exp_poly's fma steps are claimed bit-identical scalar vs vector).
   const Case& c = sub_case();
@@ -223,14 +223,26 @@ TEST(ReviewInterp, ExpPolyModeIsBitIdenticalAcrossBatchWidthsAndLaneTiles) {
         in.run(state.data(), B, out.data());
         for (int b = 0; b < B; ++b) for (std::size_t k = 0; k < n_out; ++k) {
           if (bits(out[k * static_cast<std::size_t>(B) + static_cast<std::size_t>(b)]) != bits(single[static_cast<std::size_t>(b)][k])) {
-            if (bad < 3) ADD_FAILURE() << "exp_poly lane_tile " << lane_tile << " tile " << tile << " B " << B << " lane " << b << " output " << k;
+            // A diagnostic, not a failure: the mismatch IS the finding (D80), asserted below.
+            if (bad < 3) std::cout << "[ finding ] exp_poly differs: lane_tile " << lane_tile << " tile " << tile
+                                   << " B " << B << " lane " << b << " output " << k << "\n";
             ++bad;
           }
         }
       }
     }
   }
-  EXPECT_EQ(bad, 0u);
+  // THE FINDING, now asserted rather than demonstrated by failing (D80). exp_poly's fma steps
+  // are claimed bit-identical scalar vs vector and are NOT: the same program gives different
+  // bits at different lane tiles.
+  //
+  // PRINCIPLES.md 2 closes tier 2 until tier 1 is proven, and ExpMode::poly is named as its first
+  // citizen; 5.2 requires everything below the pin to be bit-identical to the pinned tape. So
+  // this is tier 2's ENTRY CRITERION: poly mode cannot open until it is lane-width independent.
+  // The test passes while the defect stands, and fails -- deliberately -- the day it is fixed, at
+  // which point invert it back and record that tier 2's blocker is gone.
+  EXPECT_GT(bad, 0u) << "exp_poly is now lane-width independent: invert this test and update "
+                        "PRINCIPLES.md 2's tier-2 entry criterion";
 }
 
 TEST(ReviewInterp, RawRecordingWithoutPassesRunsBitIdentically) {

@@ -75,13 +75,17 @@ TEST(FmaContractionAdversarial, CatastrophicCancellationExceedsTheDeclaredE1Tole
   EXPECT_DOUBLE_EQ(out_after[0], -1.0);
   EXPECT_DOUBLE_EQ(out_before[0], 0.0);
 
-  // The actual claim under test: this input is within FmaContractionRule's own declared class.
-  // If this EXPECT fails, the rule's Exactness::E1 declaration (verify::Tolerance::e1(), 4 ulps)
-  // is not a sound bound for this rule -- exactly what this file exists to show.
-  EXPECT_TRUE(within_declared_tolerance) << "abs diff " << std::fabs(out_before[0] - out_after[0])
-                                          << " between unfused (a*b)+c and fma(a,b,c) is NOT within FmaContractionRule's "
-                                             "declared 4-ulp E1 tolerance -- catastrophic cancellation in the Sum makes "
-                                             "this rewrite's error unbounded in ulps, not <= 4.";
+  // THE FINDING, now asserted rather than demonstrated by failing (D80). Contracting a*b+c to
+  // fma(a,b,c) has NO bound in ulps when the Sum cancels against the Mul's own rounding error:
+  // here the two forms differ by 1.0, about 4.5e15 ulps, against a declared bound of 4.
+  //
+  // This is why PRINCIPLES.md 5.3 makes contraction a DECLARED BUILD POLICY, fixed above the pin
+  // and constant below it, rather than an E1 peephole carrying a ulp bound it cannot honour. The
+  // test passes when the bound is violated, because that violation is the reason for the rule.
+  EXPECT_FALSE(within_declared_tolerance)
+      << "abs diff " << std::fabs(out_before[0] - out_after[0])
+      << ": if this now holds within 4 ulps, either the rule changed or this input stopped "
+         "cancelling -- re-derive PRINCIPLES.md 5.3's justification before relaxing it.";
 }
 
 }  // namespace

@@ -17,7 +17,9 @@ using epykos::Tape;
 // A Rec carries a node id but not the tape it belongs to (D14). A value made on tape B while
 // tape A's scope is current is silently interpreted as a node of A: the recorded graph is wrong
 // and nothing throws when A happens to have a node with that id.
-TEST(ReviewRecTaint, NodeIdFromAnotherTapeIsSilentlyReinterpreted) {
+// FIXED since the probe was written (D80): the cross-tape serial guard now refuses this
+// outright. Kept, inverted, as the regression test that it stays refused.
+TEST(ReviewRecTaint, NodeIdFromAnotherTapeIsRefused) {
   Tape a, b;
   Rec on_b;
   {
@@ -26,14 +28,9 @@ TEST(ReviewRecTaint, NodeIdFromAnotherTapeIsSilentlyReinterpreted) {
   }
   Tape::Scope sa(a);
   const Rec ka = Rec(5.0) * Rec(1.0);          // node #0..#2 of a: Const 5, Const 1, Mul (untainted)
-  const Rec y = on_b * 2.0;                     // records on a with operand id 0 == a's Const 5 (!)
-  epykos::register_output(a, y);
-  EXPECT_EQ(y.unchecked_value(), 200.0);        // the value side says 100 * 2
-  EXPECT_FALSE(a.tainted(y.node()));            // the tape side says "does not depend on an input"
-  const std::vector<double> out = epykos::replay(a, {});
-  EXPECT_EQ(out[0], 10.0) << "the replay computes 5 * 2: the recorded graph disagrees with the value";
-  EXPECT_NE(out[0], y.unchecked_value());
-  // No RecordError anywhere: the hole is silent.
+  // Was: recorded on `a` reusing b's node id, silently, so the replay computed 5*2 while the
+  // value side said 100*2. Now refused at the point of use.
+  EXPECT_THROW((void)(on_b * 2.0), RecordError);
   (void)ka;
 }
 
@@ -55,9 +52,9 @@ TEST(ReviewRecTaint, ValueOnTaintedNodeIsReadableAfterTheScopeCloses) {
   EXPECT_EQ(pv.v, 3.0);
 }
 
-// value() on a Rec whose id exceeds the current tape's size throws std::out_of_range (from
-// vector::at), not RecordError.
-TEST(ReviewRecTaint, ValueOnForeignIdThrowsOutOfRangeNotRecordError) {
+// FIXED since the probe was written (D80): value() on a Rec from another tape used to escape as
+// a bare std::out_of_range from vector::at. It now throws RecordError naming both serials.
+TEST(ReviewRecTaint, ValueOnForeignIdThrowsRecordError) {
   Tape big, small;
   Rec r;
   {
@@ -67,5 +64,5 @@ TEST(ReviewRecTaint, ValueOnForeignIdThrowsOutOfRangeNotRecordError) {
     r = x;
   }
   Tape::Scope s(small);
-  EXPECT_THROW((void)r.value(), std::out_of_range);
+  EXPECT_THROW((void)r.value(), RecordError);
 }

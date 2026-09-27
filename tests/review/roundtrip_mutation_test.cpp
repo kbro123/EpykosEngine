@@ -11,12 +11,12 @@
 #include "epykos/ir/expand.hpp"
 #include "epykos/ir/program.hpp"
 #include "epykos/ir/signature.hpp"
-#include "epykos/maths/m1/book.hpp"
-#include "epykos/tape/record_m1.hpp"
+#include "epykos/fixtures/m1_book.hpp"
+#include "epykos/fixtures/record_m1.hpp"
 #include "epykos/tape/tape.hpp"
 #include "ir/ir_test_helpers.hpp"
 
-namespace m1 = epykos::m1;
+namespace m1 = epykos::fixtures;   // D28 moved the M1 fixtures out of epykos::m1
 namespace ir = epykos::ir;
 using epykos::Tape;
 

@@ -19,6 +19,7 @@ endif()
 
 file(GLOB_RECURSE EPYKOS_BENCH_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*_bench.cpp")
 list(FILTER EPYKOS_BENCH_SOURCES EXCLUDE REGEX "/\\.[^/]*$")  # no dot-prefixed files
+epykos_drop_legacy_search(EPYKOS_BENCH_SOURCES)  # the quarantine (root CMakeLists.txt)
 
 foreach(_src IN LISTS EPYKOS_BENCH_SOURCES)
   file(RELATIVE_PATH _rel "${CMAKE_CURRENT_SOURCE_DIR}" "${_src}")

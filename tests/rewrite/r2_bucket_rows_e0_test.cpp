@@ -21,6 +21,30 @@
 // per-kind floor OFF -- i.e. the pure soundness gate D52 proposed -- R2 fires on 5 of 10 and 23 of
 // 67, every site still bit-exact, but what it produces is fragmentation, not batching (M1 domain
 // 4: 2,432 rows, 2 kinds, 1,243 runs), and the e-graph cannot absorb it.
+//
+// RE-ANCHORED 2026-09-27 (PRINCIPLES.md §5.2a case 3 -- the algebra removed the shape this rule
+// matched). R2 NOW FIRES NOWHERE ON EITHER REAL FIXTURE: 0 of the M1 book's 14 domains (it was
+// already 0, of 10) and 0 of the Stage A tape's 73 (it was 3, of 67). Measured per domain against
+// the rule's own two floors, on the collapsed tapes:
+//
+//   M1 book      14 domains, 14 eligible, 4 with a varying column: 1 rejected by floor (1)
+//                (`exp(mul(neg(@0),$0))`, 2,563 rows / 2,563 runs / 2,563 kinds -- one bucket per
+//                row) and 3 by floor (2) (kinds interleaved). 0 sites.
+//   Stage A      73 domains, 58 eligible, 21 with a varying column: 7 rejected by floor (1) and
+//                14 by floor (2). 0 sites.
+//
+// The three Stage A sites that are gone were `mul($0,sub(@0,@1))@L3` (11 rows -> 2 buckets),
+// `mul(@0,$0)@L6` (13 rows -> 12 buckets -- the mostly-singleton shape this file's last test was
+// built around) and `div(sub(@0,#0),$0)@L6` (6 rows -> 2 buckets). The first no longer EXISTS: a
+// trade PV is `side·(long − short)` with side == ±1, `simplify`'s `mul(x, 1) -> x` drops the
+// multiply for side == +1 and leaves the side == −1 rows a UNIFORM literal −1, so the class has no
+// varying column left to bucket on. The other two shapes survive but their rows are now
+// interleaved by kind and fail floor (2).
+//
+// That is a finding about the layout rule set, not about this fixture: R2's whole non-synthetic
+// input was the near-duplicate structure the algebra phase exists to remove, and DESIGN.md §6's
+// eight data-movement rewrites have no other source of it here. It is stated at each test and in
+// the landing report rather than hidden behind a relaxed gate.
 #include <gtest/gtest.h>
 
 #include <iostream>
@@ -155,10 +179,15 @@ TEST(R2BucketRows, InterleavedKindsAreNotAPerKindPartitionSoTheRuleReportsNoSite
          "rather than batching it (mutant r2.accepts_fragmented_split)";
 }
 
-// The M1 book: R2 fires on 0 of its 10 domains. Five of them ARE bucketable by contiguous run,
-// but none of those runs is a per-kind partition -- measured (D65) rows / runs / kinds: domain 3
+// The M1 book: R2 fires on 0 of its 14 domains, and did on 0 of its 10 before the algebra phase,
+// so the count did not move -- but the reason it is zero got narrower and is re-measured here.
+//
+// D65 measured five domains that pass floor (1) and fail floor (2), rows / runs / kinds: domain 3
 // 16,103 / 9,152 / 2,169, domain 4 2,432 / 1,243 / 2, domain 5 15,703 / 8,752 / 1,953, domain 7
-// 969 / 454 / 2, domain 8 31 / 18 / 2. The kinds are there and the recording order interleaves
+// 969 / 454 / 2, domain 8 31 / 18 / 2. Three of those survive as the collapsed tape's domains 4,
+// 5 and 6 with the same numbers; the last two were the swap domains `mul($0,sub(@0,@1))`, and
+// `mul(x, 1) -> x` dissolved that class, so their side column -- the only thing R2 had to bucket
+// them on -- no longer exists. The kinds are there and the recording order interleaves
 // them, which is R2's own documented scope limit (it buckets contiguous runs, it does not sort).
 // verify_rule below is therefore a checked no-op; it stays so that a future R2 that DOES fire here
 // is checked by this gate rather than a new one. Note also that the M1 book's own state vector
@@ -172,6 +201,7 @@ TEST(R2BucketRows, MatchesAndVerifiesOnTheM1Book) {
 
   const std::size_t n_sites = rule.match(program, ir::PlanAnnotations{}).size();
   std::cout << "[ r2 ] M1 book: " << n_sites << " of " << program.domains.size() << " domain(s) split into contiguous-run buckets\n";
+  EXPECT_EQ(n_sites, 0u) << "R2 now fires on the M1 book: re-measure this file's header";
 
   rewrite::VerifyOptions options;
   options.ball.draws = 8;
@@ -181,37 +211,42 @@ TEST(R2BucketRows, MatchesAndVerifiesOnTheM1Book) {
   EXPECT_TRUE(report.passed()) << report.report.summary();
 }
 
-// R2 fires on the Stage A tape and every site it reports is bit-exact, forward AND adjoint, at
-// the record point. This is also the regression gate for the crash D52 point 4 walled the whole
-// singleton shape off for: EVERY site's split program has its adjoint::Adjoint built and run here,
-// and site 0 is the exact 177-row -> 168-bucket (159 singleton) domain that reproduction named.
-// The fault was never in src/adjoint/ -- it was this test handing compare_at_record_point the
-// 70-quote subset as a 148-Input state and state_bar buffer (D65, record_point_check.hpp's header,
-// which now derives both from the Program so no caller can repeat it).
+// Used to assert that R2 fires on the Stage A tape (`EXPECT_GT(sites.size(), 0u)` -- "a zero here
+// is a finding, not a pass"), that every site it reports is bit-exact forward AND adjoint at the
+// record point, and that at least one site is the mostly-singleton split D52 point 4 had walled
+// off. The zero is now the measured answer and this is that finding, stated: on the collapsed
+// tape R2 reports NO site at all, so there is no proposal to verify and the singleton shape is no
+// longer reachable from this fixture. The file header has the per-domain account of the two floors
+// that reject it.
 //
-// compare_at_record_point, not rewrite::verify_rule: this tape's Inputs feed an implicit block the
-// book's knots are calibrated from, so a ball perturbation is not a state the tape is
-// self-consistent at, only the exact record point is (see record_point_check.hpp's header).
-TEST(R2BucketRows, MatchesAndVerifiesOnTheStageATape) {
+// What that costs, said plainly rather than left implicit. The D65 defect itself -- Adjoint::run
+// writing past a state_bar buffer sized from a subset of the Inputs -- is NOT covered here any
+// more. It does not need to be: tests/adjoint/state_bar_bounds_e0_test.cpp pins that clause
+// directly with a guard region, on a tape of its own, and does not depend on any rule firing.
+// What IS lost here is R2's only end-to-end adjoint exercise on a real fixture, and it will stay
+// lost until some rule again produces a structural rewrite of this tape.
+//
+// The verification loop is kept rather than deleted: it verifies whatever sites do appear, so a
+// mutant that drops a floor (or a rule set that later learns to sort rows) is checked here and
+// not merely counted. compare_at_record_point, not rewrite::verify_rule: this tape's Inputs feed
+// an implicit block the book's knots are calibrated from, so a ball perturbation is not a state
+// the tape is self-consistent at, only the exact record point is (record_point_check.hpp).
+TEST(R2BucketRows, FindsNoSiteOnTheStageATapeBecauseTheAlgebraRemovedTheShapeItMatches) {
   const ir::Program program = ir::infer(epykos::test::stage_a_tape().tape);
   const rewrite::R2BucketRows rule;
 
   const std::vector<rewrite::MatchSite> sites = rule.match(program, ir::PlanAnnotations{});
   std::cout << "[ r2 ] Stage A: " << sites.size() << " of " << program.domains.size() << " domain(s) split into contiguous-run buckets\n";
-  EXPECT_GT(sites.size(), 0u) << "R2 is expected to fire on the Stage A tape (D65); a zero here is a finding, not a pass";
+  EXPECT_EQ(sites.size(), 0u) << "R2 fires on the Stage A tape again: re-measure this file's header "
+                                 "and restore the per-site adjoint coverage it used to carry";
 
-  bool saw_singleton_bucket_split = false;
   for (const rewrite::MatchSite& site : sites) {
     const rewrite::Proposal p = rule.propose(program, ir::PlanAnnotations{}, site);
     ASSERT_TRUE(p.is_structural());
     ir::validate(*p.program);
-    // The crash shape itself: a split whose buckets are mostly single rows. Keyed on the IR the
-    // rule produced (buckets > rows/2), never on a fixture's domain id or row count.
     const std::int32_t rows = program.domains[static_cast<std::size_t>(site.domain)].rows;
     const std::int32_t buckets = static_cast<std::int32_t>(p.program->domains.size() - program.domains.size()) + 1;
-    if (buckets * 2 > rows) saw_singleton_bucket_split = true;
     const auto report = epykos::test::compare_at_record_point(program, *p.program);
     EXPECT_TRUE(report.passed) << "domain " << site.domain << " (" << rows << " rows -> " << buckets << " buckets): " << report.detail;
   }
-  EXPECT_TRUE(saw_singleton_bucket_split) << "no mostly-singleton split among the sites: the crash shape is no longer covered here";
 }

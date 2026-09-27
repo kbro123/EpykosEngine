@@ -90,6 +90,9 @@ const std::vector<std::string> documented = {
     "cost.pairing_unpriced",
     "plan_bridge.discards_group",
     "oracle.error_in_double",
+    "interpreter.duplicate_output_unwritten",
+    "simplify.cancel_mismatched_operand",
+    "simplify.telescope_wrong_endpoint",
 };
 
 std::vector<std::string> registry_names() {

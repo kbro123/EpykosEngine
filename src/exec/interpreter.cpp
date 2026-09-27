@@ -211,6 +211,9 @@ struct Interpreter::Impl {
   std::vector<std::vector<std::int32_t>> keep_rows;  // per fused domain: rows materialised anyway
   std::vector<char> emitted;            // per value: an output written by the reduction block that computes it
   std::vector<std::int32_t> late_ids, late_ords;   // outputs copied from the value buffer after each chunk
+  // Output ordinals that share an IR value with another ordinal the reduction block emits in
+  // their place: out[dup_dst[k]] = out[dup_src[k]]. See decide_fusion.
+  std::vector<std::int32_t> dup_dst, dup_src;
   std::vector<std::int32_t> inlined_into;   // per domain: the consumer whose tiles evaluate it, or -1
   struct InlineRef { std::size_t gather; std::int32_t producer; };
   std::vector<std::vector<InlineRef>> inline_refs;   // per consumer: its inlined gathers
@@ -314,7 +317,35 @@ void Interpreter::Impl::decide_fusion() {
     late_ids.push_back(v);
     late_ords.push_back(static_cast<std::int32_t>(o));
   }
-  table_bytes += (late_ids.size() + late_ords.size()) * sizeof(std::int32_t);
+  // A value carrying MORE THAN ONE output ordinal is emitted from inside its group only ONCE:
+  // `build_group` stores one ordinal per row in `g.emit_ordinal` and the last assignment wins,
+  // so every earlier ordinal of that value was written nowhere and the caller read back whatever
+  // its output buffer held. Measured as silent zeros for 19 of 300 trade PVs on Stage A's
+  // MonotoneCubic variant, where `pv(i)` and `pv_usd(i)` are the same IR value for a USD trade.
+  //
+  // They are filled by copying the winner's OUTPUT, not by re-reading the value buffer: a value
+  // fused into a reduction is never materialised there, which is why routing them through the
+  // late-copy list above does not work (tried; it reads uninitialised buffer and is worse).
+  //
+  // The defect predates the algebra phase -- it needs a fused reduction domain carrying a
+  // duplicated output, and collapsing the coupon is what first produced that shape here.
+  // Mutant: the duplicate ordinals are not filled, which IS the defect described above.
+  const bool duplicate_unwritten = mutant("interpreter.duplicate_output_unwritten");
+  std::vector<std::int32_t> last_ord(nv, -1);
+  for (std::size_t o = 0; o < prog.outputs.size(); ++o) {
+    const ir::value_id v = prog.outputs[o];
+    if (emitted[static_cast<std::size_t>(v)]) last_ord[static_cast<std::size_t>(v)] = static_cast<std::int32_t>(o);
+  }
+  for (std::size_t o = 0; o < prog.outputs.size(); ++o) {
+    const ir::value_id v = prog.outputs[o];
+    if (!emitted[static_cast<std::size_t>(v)]) continue;
+    const std::int32_t winner = last_ord[static_cast<std::size_t>(v)];
+    if (winner != static_cast<std::int32_t>(o) && !duplicate_unwritten) {
+      dup_dst.push_back(static_cast<std::int32_t>(o));
+      dup_src.push_back(winner);
+    }
+  }
+  table_bytes += (late_ids.size() + late_ords.size() + dup_dst.size() + dup_src.size()) * sizeof(std::int32_t);
 }
 
 // Which domains are evaluated per tile of the one elementwise domain that gathers them
@@ -1173,6 +1204,12 @@ void Interpreter::run(const double* state, int B, double* out) const {
     {
       EPYKOS_EXEC_PROFILE_OUTPUT_SCOPE();
       copy_out(ctx.v, values, im.late_ids.data(), im.late_ords.data(), static_cast<int>(im.late_ids.size()), out, B, b0, L);
+      // Ordinals sharing a value with one the block emitted in their place (decide_fusion).
+      for (std::size_t k = 0; k < im.dup_dst.size(); ++k) {
+        const double* src = out + static_cast<std::size_t>(im.dup_src[k]) * static_cast<std::size_t>(B) + b0;
+        double* dst = out + static_cast<std::size_t>(im.dup_dst[k]) * static_cast<std::size_t>(B) + b0;
+        for (int l = 0; l < L; ++l) dst[l] = src[l];
+      }
     }
   }
   EPYKOS_EXEC_PROFILE_RUN();

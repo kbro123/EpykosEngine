@@ -21,13 +21,25 @@
 //                  whichever TU you like: Wide's result does not depend on -ffp-contract (see
 //                  scalar/wide.hpp), which is what lets the oracle be the SAME number everywhere.
 //   BatchFn        the path under test, differential.hpp's own type, so an exec::Interpreter, a
-//                  Replayer, or the templated maths on double all drop in unchanged.
+//                  Replayer, a catalogued kernel or the templated maths on double all drop in
+//                  unchanged. That is not incidental: PRINCIPLES.md §4 folded execution into the
+//                  mathematical tier, so "the interpreter, the catalogue kernels and the adjoint
+//                  are implementations of the recorded maths like any rewrite, and are judged the
+//                  same way". Measuring an execution path against truth therefore costs a caller
+//                  and no new code here (tests/maths/m1_oracle_error_test.cpp does it for the
+//                  interpreter).
 //   OutputClass    a named run of output ordinals. PRINCIPLES.md §4 makes tolerances per output
 //                  class ("valuation is held tight; sensitivities are allowed more"), so the
 //                  report is per class and never one global number.
 //   error_against_truth   the measurement.
 //   oracle_jacobian       the sensitivity channel: a central difference taken AT THE ORACLE'S
 //                  precision, which is a different thing from a finite difference in double.
+//
+// §4 also states the preference this header exists to serve: "prefer measuring each path against
+// the oracle over comparing the two paths to each other, where the oracle is affordable: it is the
+// stronger statement and it says which path is wrong, not merely that they differ."
+// verify/differential.hpp is the cheap path-against-path form and remains right where the oracle is
+// too expensive; this is the strong form.
 //
 // NO VERDICT IS RETURNED, deliberately. §4 says the per-class tolerances "belong in PROBLEM.md
 // beside the outputs they govern", and this package is the first ever measurement of what the

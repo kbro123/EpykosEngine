@@ -3775,6 +3775,12 @@ from. Setting them first is how the engine came to gate against an uncharacteris
 loose sanity rails and say in the source that that is what they are; the rail that matters is `max_rel > 0`, because
 an all-zero report would mean the oracle had collapsed onto the thing it judges.
 
+**The mutation harness was run in full, locally and in CI, and every mutant is caught.**
+`scripts/mutation_test.sh` on the `mutation` preset reports "every mutant caught", exit 0, for all 51 mutants over
+the 58 gate tests; CI's own `ubuntu-latest / mutation` job is green on the same tree. That full run is the check
+that matters for this package having dropped `scalar_wide_test` out of D33's gate set (§8): no pre-existing mutant
+was orphaned by it, measured rather than argued.
+
 **One mutant added, taking the registry to 51.** `oracle.error_in_double`
 (`include/epykos/mutation/mutation.hpp`, `docs/WORKLOADS.md` §M2, `tests/mutation/registry_test.cpp`, one use site in
 `src/verify/oracle.cpp`): the error is formed as `approx - truth.hi` in double instead of `Wide(approx) - truth`,
@@ -3785,7 +3791,8 @@ unmerged): that entry gives each mutant a recorded catching gate, and this one's
 `tests/verify/oracle_truth_test.cpp`.
 
 One of the four new test files joins D33's mutation gate set by name (`verify_oracle_truth_test`, via `verify`) and
-was kept cheap for it — under 0.01 s, run once per mutant. `scalar_wide_test` does not, and that is deliberate: it
+was kept cheap for it — under 0.01 s, run once per mutant. **The registry is therefore 51 mutants over 58 gate
+tests**, from 50 over 57: counted by applying D33's regex to `ctest -N` on this tree, not recalled. `scalar_wide_test` does not, and that is deliberate: it
 was `wide_e0_test.cpp` until §4a retired the convention, and a new file should not join a convention that is being
 retired (§8 below). It catches no mutant, so nothing is lost. The two measurement files do not match the regex
 either (`maths_m1_oracle_error_test`, `stage_a_oracle_error_test`); they cost 5.4 s and 91 s and are measurements,

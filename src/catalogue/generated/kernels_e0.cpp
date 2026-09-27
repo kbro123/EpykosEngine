@@ -25,7 +25,7 @@
 
 namespace epykos::catalogue::generated {
 
-// mul(col,gat);mul(step-1,gat)  (found in: m1_book)
+// mul(col,gat);mul(step-1,gat)  (found in: m1_book, stage_a)
 void kernel_05655c67bbabdf43(double* values, ir::value_id value_base, int r0, int n, int L,
                     const double* const* literals, const double* const* columns,
                     const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
@@ -47,7 +47,7 @@ void kernel_05655c67bbabdf43(double* values, ir::value_id value_base, int r0, in
   }
 }
 
-// mul(lit,gat)  (found in: stage_a)
+// mul(lit,gat)  (found in: m1_book, stage_a)
 void kernel_12441ddee83dfe58(double* values, ir::value_id value_base, int r0, int n, int L,
                     const double* const* literals, const double* const* columns,
                     const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
@@ -64,6 +64,52 @@ void kernel_12441ddee83dfe58(double* values, ir::value_id value_base, int r0, in
     for (int l = 0; l < L; ++l) {
       const double s0 = ((*literals[0]) * values[static_cast<std::size_t>(gathers[0][row]) * lz + l]);
       values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s0;
+    }
+  }
+}
+
+// neg(gat);exp(step-1)  (found in: m1_book, stage_a)
+void kernel_1677ad68638cbcb9(double* values, ir::value_id value_base, int r0, int n, int L,
+                    const double* const* literals, const double* const* columns,
+                    const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
+                    const ir::value_id* seg_members, const double* seg_coefs) {
+  const std::size_t lz = static_cast<std::size_t>(L);
+  (void)literals;
+  (void)columns;
+  (void)gathers;
+  (void)seg_offsets;
+  (void)seg_members;
+  (void)seg_coefs;
+  for (int i = 0; i < n; ++i) {
+    const int row = r0 + i;
+    for (int l = 0; l < L; ++l) {
+      const double s0 = (-values[static_cast<std::size_t>(gathers[0][row]) * lz + l]);
+      const double s1 = std::exp(s0);
+      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s1;
+    }
+  }
+}
+
+// mul(gat,gat);mul(step-1,gat);sub(step-1,lit);div(step-1,col)  (found in: stage_a)
+void kernel_2210126e5e3393f1(double* values, ir::value_id value_base, int r0, int n, int L,
+                    const double* const* literals, const double* const* columns,
+                    const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
+                    const ir::value_id* seg_members, const double* seg_coefs) {
+  const std::size_t lz = static_cast<std::size_t>(L);
+  (void)literals;
+  (void)columns;
+  (void)gathers;
+  (void)seg_offsets;
+  (void)seg_members;
+  (void)seg_coefs;
+  for (int i = 0; i < n; ++i) {
+    const int row = r0 + i;
+    for (int l = 0; l < L; ++l) {
+      const double s0 = (values[static_cast<std::size_t>(gathers[0][row]) * lz + l] * values[static_cast<std::size_t>(gathers[1][row]) * lz + l]);
+      const double s1 = (s0 * values[static_cast<std::size_t>(gathers[2][row]) * lz + l]);
+      const double s2 = (s1 - (*literals[0]));
+      const double s3 = (s2 / columns[0][row]);
+      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s3;
     }
   }
 }
@@ -94,6 +140,31 @@ void kernel_25bc072d1fea93a9(double* values, ir::value_id value_base, int r0, in
   }
 }
 
+// mul(gat,gat);sub(step-1,lit);div(step-1,col);mul(step-1,col);mul(step-1,gat)  (found in: stage_a)
+void kernel_2dddaa1c1abcef6a(double* values, ir::value_id value_base, int r0, int n, int L,
+                    const double* const* literals, const double* const* columns,
+                    const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
+                    const ir::value_id* seg_members, const double* seg_coefs) {
+  const std::size_t lz = static_cast<std::size_t>(L);
+  (void)literals;
+  (void)columns;
+  (void)gathers;
+  (void)seg_offsets;
+  (void)seg_members;
+  (void)seg_coefs;
+  for (int i = 0; i < n; ++i) {
+    const int row = r0 + i;
+    for (int l = 0; l < L; ++l) {
+      const double s0 = (values[static_cast<std::size_t>(gathers[0][row]) * lz + l] * values[static_cast<std::size_t>(gathers[1][row]) * lz + l]);
+      const double s1 = (s0 - (*literals[0]));
+      const double s2 = (s1 / columns[0][row]);
+      const double s3 = (s2 * columns[1][row]);
+      const double s4 = (s3 * values[static_cast<std::size_t>(gathers[2][row]) * lz + l]);
+      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s4;
+    }
+  }
+}
+
 // div(gat,gat);sub(step-1,gat)  (found in: stage_a)
 void kernel_340886b8281d784a(double* values, ir::value_id value_base, int r0, int n, int L,
                     const double* const* literals, const double* const* columns,
@@ -112,6 +183,30 @@ void kernel_340886b8281d784a(double* values, ir::value_id value_base, int r0, in
       const double s0 = (values[static_cast<std::size_t>(gathers[0][row]) * lz + l] / values[static_cast<std::size_t>(gathers[1][row]) * lz + l]);
       const double s1 = (s0 - values[static_cast<std::size_t>(gathers[2][row]) * lz + l]);
       values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s1;
+    }
+  }
+}
+
+// sub(lit,lit);div(step-1,lit);mul(step-1,lit);mul(step-1,gat)  (found in: stage_a)
+void kernel_3e8edc686561d14e(double* values, ir::value_id value_base, int r0, int n, int L,
+                    const double* const* literals, const double* const* columns,
+                    const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
+                    const ir::value_id* seg_members, const double* seg_coefs) {
+  const std::size_t lz = static_cast<std::size_t>(L);
+  (void)literals;
+  (void)columns;
+  (void)gathers;
+  (void)seg_offsets;
+  (void)seg_members;
+  (void)seg_coefs;
+  for (int i = 0; i < n; ++i) {
+    const int row = r0 + i;
+    for (int l = 0; l < L; ++l) {
+      const double s0 = ((*literals[0]) - (*literals[1]));
+      const double s1 = (s0 / (*literals[2]));
+      const double s2 = (s1 * (*literals[3]));
+      const double s3 = (s2 * values[static_cast<std::size_t>(gathers[0][row]) * lz + l]);
+      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s3;
     }
   }
 }
@@ -135,28 +230,6 @@ void kernel_41adba680d15745b(double* values, ir::value_id value_base, int r0, in
       const double s1 = ((*literals[1]) - s0);
       const double s2 = (values[static_cast<std::size_t>(gathers[1][row]) * lz + l] - s1);
       values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s2;
-    }
-  }
-}
-
-// sub(lit,lit);div(step-1,lit)  (found in: stage_a)
-void kernel_4201be3e8813a35c(double* values, ir::value_id value_base, int r0, int n, int L,
-                    const double* const* literals, const double* const* columns,
-                    const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
-                    const ir::value_id* seg_members, const double* seg_coefs) {
-  const std::size_t lz = static_cast<std::size_t>(L);
-  (void)literals;
-  (void)columns;
-  (void)gathers;
-  (void)seg_offsets;
-  (void)seg_members;
-  (void)seg_coefs;
-  for (int i = 0; i < n; ++i) {
-    const int row = r0 + i;
-    for (int l = 0; l < L; ++l) {
-      const double s0 = ((*literals[0]) - (*literals[1]));
-      const double s1 = (s0 / (*literals[2]));
-      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s1;
     }
   }
 }
@@ -229,6 +302,32 @@ void kernel_4e7edebd795bcae0(double* values, ir::value_id value_base, int r0, in
   }
 }
 
+// mul(gat,gat);mul(step-1,gat);sub(step-1,lit);div(step-1,col);mul(step-1,col);mul(step-1,gat)  (found in: stage_a)
+void kernel_608db042eed6060e(double* values, ir::value_id value_base, int r0, int n, int L,
+                    const double* const* literals, const double* const* columns,
+                    const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
+                    const ir::value_id* seg_members, const double* seg_coefs) {
+  const std::size_t lz = static_cast<std::size_t>(L);
+  (void)literals;
+  (void)columns;
+  (void)gathers;
+  (void)seg_offsets;
+  (void)seg_members;
+  (void)seg_coefs;
+  for (int i = 0; i < n; ++i) {
+    const int row = r0 + i;
+    for (int l = 0; l < L; ++l) {
+      const double s0 = (values[static_cast<std::size_t>(gathers[0][row]) * lz + l] * values[static_cast<std::size_t>(gathers[1][row]) * lz + l]);
+      const double s1 = (s0 * values[static_cast<std::size_t>(gathers[2][row]) * lz + l]);
+      const double s2 = (s1 - (*literals[0]));
+      const double s3 = (s2 / columns[0][row]);
+      const double s4 = (s3 * columns[1][row]);
+      const double s5 = (s4 * values[static_cast<std::size_t>(gathers[3][row]) * lz + l]);
+      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s5;
+    }
+  }
+}
+
 // neg(gat);mul(step-1,col);exp(step-1)  (found in: m1_book, stage_a)
 void kernel_67bfed22409cf372(double* values, ir::value_id value_base, int r0, int n, int L,
                     const double* const* literals, const double* const* columns,
@@ -274,7 +373,29 @@ void kernel_6a535eefecf825da(double* values, ir::value_id value_base, int r0, in
   }
 }
 
-// sub(gat,gat)  (found in: stage_a)
+// mul(col,col);mul(step-1,gat)  (found in: stage_a)
+void kernel_7e7e1f13a6b0e1ec(double* values, ir::value_id value_base, int r0, int n, int L,
+                    const double* const* literals, const double* const* columns,
+                    const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
+                    const ir::value_id* seg_members, const double* seg_coefs) {
+  const std::size_t lz = static_cast<std::size_t>(L);
+  (void)literals;
+  (void)columns;
+  (void)gathers;
+  (void)seg_offsets;
+  (void)seg_members;
+  (void)seg_coefs;
+  for (int i = 0; i < n; ++i) {
+    const int row = r0 + i;
+    for (int l = 0; l < L; ++l) {
+      const double s0 = (columns[0][row] * columns[1][row]);
+      const double s1 = (s0 * values[static_cast<std::size_t>(gathers[0][row]) * lz + l]);
+      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s1;
+    }
+  }
+}
+
+// sub(gat,gat)  (found in: m1_book, stage_a)
 void kernel_803594e6390b7977(double* values, ir::value_id value_base, int r0, int n, int L,
                     const double* const* literals, const double* const* columns,
                     const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
@@ -291,6 +412,32 @@ void kernel_803594e6390b7977(double* values, ir::value_id value_base, int r0, in
     for (int l = 0; l < L; ++l) {
       const double s0 = (values[static_cast<std::size_t>(gathers[0][row]) * lz + l] - values[static_cast<std::size_t>(gathers[1][row]) * lz + l]);
       values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s0;
+    }
+  }
+}
+
+// mul(gat,gat);mul(step-1,gat);sub(step-1,lit);div(step-1,lit);mul(step-1,lit);mul(step-1,gat)  (found in: stage_a)
+void kernel_85acf319c0f5f6b0(double* values, ir::value_id value_base, int r0, int n, int L,
+                    const double* const* literals, const double* const* columns,
+                    const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
+                    const ir::value_id* seg_members, const double* seg_coefs) {
+  const std::size_t lz = static_cast<std::size_t>(L);
+  (void)literals;
+  (void)columns;
+  (void)gathers;
+  (void)seg_offsets;
+  (void)seg_members;
+  (void)seg_coefs;
+  for (int i = 0; i < n; ++i) {
+    const int row = r0 + i;
+    for (int l = 0; l < L; ++l) {
+      const double s0 = (values[static_cast<std::size_t>(gathers[0][row]) * lz + l] * values[static_cast<std::size_t>(gathers[1][row]) * lz + l]);
+      const double s1 = (s0 * values[static_cast<std::size_t>(gathers[2][row]) * lz + l]);
+      const double s2 = (s1 - (*literals[0]));
+      const double s3 = (s2 / (*literals[1]));
+      const double s4 = (s3 * (*literals[2]));
+      const double s5 = (s4 * values[static_cast<std::size_t>(gathers[3][row]) * lz + l]);
+      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s5;
     }
   }
 }
@@ -358,6 +505,52 @@ void kernel_9743bc8d7c4102a4(double* values, ir::value_id value_base, int r0, in
   }
 }
 
+// sub(gat,lit);div(step-1,lit);mul(step-1,lit);mul(step-1,gat)  (found in: stage_a)
+void kernel_9fd6e6f47abd2b54(double* values, ir::value_id value_base, int r0, int n, int L,
+                    const double* const* literals, const double* const* columns,
+                    const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
+                    const ir::value_id* seg_members, const double* seg_coefs) {
+  const std::size_t lz = static_cast<std::size_t>(L);
+  (void)literals;
+  (void)columns;
+  (void)gathers;
+  (void)seg_offsets;
+  (void)seg_members;
+  (void)seg_coefs;
+  for (int i = 0; i < n; ++i) {
+    const int row = r0 + i;
+    for (int l = 0; l < L; ++l) {
+      const double s0 = (values[static_cast<std::size_t>(gathers[0][row]) * lz + l] - (*literals[0]));
+      const double s1 = (s0 / (*literals[1]));
+      const double s2 = (s1 * (*literals[2]));
+      const double s3 = (s2 * values[static_cast<std::size_t>(gathers[1][row]) * lz + l]);
+      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s3;
+    }
+  }
+}
+
+// sub(gat,gat);mul(step-1,lit)  (found in: stage_a)
+void kernel_b14d97112d474dff(double* values, ir::value_id value_base, int r0, int n, int L,
+                    const double* const* literals, const double* const* columns,
+                    const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
+                    const ir::value_id* seg_members, const double* seg_coefs) {
+  const std::size_t lz = static_cast<std::size_t>(L);
+  (void)literals;
+  (void)columns;
+  (void)gathers;
+  (void)seg_offsets;
+  (void)seg_members;
+  (void)seg_coefs;
+  for (int i = 0; i < n; ++i) {
+    const int row = r0 + i;
+    for (int l = 0; l < L; ++l) {
+      const double s0 = (values[static_cast<std::size_t>(gathers[0][row]) * lz + l] - values[static_cast<std::size_t>(gathers[1][row]) * lz + l]);
+      const double s1 = (s0 * (*literals[0]));
+      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s1;
+    }
+  }
+}
+
 // div(gat,col)  (found in: stage_a)
 void kernel_bb876e73c39bcfcc(double* values, ir::value_id value_base, int r0, int n, int L,
                     const double* const* literals, const double* const* columns,
@@ -379,8 +572,8 @@ void kernel_bb876e73c39bcfcc(double* values, ir::value_id value_base, int r0, in
   }
 }
 
-// sub(gat,gat);div(step-1,gat);sub(step-1,gat)  (found in: stage_a)
-void kernel_d4b14e4b8ce98e4f(double* values, ir::value_id value_base, int r0, int n, int L,
+// div(gat,gat);mul(step-1,gat);mul(step-1,gat);sub(step-1,lit);div(step-1,lit)  (found in: stage_a)
+void kernel_d2e944bd802a01a5(double* values, ir::value_id value_base, int r0, int n, int L,
                     const double* const* literals, const double* const* columns,
                     const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
                     const ir::value_id* seg_members, const double* seg_coefs) {
@@ -394,10 +587,12 @@ void kernel_d4b14e4b8ce98e4f(double* values, ir::value_id value_base, int r0, in
   for (int i = 0; i < n; ++i) {
     const int row = r0 + i;
     for (int l = 0; l < L; ++l) {
-      const double s0 = (values[static_cast<std::size_t>(gathers[0][row]) * lz + l] - values[static_cast<std::size_t>(gathers[1][row]) * lz + l]);
-      const double s1 = (s0 / values[static_cast<std::size_t>(gathers[2][row]) * lz + l]);
-      const double s2 = (s1 - values[static_cast<std::size_t>(gathers[3][row]) * lz + l]);
-      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s2;
+      const double s0 = (values[static_cast<std::size_t>(gathers[0][row]) * lz + l] / values[static_cast<std::size_t>(gathers[1][row]) * lz + l]);
+      const double s1 = (s0 * values[static_cast<std::size_t>(gathers[2][row]) * lz + l]);
+      const double s2 = (s1 * values[static_cast<std::size_t>(gathers[3][row]) * lz + l]);
+      const double s3 = (s2 - (*literals[0]));
+      const double s4 = (s3 / (*literals[1]));
+      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s4;
     }
   }
 }
@@ -425,6 +620,27 @@ void kernel_d5b6eb8bdc669bfe(double* values, ir::value_id value_base, int r0, in
   }
 }
 
+// sub(gat,lit)  (found in: stage_a)
+void kernel_dabfe6eb116e16a1(double* values, ir::value_id value_base, int r0, int n, int L,
+                    const double* const* literals, const double* const* columns,
+                    const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
+                    const ir::value_id* seg_members, const double* seg_coefs) {
+  const std::size_t lz = static_cast<std::size_t>(L);
+  (void)literals;
+  (void)columns;
+  (void)gathers;
+  (void)seg_offsets;
+  (void)seg_members;
+  (void)seg_coefs;
+  for (int i = 0; i < n; ++i) {
+    const int row = r0 + i;
+    for (int l = 0; l < L; ++l) {
+      const double s0 = (values[static_cast<std::size_t>(gathers[0][row]) * lz + l] - (*literals[0]));
+      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s0;
+    }
+  }
+}
+
 // sub(gat,lit);div(step-1,col)  (found in: stage_a)
 void kernel_dd2d4a5510d7a13d(double* values, ir::value_id value_base, int r0, int n, int L,
                     const double* const* literals, const double* const* columns,
@@ -447,8 +663,8 @@ void kernel_dd2d4a5510d7a13d(double* values, ir::value_id value_base, int r0, in
   }
 }
 
-// sub(gat,gat);mul(step-1,col)  (found in: m1_book, stage_a)
-void kernel_e60c427e9aebcee8(double* values, ir::value_id value_base, int r0, int n, int L,
+// div(gat,gat)  (found in: stage_a)
+void kernel_e8cc97762fcd1e61(double* values, ir::value_id value_base, int r0, int n, int L,
                     const double* const* literals, const double* const* columns,
                     const std::int32_t* const* gathers, const std::int32_t* seg_offsets,
                     const ir::value_id* seg_members, const double* seg_coefs) {
@@ -462,9 +678,8 @@ void kernel_e60c427e9aebcee8(double* values, ir::value_id value_base, int r0, in
   for (int i = 0; i < n; ++i) {
     const int row = r0 + i;
     for (int l = 0; l < L; ++l) {
-      const double s0 = (values[static_cast<std::size_t>(gathers[0][row]) * lz + l] - values[static_cast<std::size_t>(gathers[1][row]) * lz + l]);
-      const double s1 = (s0 * columns[0][row]);
-      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s1;
+      const double s0 = (values[static_cast<std::size_t>(gathers[0][row]) * lz + l] / values[static_cast<std::size_t>(gathers[1][row]) * lz + l]);
+      values[(static_cast<std::size_t>(value_base) + static_cast<std::size_t>(row)) * lz + static_cast<std::size_t>(l)] = s0;
     }
   }
 }

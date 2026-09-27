@@ -137,8 +137,11 @@ TEST(AdjointCatalogueE0, DefaultStageAStillDispatchesThroughTheStaleCatalogue) {
   ASSERT_FALSE(epykos::ir::scan_domains(program).empty()) << "Stage A's compounding scan is the whole point of this gate";
   const epykos::catalogue::Coverage cov = check_catalogue_e0(program, program.input_values, 1, "Stage A (default)");
   EXPECT_EQ(cov.groups_total, 72u) << "the candidate-domain count of this instance moved";
-  EXPECT_EQ(cov.groups_catalogued, 56u)
-      << "coverage against the pre-algebra registry moved from the 56/72 measured when this gate was re-anchored";
+  // Back to FULL coverage — see the note in tests/exec/interpreter_catalogue_e0_test.cpp. It
+  // read 56u for one commit against the pre-algebra registry; regenerating restored 72/72.
+  EXPECT_EQ(cov.groups_catalogued, cov.groups_total)
+      << "the catalogue no longer covers every eligible group of the workload it was generated "
+         "from: re-run scripts/catalogue_regen.sh";
 }
 
 // A smaller, differently-noised draw: signature independence holds (same catalogue, bitwise

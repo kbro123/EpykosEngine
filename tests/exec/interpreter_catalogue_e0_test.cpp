@@ -187,8 +187,14 @@ TEST(InterpreterCatalogueE0, DefaultStageAStillDispatchesThroughTheStaleCatalogu
   std::vector<std::vector<double>> states(1, c.program.input_values);
   const epykos::catalogue::Coverage cov = check_catalogue_e0(c.program, states, "Stage A (default)");
   EXPECT_EQ(cov.groups_total, 41u) << "the candidate-domain count of this instance moved";
-  EXPECT_EQ(cov.groups_catalogued, 30u)
-      << "coverage against the pre-algebra registry moved from the 30/41 measured when this gate was re-anchored";
+  // Back to FULL coverage, which is what this clause is really for: the registry was generated
+  // from exactly this instance, so every eligible group must match. It read 30u for one commit,
+  // because the generated registry was still the pre-algebra one (last regenerated at 67d7c0e,
+  // before the pin existed) and the Signature is keyed on the IR structure the algebra changed.
+  // `scripts/catalogue_regen.sh` against the collapsed tapes restored 41/41.
+  EXPECT_EQ(cov.groups_catalogued, cov.groups_total)
+      << "the catalogue no longer covers every eligible group of the workload it was generated "
+         "from: re-run scripts/catalogue_regen.sh";
 }
 
 TEST(InterpreterCatalogueE0, SmallStageA) {

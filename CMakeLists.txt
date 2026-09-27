@@ -44,6 +44,7 @@ option(EPYKOS_MUTATIONS   "Compile the registered mutants (include/epykos/mutati
 option(EPYKOS_EXEC_PROFILE "Compile exec::Interpreter's per-domain wall-clock timers (src/exec/interpreter.cpp); prints to stderr at process exit. The profile preset only (tools/costmodel/'s calibration): never a gated or perf-gated build, the instrumentation adds overhead to every run()" OFF)
 option(EPYKOS_H2H         "Build tools/h2h, the representative head-to-head that links a SECOND engine (D78). OFF by default and never in CI: needs -DSWAPENGINE_ROOT=<a configured build of it>. The only target here that compiles against another engine's headers" OFF)
 option(EPYKOS_BUILD_TOOLS "Build the executables under tools/ (tools/costmodel/'s cost-model calibration; D9 numbers, never engine API)" ON)
+option(EPYKOS_LEGACY_SEARCH "Build the quarantined M4 plan-level search (PRINCIPLES.md §7.1, §10 step 3): optimise/ (e-graph, cost model, extraction, plan_bridge) and rewrite/ minus the planner, with their tests, benchmarks and tools. OFF by default — no execution path reaches any of it. Quarantined, NOT deleted: turn this ON and every file is back, unchanged" OFF)
 
 # ---------------------------------------------------------------------------------------------
 # Flags (D13).  Gated build: -O3 -march=x86-64-v3 -fno-math-errno, never -ffast-math.
@@ -129,6 +130,52 @@ if(EPYKOS_BUILD_BENCH)
 endif()
 
 # ---------------------------------------------------------------------------------------------
+# The quarantine (PRINCIPLES.md §7.1, §10 step 3): the M4 plan-level search.
+#
+# With EPYKOS_LEGACY_SEARCH=OFF (the default) the subsystem is not compiled at all. The WHOLE
+# mechanism is the one function below, applied to the four CONFIGURE_DEPENDS globs (library,
+# tests, benchmarks) plus the three add_subdirectory() lines in tools/CMakeLists.txt. Nothing is
+# deleted and no source file carries a preprocessor guard: turn the option ON and it is all back.
+#
+# Dropped: include/epykos/optimise/ + src/optimise/, tests/optimise/, bench/optimise/,
+# tools/costmodel/, tools/egraph_scale/, tools/egraph_eval/, and ALL of rewrite/ except the exact
+# file stems in EPYKOS_REWRITE_KEEP. The keep list is exact stems, not a prefix match, so a new
+# file under rewrite/ is quarantined unless it is named here deliberately.
+#
+# Why each kept stem is NOT quarantined — the first two are the contract, the rest are
+# entanglements measured when this quarantine was built, not a judgement that they belong here:
+#   planner           src/exec/interpreter.cpp calls is_whole_segment, analyze_inline, match_pair,
+#                     match_tail and uses PairShape. The interpreter does not work without it.
+#   planner_rules     declares rewrite::planner::default_plan and DefaultPlanOptions, which
+#                     src/exec/interpreter.cpp calls to build its plan. They are NOT in planner.hpp.
+#   rule              the Rule / MatchSite / Proposal / Exactness base that planner_rules.hpp's
+#                     five planner rules derive from, and that r7_block_linmap.hpp needs.
+#   greedy            rewrite::merge_annotations, which default_plan folds every Proposal with.
+#   r7_block_linmap   rewrite::is_linmap_domain, called by src/adjoint/block_jacobian.cpp.
+#   fma_contraction   rewrite::FmaContractionRule, exercised by the D80 finding asserted in
+#                     tests/verify/zz_fma_catastrophic_cancellation_test.cpp (PRINCIPLES.md §5.3).
+# Two kept test stems, both of which gate the planner and compile against kept code only:
+# planner_rules_m1_e0_test and planner_shapes_test.
+# ---------------------------------------------------------------------------------------------
+set(EPYKOS_REWRITE_KEEP
+    "planner|planner_rules|rule|greedy|r7_block_linmap|fma_contraction|planner_rules_m1_e0_test|planner_shapes_test")
+
+# Drops the quarantined paths from a globbed file list, in place. No-op when the option is ON.
+function(epykos_drop_legacy_search _var)
+  if(EPYKOS_LEGACY_SEARCH)
+    return()
+  endif()
+  set(_files ${${_var}})
+  list(FILTER _files EXCLUDE REGEX "/(optimise|costmodel|egraph_scale|egraph_eval)/")
+  set(_kept ${_files})
+  list(FILTER _kept  INCLUDE REGEX "/rewrite/(${EPYKOS_REWRITE_KEEP})\\.(cpp|hpp)$")
+  list(FILTER _files EXCLUDE REGEX "/rewrite/")
+  list(APPEND _files ${_kept})
+  list(SORT _files)
+  set(${_var} ${_files} PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------------------------
 # The engine: static library `epykos` (alias epykos::epykos).
 # ---------------------------------------------------------------------------------------------
 file(GLOB_RECURSE EPYKOS_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.cpp")
@@ -136,6 +183,11 @@ file(GLOB_RECURSE EPYKOS_HEADERS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/include/
 # Ignore dot-prefixed files (editor backups, macOS "._" AppleDouble sidecars on copied trees).
 list(FILTER EPYKOS_SOURCES EXCLUDE REGEX "/\\.[^/]*$")
 list(FILTER EPYKOS_HEADERS EXCLUDE REGEX "/\\.[^/]*$")
+epykos_drop_legacy_search(EPYKOS_SOURCES)
+epykos_drop_legacy_search(EPYKOS_HEADERS)
+if(NOT EPYKOS_LEGACY_SEARCH)
+  message(STATUS "EpykosEngine: the M4 plan-level search is quarantined (EPYKOS_LEGACY_SEARCH=OFF, PRINCIPLES.md §7.1)")
+endif()
 
 add_library(epykos STATIC ${EPYKOS_SOURCES} ${EPYKOS_HEADERS})
 add_library(epykos::epykos ALIAS epykos)

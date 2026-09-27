@@ -1,5 +1,10 @@
-// TEMPORARY adversarial-review probe (m4-review-exactness). NOT part of any package's deliverable;
-// not intended to land. Demonstrates that FmaContractionRule's declared Exactness::E1 (<= 4 ulps,
+// The D80 finding, asserted: it pins PRINCIPLES.md §5.3's justification for making contraction a
+// declared build policy rather than an E1 peephole. Moved here from tests/rewrite/ when the M4
+// plan-level search was quarantined (PRINCIPLES.md §7.1, §10 step 3): tests/rewrite/ is dropped
+// from the default build, this assertion is not. rewrite::FmaContractionRule is one of the six
+// rewrite/ stems the default build therefore keeps (root CMakeLists.txt, EPYKOS_REWRITE_KEEP).
+//
+// Demonstrates that FmaContractionRule's declared Exactness::E1 (<= 4 ulps,
 // verify::Tolerance::e1()) is NOT an upper bound in general: for inputs where the subsequent Sum
 // suffers catastrophic cancellation against the Mul's own rounding error, "a*b (rounded) + c"
 // and "fma(a,b,c)" (correctly rounded) diverge by an UNBOUNDED number of ulps of the true result,
@@ -16,7 +21,6 @@
 #include "epykos/ir/evaluate.hpp"
 #include "epykos/ir/program.hpp"
 #include "epykos/rewrite/fma_contraction.hpp"
-#include "epykos/rewrite/verifier.hpp"
 #include "epykos/verify/differential.hpp"
 
 namespace ir = epykos::ir;

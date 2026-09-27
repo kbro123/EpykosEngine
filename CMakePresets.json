@@ -43,10 +43,11 @@
     {
       "name": "mutation",
       "displayName": "mutation: reference flags + EPYKOS_MUTATIONS=ON (scripts/mutation_test.sh)",
-      "description": "The reference build with the registered mutants compiled in; EPYKOS_MUTANT=<name> selects one at run time (D32). Never a gated or measured build.",
+      "description": "The reference build with the registered mutants compiled in; EPYKOS_MUTANT=<name> selects one at run time (D32). Never a gated or measured build. EPYKOS_LEGACY_SEARCH is ON here alone: the mutation gate audits every registered mutant, including those in the quarantined M4 search (PRINCIPLES.md §7.1), and half of them are caught only by gate tests that live in tests/rewrite/ and tests/optimise/. Quarantining the subsystem out of this preset too would silently drop those mutants and their catchers from scripts/mutation_catchers.tsv.",
       "inherits": "reference",
       "cacheVariables": {
-        "EPYKOS_MUTATIONS": "ON"
+        "EPYKOS_MUTATIONS": "ON",
+        "EPYKOS_LEGACY_SEARCH": "ON"
       }
     },
     {

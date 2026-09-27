@@ -315,12 +315,29 @@ TEST(SpikeTelescoping, TheStructuralPrize) {
             << " relative (naive " << std::setprecision(17) << n.book_pv << ", telescoped " << t.book_pv
             << std::setprecision(6) << "); optimality |J^T r|_inf " << n.jtr_inf << " and " << t.jtr_inf << "\n";
   EXPECT_LT(book_rel, 1e-9);
-  EXPECT_LT(t.tape_nodes_after_passes, n.tape_nodes_after_passes)
-      << "telescoping did not remove a single surviving tape node; the spike is not measuring what it thinks";
-  EXPECT_GT(n.ir_scan_domains, 0u) << "the naive form should record the compounding as a scan (D41)";
-  // The compounding scan is what telescoping removes, and its ROWS are the measure of it: the
-  // telescoped form keeps a scan domain or two (the fixed leg's own folds are recurrences too)
-  // but almost no rows in them. A tenfold drop is a floor, not the measurement -- the measurement
-  // is the table printed above.
-  EXPECT_LT(t.ir_scan_rows * 10u, n.ir_scan_rows) << "the compounding scan did not collapse";
+  // ---- INVERTED, and this is the whole point (PRINCIPLES.md §5.2a case 3) ------------------
+  //
+  // This test used to assert that the hand-telescoped column was strictly SMALLER than the naive
+  // one, and that the compounding scan's rows dropped tenfold. Both were true and both are now
+  // false, because `epykos::compile` derives the collapse itself: `simplify`'s four peepholes
+  // turn the naive recording into the same program the hand-written spike produces.
+  //
+  // Measured at the moment of inversion: 1,183 surviving tape nodes on BOTH sides, 18 IR scan
+  // rows on both, and the two forms' book PV agreeing to 6.3e-14 with identical optimality.
+  // The naive column of `bench/compare/ois_ladder_bench` and `tools/h2h` reports 0.000e+00
+  // between the forms for the same reason.
+  //
+  // So the assertion becomes the success condition: the spike must now be REDUNDANT. If the two
+  // columns ever diverge again, `simplify` has stopped finding the collapse on this fixture and
+  // that is a regression, not a prize.
+  EXPECT_EQ(t.tape_nodes_after_passes, n.tape_nodes_after_passes)
+      << "the engine no longer derives the telescope: the hand-written spike is smaller than what "
+         "compile() produces from the naive recording, which is the regression this test now guards";
+  EXPECT_EQ(t.ir_scan_rows, n.ir_scan_rows)
+      << "the compounding scan survives in the naive form but not the hand-written one";
+  EXPECT_EQ(t.ir_steps, n.ir_steps);
+  // `spike_telescoped.hpp` says in its own header that it "becomes redundant and should be
+  // deleted rather than kept as a fast path" once the engine can find this. That is now true.
+  // It is kept for exactly as long as it takes to record the end-to-end timing against the other
+  // engine with both columns side by side, and then it goes.
 }

@@ -9,31 +9,48 @@ A financial computation engine that records pricing maths written once (template
 domain-typed array program executed by pre-compiled fused kernels, with mechanically derived adjoints. **No JIT.**
 
 ## Status
-**Rebuilding the front half of the compiler.** `docs/PRINCIPLES.md` is the contract and is authoritative;
-this paragraph is a summary of it and is rewritten, never extended (PRINCIPLES.md §9).
+**The front half of the compiler exists and the engine derives telescoping.** `docs/PRINCIPLES.md`
+is the contract and is authoritative; this paragraph summarises it and is rewritten, never extended
+(§9).
 
-M1 (kill test), M2 (verification and adjoints) and M3 (the Stage A tape) passed 2026-09-23. **M4 (optimise
-the totality) failed its exit gate 2026-09-24** (D59), and the post-mortem found the cause is structural,
-not a tuning problem: the engine has a good back half — inference, planning, tiling, the catalogue, the
-adjoint, the IFT — and **no front half at all**. There is no canonicalisation, no algebraic simplification
-and no recurrence solving anywhere in it, and the tape passes were contracted to be bit-identical, which
-forbids all three. D68 measured the consequence: the whole plan-level dynamic range on Stage A is
-1.027x–1.042x and `exec::Interpreter` is 2.513% of the problem, so the space M4 searched was worth about
-one part in a thousand of the wall clock. D78 measured what was outside it: 33x–132x on the same problem.
+M1–M3 passed 2026-09-23. **M4 failed its exit gate** 2026-09-24 (D59) and the post-mortem found the
+cause was structural: the engine had a good back half and no front half, and the tape passes were
+contracted to be bit-identical, which forbids algebra outright. **D79 replaced that contract with
+the pin** — above it the engine chooses WHICH expression to evaluate and is judged against the
+recorded expression in exact real arithmetic; below it, HOW, bit-identical to the pinned tape under
+a declared contraction and transcendental policy.
 
-**The engine as M4 left it is tagged `v1.0-m4`** and stays addressable and re-measurable.
+**D81, 2026-09-27: `epykos::compile` now collapses the compounded OIS coupon by itself.** Five
+local peepholes in one forward sweep — the tau cancellation, the +1/-1 cancellation, the
+multiplicative identity, the telescope `mul(div(p,q),div(q,s)) -> div(p,s)` and one reassociation
+for seasoned coupons. No recurrence solver, no e-graph, no new types. compare_ois goes from
+1,020,583 recorded nodes to **1,183**, where the four data-movement passes alone left 81,321 and
+D74's hand-written spike produced 1,313; Stage A goes 517,036 → **174,388**. It costs 1.03–1.08x
+the old pass time. Verified against an independent engine and TIGHTER than before the collapse
+(discount factors 7.355e-16, was 5.329e-15); the mechanical adjoint, the IFT ladder and every
+error-against-truth gate pass unedited.
 
-Where it stands against a specialist, measured in one process on one clock over 25 knots and 1,000 trades
-(D78, `tools/h2h`): the risk ladder is **5.16x faster** and crosses over at about 32 trades because an IFT
-ladder scales with the knots and not the book; cold calibration is **1.9x slower** and warm recalibration
-**7.1x slower**. Those are with the coupon hand-telescoped. As the engine records it today they are 132x
-and 33x worse again, which is the missing front half priced.
+**Against a specialist, both engines in one process on one clock** (D81 §7, `tools/h2h`, 25 knots
+and 1,000 trades, idle box): 161x faster cold calibration than the engine managed a day earlier,
+150x warm, 36.5x on the risk ladder, each better than the hand-written spike. The **risk ladder is
+5.70x in our favour**. Calibration is still **1.7x slower cold and 7.1x warm** and the collapse did
+not move that ratio at all, which says the remaining gap is solver algorithm, not arithmetic —
+`PRINCIPLES.md` §4's named exception.
 
-Work in flight, in `PRINCIPLES.md` §10 order: a compile entry point, quarantine then delete the 12,219
-lines of e-graph and layout-rule machinery no execution path reaches (§7.1), then canonicalise → simplify
-→ solve recurrences above the pin. Telescoping is the worked example that proves the contract end to end.
-Nothing below the pin is rewritten; nothing below the pin is implicated. Nothing merges to `main` without
-the owner.
+Two defects found on the way and fixed: `exec::Interpreter` silently left duplicated outputs
+unwritten (pre-existing, exposed by the collapse — silent zeros for 19 of 300 trade PVs on a Stage
+A variant), and the generated catalogue registry was stale so coverage had dropped a quarter.
+
+The M4 search — the e-graph, the cost model and layout rules R1–R7 — is **quarantined behind
+`EPYKOS_LEGACY_SEARCH`, default OFF, and deliberately not deleted** (§7.1): the technique has a
+future at term level once §7's measurement says what the residual bidirectional space is worth. R1,
+R2 and R5 now find **zero sites** on both fixtures, because the algebra removed the near-duplicate
+structure they matched.
+
+`ctest`: **104/104** default, **129/129** with the legacy search on, on `d448afd70180`. No CI
+evidence yet — none of this has been pushed. `v1.0-m4` tags the pre-rebuild engine. Nothing merges
+to `main` without the owner.
+
 ## Rules
 - **`docs/PRINCIPLES.md` is the contract** and outranks every other document, this one included. It is **rewritten in
   place**, never appended to; so is the Status block above (PRINCIPLES.md §9).

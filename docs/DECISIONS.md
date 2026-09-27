@@ -5813,3 +5813,199 @@ carries the whole M1–M4 history, both comparison harnesses, the oracle, the te
 term-rewriting design and the rewritten contract. `v1.0-m4` tags the pre-consolidation engine.
 Nothing merged to `main`; 74 branches already contained in the integration line are candidates for
 pruning and are the owner's call.
+
+## D81 — The engine derives telescoping: four peepholes above the pin, and steps 4–6 collapse into one pass (2026-09-27)
+
+Implements `PRINCIPLES.md` §10 steps 2 and 4–6, measures step 7, and corrects §3a. D79 set the
+contract; this is the first thing built under it.
+
+### 1. The result
+
+`epykos::compile` — the pin's front door, new in step 2 — now runs `simplify`, and the engine
+collapses the compounded OIS coupon by itself. Measured on `d448afd70180`:
+
+| | recorded | after the four data-movement passes | after the pin |
+|---|---|---|---|
+| compare_ois, 16 trades | 1,020,583 | 81,321 | **1,183** |
+| compare_ois, 25 knots / 1,000 trades | 16,877,315 | 142,976 | **42,026** |
+| Stage A, the whole desk problem | 27,459,283 | 517,036 | **194,794** |
+
+The hand-written telescoped spike of D74 produces **1,313** nodes from the same 16-trade problem,
+so the engine's own result is SMALLER than the form a human wrote to show it what it was missing.
+Recording both forms and comparing the answers gives **0.000e+00** relative: `compile` derives
+exactly the hand-written collapse, and `tests/spike/telescoping_prize_test.cpp` is inverted to
+assert that the spike is now redundant.
+
+Stage A is 2.65x smaller even though §6 records that its averaged RFR coupons do not telescope at
+all.
+
+### 2. It needed no machinery, and that is the finding
+
+Four local peepholes, one forward sweep over the tape in topological order:
+
+    mul(div(x, c), c)         -> x            the tau cancellation
+    add(a, sub(x, a))         -> x            the +1/-1 cancellation
+    mul(one, x)               -> x            acc starts at 1
+    mul(div(p, q), div(q, s)) -> div(p, s)    THE TELESCOPE
+
+`tau` is a plain `double` in `maths/swap/compounding.hpp`, so it is ONE hash-consed node in both
+the divide and the multiply and the first rule is a node-identity match. The accumulator is
+left-associated, so at day i the tape holds `mul(div(d_0,d_i), div(d_i,d_{i+1}))` and the last rule
+fires once per day, linearly.
+
+Zero new types. One new function beside cse/dce/fold_sum/affine_collapse, using the same
+`Rebuilder`. No recurrence solver, no scan analysis, no term IR, no e-graph.
+
+**Two properties worth keeping.** The pattern IS the precondition: a lookback, observation-shift or
+lockout coupon's days do not meet, so its divides share no node and the telescope cannot match —
+where the spike needed an explicit `telescopes()` predicate per coupon, a structural rewrite needs
+none. And it is O(n) rather than the O(1) a scan-domain closed form would be; at 94,942 days that
+is cheap enough that the IR-level version buys nothing today, which §3a now records.
+
+### 3. Correctness
+
+**Against an independent engine**, 25 knots and 1,000 trades, and TIGHTER than before the collapse:
+
+| | after the pin | before |
+|---|---|---|
+| discount factors | 7.355e-16 | 5.329e-15 |
+| model par rates | 2.158e-15 | 8.743e-16 |
+| book NPV | 4.804e-16 | 4.656e-15 |
+| book ladder | 4.997e-15 | 8.187e-15 |
+
+**The adjoint and the IFT ladder needed no change at all.** `adjoint_m1_adjoint_vs_dual_test`,
+`stage_a_gate_risk_test` (the ladder against bump-and-recalibrate), `maths_m1_oracle_error_test`,
+`stage_a_oracle_error_test` and `verify_oracle_truth_test` all pass unedited on the collapsed tape.
+The accuracy gates did not even need re-anchoring, because they are loose bounds and the collapse
+moved the values TOWARD truth — D74's 39.7x/53.5x measured from the other side.
+
+**Its own gate.** `tests/tape/simplify_differential_test.cpp`, eight cases: one per rule, one
+end-to-end (32 days of the coupon reducing to ONE arithmetic node), two for what must NOT be
+rewritten, and idempotence. Two mutants, both verified caught, registry 51 -> 53. Named
+`*_differential_test.cpp` because `scripts/mutation_test.sh` selects the gate set by filename.
+
+**The fixpoint gate.** `tests/tape/residual_space_test.cpp` asserts no site of any `simplify` rule
+survives on the tape it produced — a rule that silently stops matching would otherwise surface only
+as an untraced performance regression.
+
+### 4. Step 7: the residual bidirectional space, measured
+
+Printed by the same test, never asserted:
+
+  pinned compare_ois tape, 16 trades, 1,183 nodes:
+    mul 640, const 132, div 96, exp 81, sub 72, affine 65, sum 63, input 34
+  factorable Mul pairs under a Sum   549 of 3,873    (15,865 of 63,619 at 256 trades)
+  div(exp,exp) -> exp(sub) sites      40
+    both exps single-use (a win)       0
+    shared, where the rule LOSES      40
+
+The last line is the evidence the owner's refusal to delete the e-graph deserved.
+`div(exp(a), exp(b)) -> exp(a-b)` trades two transcendentals and a divide for one transcendental
+and a subtract. Obviously good in isolation; on this fixture it LOSES at every one of its forty
+sites, because consecutive telescoped coupons share their endpoint discount factors, so both exps
+stay live and the rewrite only adds nodes. A directed rule would take it every time and make the
+program worse. **Measured, then declined** — and it is the clearest evidence in the repository that
+the residual space needs a cost-aware search rather than another directed rule.
+
+### 5. What moved, and what did not
+
+Fifteen of 127 gates failed and every one was explainable. §5.2a, written before any of them was
+touched, is the rule they were resolved by.
+
+### 6. What the re-anchoring found, which is the part worth reading
+
+§5.2a was written before a single gate was touched, so the same rule was applied to all fifteen
+instead of each being argued separately. Its case 1 — *both sides evaluate the pinned tape, so it
+stays bitwise, and a failure there is a REAL DEFECT, never a reason to loosen* — is what earned
+its keep.
+
+**(a) `exec::Interpreter` silently left duplicated outputs unwritten. A real defect, pre-existing.**
+
+When one IR value carries more than one output ordinal — `pv(i)` and `pv_usd(i)` are the same node
+for a USD trade — `Impl::build_group` stores a single ordinal per row in `g.emit_ordinal`, so the
+last assignment wins and every earlier ordinal of that value is written NOWHERE. `decide_fusion`
+then skips them all, keying its late copy on `emitted[v]`. The caller reads back whatever its
+output buffer held: exactly `0.0` through `fixtures::run_lanes`.
+
+Measured on Stage A's MonotoneCubic variant at 300 trades: **17 of 2,279 outputs never written**,
+giving silent zeros for **19 of 300 trade PVs** whose own leg outputs were correct. Composite:
+88 of 300. Size-dependent (0 at 60 trades, 9 at 150) and batch-dependent (0 at `max_batch` 1, 87
+at 8). The base Stage A problem is clean at 300 and 2,000 trades.
+
+**It predates the algebra phase** — with `standard_passes` instead of `compile`, 0 unwritten. It
+needs a fused reduction domain carrying a duplicated output, and collapsing the coupon is what
+first produced that shape here.
+
+The fix fills those ordinals by copying the OUTPUT the block does write. That distinction is the
+whole of it: a value fused into a reduction is never materialised in the value buffer, so routing
+the duplicates through the existing late-copy list reads uninitialised memory and is worse — tried
+first, 38 mismatches against 17, reverted. Pinned by `interpreter.duplicate_output_unwritten`.
+
+**(b) The generated catalogue registry was stale, and coverage had silently dropped a quarter.**
+
+`src/catalogue/generated/registry.cpp` was last produced at 67d7c0e (D61), before the pin existed,
+and `catalogue::Signature` is keyed on the IR structure the algebra changes. Interpreter coverage
+had fallen to 30/41 groups and the adjoint's to 56/72. `scripts/catalogue_regen.sh` against the
+collapsed tapes restores **41/41, 72/72, 13/13 with on/off mismatches still 0** — 31 distinct
+signatures, 0 hash collisions. Worth noting for what it says about the pin: the collapsed Stage A
+tape yields 73 domains where the old one yielded fewer, 72 of them catalogue-eligible. A smaller
+program is not a coarser one.
+
+**(c) Everything below the pin held.** Catalogue ON vs OFF: 0 mismatches on the M1 book and all
+four Stage A draws, at every (tile, lane_tile), in the interpreter's outputs, the adjoint's forward
+outputs and its reverse state adjoints. Batched-vs-single-lane and tile-vs-tile stayed bitwise. The
+M1 book — vanilla swaps with no product to telescope — still matches `price_book<double>` bitwise
+across the pin.
+
+**(d) The case-2 divergences, all measured before a tolerance was chosen.**
+
+| gate | worst measured | gate set to |
+|---|---|---|
+| RFR book, replay / interpreter / B=64 vs the `double` oracle | 6.46268e-11 | 1e-9 |
+| instrument sample, replay vs `price_sample<double>` | 7.88502e-10 | 1e-8 |
+| Stage A variants, PV against the leg scale | 1.12597e-13 | 1e-12 |
+| Stage A outputs, book error | 4.6354e-11 | 5e-10 |
+| Stage A O2 book, differential ball | 5.69283e-08 | 1e-6 |
+
+Every one is cancellation in `pv = side·(fixed − float)` — a PV of order 1e2 from notionals of 1e6
+to 1e8 — which is D26/D30's own observation about this book's conditioning, not error introduced by
+the collapse. The Stage A residuals are scaled by the solve tolerance, because comparing 4e-16
+against −4e-16 is meaningless.
+
+**(e) Case 3, structure the algebra removed.** Stage A's round trip: 167 chains over 20,368 scan
+rows where the thresholds were written for >500 and >100,000; and the DF domains go 2 → 3, because
+the telescoped endpoints' discount factors form a third 4-row `exp(neg(@0))` domain. The M1 adjoint
+plan goes 10 domains / 42,314 values to 14 / 42,799 on a tape that shrank 75,698 → 75,182: **a
+smaller tape partitions into more domains**, which is worth knowing before reading any domain count
+as a proxy for work.
+
+### 7. The head-to-head, re-run: what the engine is now worth against a specialist
+
+`tools/h2h`, both engines in one process on one `steady_clock`, interleaved, 20 repetitions,
+25 knots and 1,000 trades, idle box (1-minute load 2.47 before, 2.46 after), agreement gate passed
+first (book NPV 1.083e-13, ladder 4.142e-15).
+
+| phase, median us | D78, as the engine wrote it | **now** | the other engine | D78's hand spike |
+|---|---|---|---|---|
+| calibrate_cold | 59,104.4 | **367.6** | 213.1 | 448.9 |
+| calibrate_hot | 13,203.3 | **88.3** | 12.0 | 113.7 |
+| price 1,000 trades | 348.5 | **59.1** | 2,625.1 | 73.6 |
+| risk ladder | 14,437.6 | **395.5** | 2,254.8 | 441.5 |
+
+**161x on cold calibration, 150x on warm, 36.5x on the risk ladder, 5.9x on pricing** — and every
+one of them beats the hand-written spike, because `simplify` cancels everywhere and the spike only
+changed the coupon. The naive and telescoped columns are now within measurement noise of each
+other and compile to the same 42,026-node program, which is the same 0.000e+00 result the
+structural gate reports, in wall clock.
+
+Against the specialist: **the risk ladder is 5.70x in our favour** where D78 measured 0.16x as the
+engine wrote it. Pricing reads 44.4x and is not like-for-like (theirs is book-only; ours prices the
+book AND the 25 calibration instruments, and the book-attributable part is 56.0 us of our 59.1).
+
+**D78's calibration verdict stands, and is now a sharper statement.** Cold is 0.58x — we are still
+1.7x slower — and warm is 0.14x, still 7.1x slower, unchanged from D78's telescoped column. The
+residual slice the solve iterates fell 80,319 → 402 steps×rows and it did not move the ratio. So
+the arithmetic was never what we were losing on: **what remains is purely solver algorithm**, their
+frozen-Newton tick on a compiled W-cache at 12 us against our 88 us with the calibration Jacobian
+rebuilt on every call. §4 puts the solver out of scope and §4's named exception now carries the
+best-evidenced open item in the repository.

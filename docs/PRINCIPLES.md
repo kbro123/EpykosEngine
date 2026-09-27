@@ -514,26 +514,43 @@ A decision entry that changes a principle lands in the same commit as the rewrit
 
 ## 10. Order of work
 
-1. **This contract.** Nothing downstream can be judged before it exists. *(done, 2026-09-27)*
-2. **A compile entry point.** `standard_passes` is called by fixtures; there is no front door for a
-   phase to be added to (§7.2 item 6). Build it, and route every existing caller through it.
-3. **Quarantine §7.1** behind a default-OFF flag. One commit.
-4. **Canonicalise.** `div(x,c) → mul(x,1/c)`, `sub → add·neg`, commutative operand ordering,
-   constant folding. Cheap, and it makes the existing `affine_collapse` more capable for free.
-5. **Simplify.** Value numbering plus algebraic identities and cancellation, iterated with CSE to a
-   fixpoint. Measured to fire 94,942 times on the real tape before any recurrence work at all (§3a).
-6. **Solve recurrences.** The closed-form rule kind on detected scans, product-of-consecutive-ratios
-   first. Telescoping is the worked example and the end-to-end proof: it exercises every part of
-   this contract and is worth 33x–132x (D78).
-7. **Measure the residual bidirectional space**, now that directed rewriting has taken everything
-   it can. Factoring against distribution, reassociation, association-dependent CSE. That
-   measurement is what a term-level e-graph (D73's `algebra/egraph.hpp`) is built against, and it
-   is also what decides whether the quarantined §7.1 code is deleted or partly revived.
-8. **Vector transcendentals**, under the §5.3 policy. Likely the largest remaining win below the pin
-   and currently untried.
-9. **The arithmetic-dominated workload** of §6.
-10. **Tier 2 opens**, with `ExpMode::poly` as its first citizen.
+Steps 1–7 were built on 2026-09-27 and are recorded in D81. What they cost and what they returned:
 
-Steps 4–6 are the front half of the compiler. Steps 3 and 7 are the cull, and step 7 is a
-measurement before it is a deletion. Nothing in this list
-rewrites anything below the pin, because nothing below the pin is implicated.
+1. **This contract.** *(done)*
+2. **A compile entry point.** `epykos::compile(Tape&)` — the pin's front door. A pure refactor:
+   the engine and eight fixture recording paths route through it, test callers of the individual
+   passes do not. *(done, 91a44f8)*
+3. **Quarantine §7.1** behind `EPYKOS_LEGACY_SEARCH`, default OFF. 12,126 lines left the default
+   build; 104/104 tests pass with it off, 129/129 with it on. Nothing deleted. *(done, 824a628)*
+4–6. **Canonicalise, simplify, solve recurrences — one pass of five peepholes**, not three stages.
+   The engine derives telescoping: compare_ois 1,020,583 recorded nodes → **1,183** where the
+   data-movement passes alone left 81,321, against 1,313 for the hand-written spike; Stage A
+   517,036 → **174,388**. It costs 1.03–1.08x the old pass time and reaches its fixpoint in three
+   rounds. §3a records why no recurrence solver was needed. *(done, 001845b and c8ed80a)*
+7. **The residual bidirectional space, measured** rather than deleted — see §7.1. 549 factorable
+   `Mul` pairs under a `Sum` at 16 trades, 15,865 at 256; and 40 `div(exp,exp)` sites where the
+   obvious rule loses at all 40 because the exps are shared. That last is why the quarantined code
+   is quarantined and not gone. *(done, ae7b66d)*
+
+**Measured against a specialist, both engines in one process on one clock** (D81 §7): 161x faster
+cold calibration, 150x warm, 36.5x on the risk ladder, every one of them better than the hand
+spike. The risk ladder is **5.70x in our favour** where the engine as it wrote its own maths was
+0.16x. Calibration is still **1.7x slower cold and 7.1x warm**, unchanged by the collapse — so the
+arithmetic was never what that gap was made of, and what is left is solver algorithm.
+
+What is next, in order:
+
+8. **The solver gap**, which §4 excludes and §4's named exception now documents with the best
+   evidence in the repository: their frozen-Newton tick on a compiled W-cache at 12 us against our
+   88 us with the calibration Jacobian rebuilt on every call. It is the largest measured loss left
+   and it is out of scope until tier 1 is proven; this is the entry that should reopen that.
+9. **Vector transcendentals**, under the §5.3 policy. 81 of the pinned tape's 1,183 nodes are
+   `exp`, and it has never been tried.
+10. **The arithmetic-dominated workload** of §6 — and note it is now also the only workload that
+    would feed the quarantined layout rules, which find zero sites on both current fixtures.
+11. **The term-level e-graph**, built against §7's measurement rather than a guess.
+12. **Tier 2 opens**, with `ExpMode::poly` as its first citizen — blocked on its own entry
+    criterion, that it become lane-width independent (D80).
+
+Nothing in this list rewrites anything below the pin, because nothing below the pin is implicated —
+with one exception already taken: D81 §6(a), a pre-existing interpreter defect the collapse exposed.

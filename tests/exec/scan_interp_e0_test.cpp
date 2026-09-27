@@ -1,9 +1,19 @@
 // M3/G3 E0 gate: the tiled interpreter on the scan fixtures (D41) — the RFR compounding book
-// (fixtures/rfr_book.hpp) and the affine scan (fixtures/affine_scan.hpp) — bitwise the templated
-// double maths and the tape replay at the record point and at 64 batch states at B = 1; a
-// batched run (B = 64) lane for lane bitwise the 64 single-state runs; every tile in {1, 7, 256,
-// 4096} × lane tile in {1, 3, 8, 32, 64} the same bits; odd batch widths too. A scan is
-// evaluated wave by wave: sequential along a chain, parallel across chains and batch lanes.
+// (fixtures/rfr_book.hpp) and the affine scan (fixtures/affine_scan.hpp) — bitwise the tape
+// replay at the record point and at 64 batch states at B = 1; a batched run (B = 64) lane for
+// lane bitwise the 64 single-state runs; every tile in {1, 7, 256, 4096} × lane tile in
+// {1, 3, 8, 32, 64} the same bits; odd batch widths too. A scan is evaluated wave by wave:
+// sequential along a chain, parallel across chains and batch lanes.
+//
+// RE-ANCHORED for the algebra phase, PRINCIPLES.md §5.2a. `record_rfr` / `record_affine_scan`
+// now run `epykos::compile`, which telescopes the RFR book's compounded factor
+// (Π (1 + fwd_d·τ) with fwd_d = (DF_d/DF_{d+1} − 1)/τ collapses to DF_s/DF_e). Every comparison
+// of two evaluations of the PINNED tape — interpreter against replay, B = 64 lane against its
+// B = 1 run, one (tile, lane_tile) against another — is case 1 and is STILL BITWISE; all of
+// them pass unchanged. Every comparison whose other side is the templated `double` maths
+// (rfr_reference_state, affine_scan_oracle) is case 2: it crosses the pin, the two sides are
+// different roundings of the same real number, and it is now a measured relative tolerance.
+// Measured worst divergence and the gate are at kCrossPin below.
 //
 // This TU is compiled with -ffp-contract=off in every preset (the _e0_test.cpp convention); the
 // interpreter's kernels are pinned the same way in libepykos (D25), so the gate holds under the
@@ -11,6 +21,8 @@
 // interpreter's scan mutant is caught here.
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -45,6 +57,18 @@ std::uint64_t bits(double v) {
   std::memcpy(&u, &v, sizeof u);
   return u;
 }
+
+// The §5.2a case 2 gate, on |a − b| / max(|a|, |b|). MEASURED, release preset, over all three
+// cases at 65 states: RFR book 6.463e-11, affine scan (finals) 0, affine scan (path) 0 — the
+// affine cases record no compounded product, so the algebra changes nothing there and the old
+// bitwise agreement survives. The RFR number lands on a swap PV of order 1e2 (worst observed
+// pair: -110.6725350242923 against -110.6725350282577, i.e. 4.0e-9 ABSOLUTE) while rfr_book's
+// notionals are log-uniform in [1e6, 1e8]. The measure is inflated because a swap PV is
+// side*(fixed - float), a difference of legs: D26/D30's long-standing observation about this
+// quantity, which is why the project's own E1 class scales by |fixed| + |float| rather than by
+// |pv|. Gate set an order of magnitude above the measurement; every test prints its own worst so
+// drift is visible (§5.1: a bug-detection tolerance need not be tight).
+constexpr double kCrossPin = 1e-9;
 
 // A recorded fixture with its states, the replay and the double oracle per state.
 struct Case {
@@ -109,11 +133,19 @@ const std::vector<Case>& cases() {
   return all;
 }
 
-std::size_t count_mismatches(const double* a, const double* b, std::size_t n, const std::string& what) {
+// Bitwise by default (case 1: both sides evaluate the pinned tape). With `tol` > 0 the gate is
+// |a − b| <= tol · max(|a|, |b|) instead (case 2: `b` is the templated double maths and the
+// comparison crosses the pin); `worst`, when given, accumulates the largest relative divergence
+// seen either way, so the measurement is printed whether or not it fires.
+std::size_t count_mismatches(const double* a, const double* b, std::size_t n, const std::string& what,
+                             double tol = 0.0, double* worst = nullptr) {
   std::size_t bad = 0;
   for (std::size_t k = 0; k < n; ++k) {
-    if (bits(a[k]) != bits(b[k])) {
-      if (bad < 5) ADD_FAILURE() << what << ", output " << k << ": " << a[k] << " vs " << b[k];
+    const double scale = std::max(std::fabs(a[k]), std::fabs(b[k]));
+    const double rel = scale > 0.0 ? std::fabs(a[k] - b[k]) / scale : 0.0;
+    if (worst != nullptr && rel > *worst) *worst = rel;
+    if (tol > 0.0 ? !(rel <= tol) : bits(a[k]) != bits(b[k])) {
+      if (bad < 5) ADD_FAILURE() << what << ", output " << k << ": " << a[k] << " vs " << b[k] << " (relative " << rel << ")";
       ++bad;
     }
   }
@@ -144,13 +176,18 @@ std::vector<double> run_batched(const exec::Interpreter& in, const std::vector<s
 
 }  // namespace
 
-TEST(ScanInterpE0, ReplayIsTheOracleBitwise) {
+// §5.2a case 2 — was ReplayIsTheOracleBitwise. The replay evaluates the collapsed tape and the
+// oracle the recording as written, so the two are different roundings of the same real number.
+TEST(ScanInterpE0, ReplayMatchesTheOracleAcrossThePin) {
   for (const Case& c : cases()) {
     std::size_t bad = 0;
+    double worst = 0.0;
     for (std::size_t s = 0; s < c.states.size(); ++s) {
-      bad += count_mismatches(c.replay[s].data(), c.oracle[s].data(), c.oracle[s].size(), c.name + " replay vs oracle, state " + std::to_string(s));
+      bad += count_mismatches(c.replay[s].data(), c.oracle[s].data(), c.oracle[s].size(),
+                              c.name + " replay vs oracle, state " + std::to_string(s), kCrossPin, &worst);
     }
     EXPECT_EQ(bad, 0u) << c.name;
+    std::cout << "[ cross-pin ] " << c.name << ": replay vs double, worst relative " << worst << " (gate " << kCrossPin << ")\n";
   }
 }
 
@@ -160,15 +197,19 @@ TEST(ScanInterpE0, SingleStateMatchesReplayAndOracleAtEveryState) {
     ASSERT_FALSE(ir::scan_domains(c.program).empty()) << c.name;
     std::cout << "[  plan    ] " << c.name << "\n" << in.describe();
     std::size_t bad = 0;
+    double worst = 0.0;
     const std::vector<std::vector<double>> out = run_single(in, c.states);
     for (std::size_t s = 0; s < c.states.size(); ++s) {
       const std::string where = c.name + (s == 0 ? ", record point" : ", state " + std::to_string(s - 1));
+      // case 1, both sides the pinned tape: bitwise.
       bad += count_mismatches(out[s].data(), c.replay[s].data(), out[s].size(), where + ": interpreter B=1 vs replay");
-      bad += count_mismatches(out[s].data(), c.oracle[s].data(), out[s].size(), where + ": interpreter B=1 vs double");
+      // case 2, the other side is the templated double maths: the measured tolerance.
+      bad += count_mismatches(out[s].data(), c.oracle[s].data(), out[s].size(), where + ": interpreter B=1 vs double",
+                              kCrossPin, &worst);
     }
     EXPECT_EQ(bad, 0u) << c.name;
     std::cout << "[  states  ] " << c.name << ": " << c.states.size() << " states x " << in.n_outputs()
-              << " outputs at B=1, mismatches " << bad << '\n';
+              << " outputs at B=1, mismatches " << bad << ", worst relative vs double " << worst << '\n';
   }
 }
 
@@ -181,13 +222,17 @@ TEST(ScanInterpE0, BatchOf64EqualsThe64SingleStateRuns) {
     const std::vector<double> batched = run_batched(in, batch);
     const std::size_t n_out = static_cast<std::size_t>(in.n_outputs());
     std::size_t bad = 0;
+    double worst = 0.0;
     for (std::size_t b = 0; b < 64; ++b) {
       std::vector<double> lane(n_out);
       for (std::size_t o = 0; o < n_out; ++o) lane[o] = batched[o * 64 + b];
+      // case 1 bitwise; case 2 at the measured tolerance.
       bad += count_mismatches(lane.data(), single[b].data(), n_out, c.name + ": B=64 lane vs B=1 run, state " + std::to_string(b));
-      bad += count_mismatches(lane.data(), c.oracle[b + 1].data(), n_out, c.name + ": B=64 lane vs oracle, state " + std::to_string(b));
+      bad += count_mismatches(lane.data(), c.oracle[b + 1].data(), n_out, c.name + ": B=64 lane vs oracle, state " + std::to_string(b),
+                              kCrossPin, &worst);
     }
     EXPECT_EQ(bad, 0u) << c.name;
+    std::cout << "[  batch   ] " << c.name << ": B=64 lanes vs double, worst relative " << worst << '\n';
   }
 }
 

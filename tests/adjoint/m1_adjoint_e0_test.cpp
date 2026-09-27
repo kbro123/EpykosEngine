@@ -295,11 +295,20 @@ TEST(M1AdjointE0, BadBatchWidthThrows) {
   EXPECT_NO_THROW(ad.run(f.states[0].data(), 1, out_bar.data(), out.data(), sb.data()));
 }
 
+// §5.2a case 3: the literal is a fact about the tape's shape, and the algebra phase changed the
+// shape. `record_m1` now runs `epykos::compile`, whose `simplify` takes the pinned M1 tape from
+// 75,698 nodes to 75,182 (measured, tests/tape/m1_record_e0_test.cpp prints both), and the
+// smaller tape partitions into MORE domains: 10 over 42,314 plan values becomes 14 over 42,799.
+// Nothing numeric moved with it, and that is the interesting part — this book is vanilla swaps
+// with no compounded product to telescope, so every other test in this file (adjoint forward
+// against replay, against price_book<double>, against the interpreter, B = 64 lanes against
+// B = 1, the 42-configuration tile sweep) still passes BITWISE, unchanged, including the two
+// that cross the pin. Was "adjoint plan: 10 domains, 42314 values".
 TEST(M1AdjointE0, DescribeNamesThePlan) {
   const Fixture& f = fixture();
   adjoint::Adjoint ad(f.program);
   const std::string d = ad.describe();
-  EXPECT_NE(d.find("adjoint plan: 10 domains, 42314 values"), std::string::npos) << d.substr(0, 400);
+  EXPECT_NE(d.find("adjoint plan: 14 domains, 42799 values"), std::string::npos) << d.substr(0, 400);
   EXPECT_NE(d.find("affine: coef * segbar"), std::string::npos);
   std::cout << d.substr(0, d.find('\n')) << '\n' << d.substr(d.find('\n') + 1, d.find("\n  reverse domain 8") - d.find('\n')) ;
 }

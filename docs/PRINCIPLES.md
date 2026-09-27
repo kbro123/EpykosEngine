@@ -157,20 +157,40 @@ are node-identity matches, not value comparisons. Measured on the real `compare_
 they need no search, and `standard_passes` performs none of them — a 365-day chain goes in at 2,558
 nodes and comes out at 2,558.
 
-**The closed form belongs on the scan IR.** After the peepholes the step is `acc ← acc·(d_i/d_{i+1})`
-and the chain collapses to `d_0/d_n`. On the tape that is n rewrites; on a detected scan domain it
-is **one** — a symbolic step and a row count. `ir::infer` already runs `detect_chains`, so the
-analysis exists; only the question "what is this recurrence's closed form?" is never asked. This is
-scalar evolution without the solve.
+**The closed form ALSO turned out to belong on the tape, and this section predicted otherwise.**
+The plan was: peepholes on the tape, then the recurrence's closed form on the detected scan domain,
+where it is one rewrite instead of n. Built and measured 2026-09-27, the tape does all of it. After
+the two cancellations the step is `acc ← acc·(d_i/d_{i+1})`, the accumulator is left-associated, so
+the tape holds `mul(div(d_0,d_i), div(d_i,d_{i+1}))` at every step and **one more peephole,
+`mul(div(p,q), div(q,s)) → div(p,s)`, telescopes the whole chain in a single forward sweep.** No
+scan analysis, no closed-form solver, no IR round trip. §10's steps 4, 5 and 6 are one pass of four
+rules.
 
-The peepholes shrink the step shape without breaking its isomorphism class, so chain detection still
-fires — on a simpler step. The two layers cooperate.
+Two properties worth keeping in view:
+
+* **The pattern IS the precondition.** A lookback, observation-shift or lockout coupon's days do
+  not meet — `t_next_i ≠ t_rate_{i+1}` — so `div(d_i, d_{i+1})` and `div(d_{i+1}, d_{i+2})` share
+  no node and the rule does not match. The spike had to test `telescopes()` explicitly per coupon;
+  a structural rewrite needs no such test, because a coupon that does not telescope cannot match
+  the shape.
+* **It is O(n), not O(1).** One rewrite per observation day, and n is 94,942 on `compare_ois`.
+  Linear in the recording is cheap enough that the O(1) scan-domain version buys nothing today.
+  If a recording ever appears where it does — a scan too long to unroll at all — `ir::infer`'s
+  `detect_chains` is still there and the closed-form solver is still the right answer for it.
+  That is a measurement to make before building, not a layer to add on principle.
 
 **This is elementary and was over-theorised.** D74 and D75 framed it as creative telescoping
 (Gosper/Zeilberger) and as e-graph equality saturation needing associative-commutative closure,
 measured 2ⁿ−1 e-classes, and concluded it was unreachable. Both framings are withdrawn (§7.3). An
 e-graph is for when you do not know which direction is better. Here you always do: fewer nodes wins.
 The right tool is **directed canonicalisation**, and it is linear.
+
+Measured once it existed: `compare_ois` at sixteen trades goes from 1,020,583 recorded nodes to
+**1,183**, where the four data-movement passes alone left 81,321. The hand-written spike produces
+1,313 from the same problem, so the engine's own result is smaller than the form a human wrote to
+show it what it was missing, and recording both and comparing gives **0.000e+00**. The whole desk
+problem, Stage A, goes 517,036 → **194,794** even though §6 notes its averaged coupons do not
+telescope at all.
 
 The recurrence library is small and enumerable for this domain: product of consecutive ratios,
 geometric, arithmetic, linear with constant coefficients. That list is the work and it is finite.

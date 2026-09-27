@@ -622,6 +622,12 @@ namespace {
 node_id simplify_binary(Tape& t, Op op, node_id a, node_id b) {
   const Node& na = t[a];
   const Node& nb = t[b];
+  // Mutant: the cancelling rules stop checking that the two operands are the SAME node, so a
+  // divide by one value and a multiply by another cancel. The guard is the entire rule.
+  const bool cancel_mismatched = mutant("simplify.cancel_mismatched_operand");
+  // Mutant: the telescope keeps the INNER endpoint, div(p, q) instead of div(p, s). Correct for a
+  // one-step chain and wrong for every longer one, which is what makes it worth a gate.
+  const bool telescope_wrong_end = mutant("simplify.telescope_wrong_endpoint");
   const auto konst_is = [&](node_id x, double v) {
     const Node& n = t[x];
     return n.op == Op::Const && n.konst == v;
@@ -631,20 +637,20 @@ node_id simplify_binary(Tape& t, Op op, node_id a, node_id b) {
       if (konst_is(a, 1.0)) return b;
       if (konst_is(b, 1.0)) return a;
       // mul(div(x, c), c) -> x, either operand order.
-      if (na.op == Op::Div && na.b == b) return na.a;
-      if (nb.op == Op::Div && nb.b == a) return nb.a;
+      if (na.op == Op::Div && (cancel_mismatched || na.b == b)) return na.a;
+      if (nb.op == Op::Div && (cancel_mismatched || nb.b == a)) return nb.a;
       // THE TELESCOPE: mul(div(p, q), div(q, s)) -> div(p, s), either operand order.
       if (na.op == Op::Div && nb.op == Op::Div) {
-        if (na.b == nb.a) return t.binary(Op::Div, na.a, nb.b);
-        if (nb.b == na.a) return t.binary(Op::Div, nb.a, na.b);
+        if (na.b == nb.a) return t.binary(Op::Div, na.a, telescope_wrong_end ? na.b : nb.b);
+        if (nb.b == na.a) return t.binary(Op::Div, nb.a, telescope_wrong_end ? nb.b : na.b);
       }
       break;
     case Op::Div:
       if (konst_is(b, 1.0)) return a;
       if (a == b) return t.constant(1.0);
       // div(mul(x, c), c) -> x, either operand order inside the Mul.
-      if (na.op == Op::Mul && na.b == b) return na.a;
-      if (na.op == Op::Mul && na.a == b) return na.b;
+      if (na.op == Op::Mul && (cancel_mismatched || na.b == b)) return na.a;
+      if (na.op == Op::Mul && (cancel_mismatched || na.a == b)) return na.b;
       // div(div(p, q), r) -> div(p, mul(q, r)) is NOT done: it trades a divide for a multiply
       // and a divide, which is not fewer operations. Only rules that remove work are here.
       break;

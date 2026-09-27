@@ -265,6 +265,33 @@ CODE implements the algebra, which is a claim about construction rather than a c
 Two defects were exactly that gap: the catalogue fingerprint was canonical by design and was not
 (D61), and a harness sized a buffer from the wrong vector and overran it on every call (D65).
 
+### 5.2a Re-anchoring an existing gate: the decision rule
+
+Every gate written before the pin existed compared *something* to *something*. Which of the three
+cases it is decides what happens to it, and the case is a fact about the test, not a judgement:
+
+1. **Both sides evaluate the SAME pinned tape** — interpreter against replay, against
+   `ir::Evaluator`, against the expanded tape, against the adjoint's forward pass; catalogue on
+   against off; one lane width against another; one batch size against another. This is below the
+   pin on both sides. **It stays bitwise.** If such a gate starts failing, that is a REAL DEFECT
+   in the algebra phase or in execution — it is never a reason to loosen the gate.
+
+2. **One side is the templated `double` maths** — `price_book<double>`, `price_stage_a_at`,
+   `price_sample<double>`, the M1 oracle tables, a `double` instantiation of a curve. This
+   comparison CROSSES the pin: the reference is the recording as written and the other side is the
+   collapsed tape, so they are two different roundings of the same real number. **It becomes a
+   tolerance comparison.** Measure the divergence the change actually produces, set the gate about
+   an order of magnitude looser than that, and print the measured value so drift is visible. §5.1
+   is why a bug-detection tolerance need not be tight.
+
+3. **The test asserts STRUCTURE the algebra removed** — that a scan chain exists, that a domain has
+   N rows, that a rule fires on M sites. The structure legitimately changed and the old assertion
+   is now false about a better program. **Re-state it against what is true now**, and say in the
+   test what it used to assert and why that moved. Deleting it silently is how coverage is lost.
+
+A gate in case 1 that fails is a bug. A gate in case 2 that fails is arithmetic. A gate in case 3
+that fails is the point.
+
 ### 5.3 Transcendentals: the declared policy
 
 **`exp(x)` in a computer is not the exponential** (owner, 2026-09-27). It is libm's approximation,

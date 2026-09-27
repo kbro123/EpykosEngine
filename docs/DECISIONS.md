@@ -4291,3 +4291,98 @@ not measured here. The other engine's `risk_us` excludes forming the risk operat
 builds its Jacobian inside the timed region; the table above uses the OUTER clock on both sides, which
 is the honest comparison, and its own self-reported figure (2,146.9 us) is quoted in the run log as the
 floor. Informational under D9: nothing here gates anything.
+
+## D79 — The pin: exactness becomes a pipeline stage boundary, not a per-rule declaration (2026-09-27)
+
+Lands with the in-place rewrite of `docs/PRINCIPLES.md`, per that document's own §9. This entry is the
+ledger record; the contract itself is in `PRINCIPLES.md` and is authoritative. Read that, not this.
+
+### 1. What changed
+
+Exactness was a property each rewrite declared (E0 bit-identical, or E1 tolerance-gated). It becomes a
+property of **where in the pipeline the rewrite sits**:
+
+* **Above the pin** — canonicalise, simplify, solve recurrences — the engine chooses WHICH expression to
+  evaluate. Judged against the recorded expression in exact real arithmetic. May re-round.
+* **Below the pin** — inference, planning, execution, the adjoint — it chooses HOW to evaluate THAT
+  expression. Bit-identical to the pinned tape, under a declared contraction and transcendental policy.
+
+Owner, 2026-09-27: *"I don't think we need bit identity until after we do the semantic collapse."*
+
+Per-rule declaration made every rewrite a separate negotiation and returned the wrong answer every time
+the right answer was "change the arithmetic". A stage boundary cannot be argued around.
+
+### 2. Why it was needed: E0 was correct, and correctly aimed at the wrong stage
+
+`include/epykos/tape/passes.hpp` states it plainly — "All four passes are exactness class E0 (D8): the
+replay of the tape after a pass is bit-identical to the replay before it." That is exactly right for a
+pass that reorders work and exactly wrong for one whose purpose is to change it.
+
+The measured consequence, on the raw `compare_ois` tape: the recorded coupon is
+`1 + ((DF(s)/DF(e) − 1)/τ)·w` with `w ≡ τ`, and because constants are hash-consed on bit pattern, τ is
+the same node in both places, so `mul(div(x,τ),τ) → x` is a node-identity match. A four-rule prototype
+fires **94,942 additive cancellations — exactly the recorded observation-day count** — and telescopes a
+clean 365-day chain from 2,558 nodes to `DF(t_0)/DF(t_365)` in one topological sweep. `standard_passes`
+performs none of it: 2,558 nodes in, 2,558 out.
+
+`affine_collapse` comes within one normalisation step of catching half of it and does not, because it
+matches `Add`, `Sub`, `Sum` and `Mul` and never `Div`, so `div(x,c)` is not seen as a scale by `1/c`.
+
+### 3. Transcendentals, which is where the argument generalises
+
+Owner, 2026-09-27: *"exp(x) in a computer isn't truly the exponential, it is an approximation of it."*
+
+So bit-identity to libm is not correctness, it is agreement with one approximation — and D72 already
+measured that this particular approximation is the less accurate side of its own comparison. The cost has
+been real and unquantified: D27's M1 kill test ran "the interpreter in its gated E0 mode (scalar libm
+`std::exp`) against the hand-fused kernel using the same scalar libm", both sides held to the scalar
+transcendental so bit-identity was achievable. Every discount factor is an `exp`.
+
+Transcendental choice and fma contraction become a **declared build policy**, fixed above the pin and
+constant below it, exactly as compilers treat `-ffp-contract`. A vector transcendental of equal or better
+accuracy is then a legal implementation, and is currently untried.
+
+### 4. The reassessment that produced it
+
+Audited against the code, not recalled. The engine has a good back half and no front half: no
+canonicalisation, no value numbering beyond syntactic hash-consing, no algebraic simplification, no
+strength reduction, and — the sharpest one — `ir::infer` runs `detect_chains`, so it **finds** every
+loop-carried recurrence and never asks what its closed form is. That is scalar evolution without the
+solve. Everything from loop transformation down exists and is good (M1: the interpreter within 4.4% of a
+hand-fused kernel). M4 searched the half that was already good.
+
+### 5. Retractions
+
+* **D74's framing** of telescoping as creative telescoping (Gosper/Zeilberger). It is a first-order
+  product recurrence with an elementary closed form.
+* **D75's argument** that telescoping is unreachable because AC-closing n leaves gives 2^n − 1 e-classes.
+  The measurement stands; the conclusion does not. An e-graph is for when you do not know which direction
+  is better. Here you always do — fewer nodes wins — and the tool is directed canonicalisation, which is
+  linear.
+* **D77's headline** of 2.82x, already superseded by D78 (1.49x at the same book size).
+* **"The tape is the right layer"**, the steer given to the P1 term-rewriting design. It is both layers:
+  cancellations are local peepholes on the tape; the closed form is one rewrite on a detected scan domain,
+  O(1) rather than O(n). `PRINCIPLES.md` §3a.
+* **E0 as a global contract.**
+
+### 6. The cull this licenses, and its trigger
+
+Measured 2026-09-27: `optimise/` (2,098 engine + 3,983 test lines) and `rewrite/` minus `planner` (3,417 +
+2,721) total **12,219 lines that no execution path reaches** — `grep -rn "optimise::" src/solver src/exec`
+returns nothing. Quarantine behind a default-OFF flag first; **delete when the algebra phase passes its
+first end-to-end gate.** The trigger is named because quarantine without one is how a cull becomes more
+accretion. Owner, 2026-09-27: *"I am worried that we're just accreting rather than doing the necessary
+culling."*
+
+Separately, `PRINCIPLES.md` §9 splits the documents: this file becomes an append-only ledger, cited rather
+than read; `PRINCIPLES.md` and `CLAUDE.md`'s Status block become state, rewritten in place. This file stood
+at 4,293 lines and 73 entries, and the rule that produced it — append a superseding entry — is an accretion
+machine by construction.
+
+### 7. Not decided here
+
+Nothing below the pin is rewritten and nothing below the pin is implicated: the tape, inference, the
+interpreter, the planner, the catalogue, the adjoint, the IFT solver, the conventions layer, the fixtures
+and both comparison harnesses are kept as they are (~21,500 lines, all measured). The pre-rebuild engine is
+tagged `v1.0-m4`. A v2 branch was considered and rejected: 95% of the tree is unchanged, so a long-lived
+divergent branch would cost a fork's maintenance for a fifth of the code — a tag gives the same safety net.

@@ -12,8 +12,19 @@
 // stage_a_e0.cpp, pinned to -ffp-contract=off), CurveSet::residuals (the instrument residuals on
 // double, instantiated in the same pinned TU), the knots themselves (O1) and the solve's
 // diagnostics. So a pass says: at every draw, every one of the 8,191 outputs of the batched
-// program is bitwise the double maths at the knots the single-lane solve finds (which includes
+// program agrees with the double maths at the knots the single-lane solve finds (which includes
 // "the batched solve is bitwise the single solve", O4's lane statement, at random quotes).
+//
+// RE-ANCHORED for the algebra phase (PRINCIPLES.md §5.2a). The gate used to be E0 — bitwise on
+// every output. It is now two statements, because the reference is two different things:
+//
+//   * case 2, measured: the O2 book (price_stage_a_at) and the residual outputs
+//     (CurveSet::residuals) are the templated `double` maths, which evaluates the recording AS
+//     WRITTEN, while the program evaluates the tape `epykos::compile` collapsed. Two roundings of
+//     the same real number. `Tolerance::e1_relative(kRel)` with the D26 scales below.
+//   * case 1, still bitwise: the O1 knots and the solve diagnostics come from the reference's own
+//     single-lane ImplicitProgram over the SAME pinned tape, so both sides are below the pin.
+//     Checked per output at the end of the batched test.
 //
 // The linear algebra of the solves (Eigen, src/solver/residual.cpp) is not pinned, so the knots
 // may differ in their last bits between presets; within one preset both sides run the same
@@ -23,6 +34,7 @@
 // A gate of scripts/mutation_test.sh (the name ends in _e0_test).
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <iostream>
@@ -47,6 +59,32 @@ using epykos::test::stage_a_tape;
 namespace {
 
 constexpr int R = 64;   // draws (stated: fewer than the M1 ball's 256; every draw is a full recalibration)
+
+// The gates for the outputs that cross the pin, per output class (PRINCIPLES.md §5.2: tolerances
+// are per output class, not global), MEASURED over the 64-draw ball before they were set.
+//
+//   kRel  the harness's own verdict, against the D26 scales below. It governs the residual
+//         outputs, whose scale IS the solve tolerance, so it reads "the two roundings of a
+//         residual agree to within one solve tolerance". Measured worst 0.128855 of it.
+//   kBook the O2 book, relative to the value itself. Measured worst 5.69283e-08, on a per-trade
+//         PV that passes near zero somewhere in a ±50 bp ball; the aggregates are far tighter.
+//         About an order of magnitude looser, and the run prints what it measured.
+constexpr double kRel = 1.0;
+constexpr double kBook = 1.0e-6;
+
+// D26 scales, per output class. A residual output sits at the SOLVER'S floor: both sides compute
+// a quantity that is zero to the solve tolerance, so comparing their two roundings to each other
+// is meaningless (it is 4e-16 against -4e-16). They are compared against the solve tolerance
+// instead. Every other output is relative to its own magnitude.
+std::vector<double> output_scales() {
+  const fixtures::StageA& s = stage_a();
+  const fixtures::StageATape& t = stage_a_tape();
+  std::vector<double> v(t.tape.num_outputs(), 0.0);
+  for (const solver::ImplicitBlock& b : t.registry.blocks) {
+    for (int o : b.residuals) v[static_cast<std::size_t>(o)] = s.options.solve_tol;
+  }
+  return v;
+}
 
 struct Reference {
   std::unique_ptr<solver::ImplicitProgram> single;   // the reference's own solve, one lane
@@ -142,7 +180,7 @@ TEST(StageAGateDifferentialE0, TheBallIsOverTheQuotes) {
   std::cout << "[  ball    ] " << R << " draws in [q - 0.005, q + 0.005]^" << s.n_quotes() << ", max |q_k - q0_k| = " << max_dev << " (rate units; a futures price moves by the same amount)\n";
 }
 
-TEST(StageAGateDifferentialE0, BatchedProgramIsBitwiseTheDoubleMathsAtTheSingleSolvesKnots) {
+TEST(StageAGateDifferentialE0, BatchedProgramMatchesTheDoubleMathsAtTheSingleSolvesKnots) {
   const fixtures::StageA& s = stage_a();
   const fixtures::StageATape& t = stage_a_tape();
   constexpr int B = 8;
@@ -151,9 +189,11 @@ TEST(StageAGateDifferentialE0, BatchedProgramIsBitwiseTheDoubleMathsAtTheSingleS
   Reference& ref = reference();
   ref.seconds = 0.0;
   ref.calls = 0;
+  const std::vector<double> scales = output_scales();
   verify::DifferentialOptions o;
-  o.tolerance = verify::Tolerance::e0();
+  o.tolerance = verify::Tolerance::e1_relative(kRel);
   o.batch = B;
+  o.scale = [&scales](const double*, double* out) { std::copy(scales.begin(), scales.end(), out); };
   const epykos::test::clock_type::time_point t0 = epykos::test::clock_type::now();
   const verify::Report rep = verify::differential(
       ball(R), n_out, [&ref](const double* z, double* out) { ref(z, out); }, [&prog](const double* state, int Bn, double* out) { prog.run(state, Bn, out); }, o);
@@ -162,27 +202,55 @@ TEST(StageAGateDifferentialE0, BatchedProgramIsBitwiseTheDoubleMathsAtTheSingleS
   std::cout << "[  cost    ] " << R << " draws in " << dt << " s: reference (single solve + double maths) " << ref.seconds << " s over " << ref.calls
             << " calls; compiled " << dt - ref.seconds << " s\n";
   EXPECT_TRUE(rep.passed) << rep.summary();
-  EXPECT_TRUE(rep.bitwise_equal);
-  EXPECT_EQ(rep.mismatches, 0u);
+  EXPECT_EQ(rep.violations, 0u);
   EXPECT_EQ(rep.n_draws, R);
   EXPECT_EQ(rep.n_outputs, n_out);
-  std::cout << "[  GATE    ] differential_e0 ok=" << (rep.passed ? 1 : 0) << " draws=" << R << " batch=" << B << " outputs=" << n_out << " mismatches=" << rep.mismatches
-            << " max_ulps=" << rep.max_ulps << '\n';
+  // Case 1 (PRINCIPLES.md §5.2a): the O1 knots and the solve diagnostics are the PINNED TAPE on
+  // both sides — the reference's own single-lane ImplicitProgram against this batched one — so
+  // they stay bitwise. A failure here is a defect in the algebra phase or in execution, never a
+  // reason to loosen the gate.
+  std::size_t pinned = 0;
+  for (const std::vector<int>& c : t.layout.knots) {
+    for (int ord : c) pinned += static_cast<std::size_t>(rep.outputs[static_cast<std::size_t>(ord)].mismatches);
+  }
+  for (const solver::ImplicitBlock& b : t.registry.blocks) {
+    pinned += static_cast<std::size_t>(rep.outputs[static_cast<std::size_t>(b.diag_jtr_output)].mismatches);
+    pinned += static_cast<std::size_t>(rep.outputs[static_cast<std::size_t>(b.diag_iterations_output)].mismatches);
+  }
+  EXPECT_EQ(pinned, 0u) << "O1 knots / diagnostics: the same pinned tape on both sides, no longer bitwise";
+  double book_rel = 0.0, resid_rel = 0.0;
+  int book_rel_output = -1;
+  for (int ord = t.layout.pv0; ord <= t.layout.book; ++ord) {
+    if (rep.outputs[static_cast<std::size_t>(ord)].max_rel > book_rel) {
+      book_rel = rep.outputs[static_cast<std::size_t>(ord)].max_rel;
+      book_rel_output = ord;
+    }
+  }
+  for (const solver::ImplicitBlock& b : t.registry.blocks) {
+    for (int ord : b.residuals) resid_rel = std::max(resid_rel, rep.outputs[static_cast<std::size_t>(ord)].max_rel);
+  }
+  EXPECT_LT(book_rel, kBook) << "the O2 book against the double maths";
+  std::cout << "[  class   ] O2 book worst rel " << book_rel << " at output " << book_rel_output << " (gate " << kBook << "); residuals worst " << resid_rel
+            << " of the solve tolerance " << s.options.solve_tol << " (gate " << kRel << ")\n";
+  std::cout << "[  GATE    ] differential ok=" << (rep.passed ? 1 : 0) << " draws=" << R << " batch=" << B << " outputs=" << n_out
+            << " violations=" << rep.violations << " max_rel=" << rep.max_rel << " (gate " << kRel << ") pinned-output mismatches=" << pinned << '\n';
 }
 
-TEST(StageAGateDifferentialE0, SingleLaneProgramIsBitwiseTooOnTheFirstDraws) {
+TEST(StageAGateDifferentialE0, SingleLaneProgramMatchesTooOnTheFirstDraws) {
   const fixtures::StageA& s = stage_a();
   const fixtures::StageATape& t = stage_a_tape();
   constexpr int R1 = 16;
   solver::ImplicitProgram prog(t.tape, t.registry, fixtures::stage_a_program_options(s, 1));
   Reference& ref = reference();
+  const std::vector<double> scales = output_scales();
   verify::DifferentialOptions o;
-  o.tolerance = verify::Tolerance::e0();
+  o.tolerance = verify::Tolerance::e1_relative(kRel);
   o.batch = 1;
+  o.scale = [&scales](const double*, double* out) { std::copy(scales.begin(), scales.end(), out); };
   const verify::Report rep = verify::differential(
       ball(R1), prog.n_outputs(), [&ref](const double* z, double* out) { ref(z, out); }, [&prog](const double* state, int Bn, double* out) { prog.run(state, Bn, out); }, o);
   print("B=1 ", rep);
   EXPECT_TRUE(rep.passed) << rep.summary();
-  EXPECT_TRUE(rep.bitwise_equal);
+  EXPECT_EQ(rep.violations, 0u);
   EXPECT_EQ(rep.n_draws, R1);
 }

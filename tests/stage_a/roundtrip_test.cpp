@@ -117,10 +117,21 @@ TEST(StageARoundtrip, RoundTripIdentityAfterThePasses) {
   const ir::Program& p = program();
   const fixtures::StageAStructure st = fixtures::stage_a_structure(p);
   std::cout << "[  struct  ] " << st.to_string() << '\n';
+  // PRINCIPLES.md §5.2a CASE 3: these count structure the algebra phase removed, and are
+  // re-stated against what the collapsed tape actually lays out. They asserted, of the tape the
+  // four data-movement passes produced, `chains > 500` over `scan_rows > 100000` and
+  // `df_domains == 2`. `epykos::compile` now telescopes the compounded coupon
+  // (src/tape/passes.cpp), so the daily product is a ratio of its endpoints and the scan
+  // structure it used to need is gone: measured 167 chains over 20,368 rows, and a third
+  // Exp-ended domain (4 rows) appears beside the two DF buckets of D22 / D40 because the
+  // collapsed endpoints' discount factors no longer share the interpolated bucket's shape.
+  // What the gate is FOR survives and is asserted below and in SharingGateOverResidualsAndBook:
+  // the compounding is still laid out as scan domains, every DF domain is still shared by the
+  // residuals and the book, and no discount factor is computed twice.
   EXPECT_GE(st.scan_domains, 1u) << "the compounded coupons must be laid out as scan domains";
-  EXPECT_GT(st.chains, 500u);
-  EXPECT_GT(st.scan_rows, 100000u);
-  EXPECT_EQ(st.df_domains, 2u) << "the interpolated and the knot-time DF buckets of D22 / D40";
+  EXPECT_GT(st.chains, 100u);
+  EXPECT_GT(st.scan_rows, 10000u);
+  EXPECT_EQ(st.df_domains, 3u) << "the two DF buckets of D22 / D40 and the telescoped endpoints'";
   EXPECT_LT(st.domains, 200u) << "the scan class must not have been split by level";
   std::cout << ir::to_string(p);
 }
@@ -137,7 +148,12 @@ TEST(StageARoundtrip, SharingGateOverResidualsAndBook) {
   }
   std::string why;
   EXPECT_TRUE(ir::assert_all_shared(rep, &why)) << why;
-  EXPECT_EQ(rep.matching.size(), 2u);
+  // PRINCIPLES.md §5.2a CASE 3: this asserted 2 — the interpolated and the knot-time DF buckets
+  // of D22 / D40. The algebra phase telescopes the compounded coupon to a ratio of its endpoints,
+  // and those endpoints' discount factors form a third, 4-row Exp-ended domain. The PROPERTY the
+  // gate exists for is unchanged and is the line above and the line below: every DF domain feeds
+  // both the residuals and the book, and no discount factor is computed twice.
+  EXPECT_EQ(rep.matching.size(), 3u);
   EXPECT_EQ(ir::duplicates(p, epykos::Op::Exp), 0u) << "a discount factor computed twice";
   // Every output group is reached from the inputs domain; the reach masks over all four groups.
   const std::vector<std::vector<int>> groups = t.output_groups();

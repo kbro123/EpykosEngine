@@ -133,11 +133,16 @@ ir::Program expect_roundtrip(const Tape& tape, const std::string& what, ir::Infe
 // fixings — a Mul, not a Div — so `mul(div(p,q), div(q,s))` never matches and the whole chain
 // survives, together with the realised-fixings chain that feeds it.
 //
-// That is a real and reportable limit of the peephole rule set, not a property of the fixture:
-// one reassociation, `mul(mul(x, div(p,q)), div(q,s)) -> mul(x, div(p,s))`, would collapse the
-// seasoned coupons too. The gate below states it as the measurement it is — the number of
-// surviving projected chains IS the number of seasoned coupons, checked, not asserted from the
-// shape — so a rule set that later closes the gap fails here and gets re-measured.
+// That gap is now CLOSED, and this test is the re-measurement it asked for. The reassociation it
+// named — `mul(mul(x, div(p,q)), div(q,s)) -> mul(x, div(p,s))` — was added to `simplify` the
+// same night, and it collapses the seasoned coupons too: the projected-day scan class
+// `mul(^,@0)@scan` no longer exists at all.
+//
+// What is left is the REALISED chain of each seasoned coupon, `mul(^,$c)@scan`, one per seasoned
+// swap. It cannot telescope and should not: a realised fixing is a double of the tables, so the
+// chain is a product of unrelated constants, not of consecutive discount-factor ratios. There is
+// no identity to apply. (Folding those constants at record time would be a different thing
+// entirely — it would bake market data into the program — and PRINCIPLES.md §2 forbids it.)
 TEST(ScanRoundtrip, RfrBookAfterPassesTelescopesEveryUnseasonedCoupon) {
   const fixtures::RfrBook book = fixtures::make_rfr_book();
   int float_coupons = 0, seasoned_coupons = 0;
@@ -167,30 +172,26 @@ TEST(ScanRoundtrip, RfrBookAfterPassesTelescopesEveryUnseasonedCoupon) {
     }
   }
 
-  // Still two scan domains, and still the same two classes: the projected days (mul(^, @g)) and
-  // the realised days of a seasoned swap's first coupon (mul(^, $c), a constant per step).
-  EXPECT_EQ(s.domains, 2) << ir::to_string(p);
-  const int projected = s.find("mul(^,@0)@scan");
+  // ONE scan domain now, and one class: the realised days of a seasoned swap's first coupon
+  // (mul(^, $c), a constant per step). The projected-day class is gone entirely.
+  EXPECT_EQ(s.domains, 1) << ir::to_string(p);
+  EXPECT_EQ(s.find("mul(^,@0)@scan"), -1)
+      << "a projected-day scan survived the telescope: " << ir::to_string(p);
   const int realised = s.find("mul(^,$0)@scan");
-  ASSERT_GE(projected, 0) << ir::to_string(p);
   ASSERT_GE(realised, 0) << ir::to_string(p);
+  (void)seasoned_projected_days;
 
-  // THE MEASUREMENT: one surviving projected chain per seasoned coupon and not one more, so the
-  // telescope fired on every unseasoned coupon and on none of the seasoned ones.
-  EXPECT_EQ(s.chains_of[static_cast<std::size_t>(projected)], seasoned_coupons) << ir::to_string(p);
+  // THE MEASUREMENT: every projected chain is gone -- seasoned and unseasoned alike -- and
+  // exactly one realised chain per seasoned coupon remains.
   EXPECT_EQ(s.chains_of[static_cast<std::size_t>(realised)], seasoned_coupons) << ir::to_string(p);
-  EXPECT_EQ(s.chains, 2 * seasoned_coupons) << ir::to_string(p);
-  EXPECT_EQ(s.rows_of[static_cast<std::size_t>(projected)], seasoned_projected_days);
+  EXPECT_EQ(s.chains, seasoned_coupons) << ir::to_string(p);
   // One row short of the book's fixings PER CHAIN: a realised chain also starts at `acc = 1`, so
   // its first step `mul(1, c_0)` is `c_0` and the chain begins at the second fixing. That is the
-  // same `mul(x, 1) -> x`, and it is why the old `min_steps >= 10` is now 9.
+  // same `mul(x, 1) -> x`.
   EXPECT_EQ(s.rows_of[static_cast<std::size_t>(realised)], realised_days - seasoned_coupons);
-  EXPECT_EQ(s.rows, seasoned_projected_days + realised_days - seasoned_coupons);
+  EXPECT_EQ(s.rows, realised_days - seasoned_coupons);
   EXPECT_EQ(static_cast<int>(stats.chains), s.chains);
   EXPECT_EQ(stats.scan_rounds, 1u) << stats.scan_retries;
-  // The surviving projected chains are still whole coupons: about ninety sub-periods each.
-  EXPECT_GT(s.rows_of[static_cast<std::size_t>(projected)], 70 * seasoned_coupons)
-      << "about ninety sub-periods per surviving coupon";
   EXPECT_GE(s.min_steps, 5);
   EXPECT_LE(s.max_steps, 93);
   // What the telescope removed: every coupon that is not a seasoned swap's first one.

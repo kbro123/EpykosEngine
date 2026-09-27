@@ -650,6 +650,25 @@ node_id simplify_binary(Tape& t, Op op, node_id a, node_id b) {
         if (qa == pb) return t.binary(Op::Div, pa, telescope_wrong_end ? qa : qb);
         if (qb == pa) return t.binary(Op::Div, pb, telescope_wrong_end ? qb : qa);
       }
+      // THE TELESCOPE, one reassociation out: mul(mul(x, div(p,q)), div(q,s)) -> mul(x, div(p,s)).
+      //
+      // A SEASONED coupon enters its projected days holding the product of its realised fixings,
+      // so the accumulator is a Mul and not a Div and the rule above never matches. Measured
+      // before this rule existed: of Stage A's 51 compounding chains over 4,382 rows, six chains
+      // over 270 rows survived the collapse, and they were exactly the three seasoned coupons.
+      // Seasoned trades are 20% of the Stage A book (WORKLOADS.md), so this is not a corner.
+      if (na.op == Op::Mul && nb.op == Op::Div) {
+        const Node& inner = t[na.b];
+        if (inner.op == Op::Div && inner.b == nb.a) {
+          const node_id x = na.a, p2 = inner.a, s2 = nb.b, q2 = inner.b;
+          return t.binary(Op::Mul, x, t.binary(Op::Div, p2, telescope_wrong_end ? q2 : s2));
+        }
+        const Node& inner_a = t[na.a];
+        if (inner_a.op == Op::Div && inner_a.b == nb.a) {
+          const node_id x = na.b, p2 = inner_a.a, s2 = nb.b, q2 = inner_a.b;
+          return t.binary(Op::Mul, x, t.binary(Op::Div, p2, telescope_wrong_end ? q2 : s2));
+        }
+      }
       break;
     case Op::Div:
       if (konst_is(b, 1.0)) return a;

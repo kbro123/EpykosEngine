@@ -6002,6 +6002,21 @@ Against the specialist: **the risk ladder is 5.70x in our favour** where D78 mea
 engine wrote it. Pricing reads 44.4x and is not like-for-like (theirs is book-only; ours prices the
 book AND the 25 calibration instruments, and the book-attributable part is 56.0 us of our 59.1).
 
+**The ladder against book size, same protocol at each — the crossover is gone.**
+
+| trades | D78's hand spike | now | the other engine | D78 ratio | now |
+|---|---|---|---|---|---|
+| 16 | 137.2 | **99.2** | 123.7 | 0.93x | **1.25x** |
+| 64 | 149.6 | **114.2** | 236.7 | 1.49x | **2.07x** |
+| 256 | 216.7 | **164.5** | 642.9 | 3.22x | **3.91x** |
+| 1,000 | 441.5 | **395.5** | 2,254.8 | 5.16x | **5.70x** |
+
+D78 measured the crossover at about thirty-two trades and had the engine LOSING at sixteen
+(0.93x). There is no crossover in the measured range any more: the engine is ahead at every book
+size, and ahead of the hand-written form at every one too. Cold calibration reads 0.58x, 0.58x,
+0.59x and 0.58x across the four sizes — flat, which is the same statement as below from the other
+direction: it is a fixed solver cost and nothing about it scales with the book.
+
 **D78's calibration verdict stands, and is now a sharper statement.** Cold is 0.58x — we are still
 1.7x slower — and warm is 0.14x, still 7.1x slower, unchanged from D78's telescoped column. The
 residual slice the solve iterates fell 80,319 → 402 steps×rows and it did not move the ratio. So

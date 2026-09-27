@@ -21,10 +21,31 @@
 // planning, and the README warns against reading a recorded count as a cost. This header records
 // both forms from ONE fixture so the difference can be measured end to end instead of inferred.
 //
-// **The engine is expected to find this itself.** The identity below is a general fact about a
-// scan whose step multiplies by a ratio of consecutive terms, which PRINCIPLES.md §2 names as
-// exactly the kind of fact the engine is entitled to hold. When the recurrence rule kind of §2a
-// exists, this header becomes redundant and should be deleted rather than kept as a fast path.
+// **The engine now finds this itself, and that changes what this file is for (D81, 2026-09-27).**
+// `epykos::compile` derives the collapse: the naive recording and the hand-written form below
+// compile to the SAME program, 1,183 nodes on compare_ois, agreeing to 0.000e+00. So the prize
+// this file was written to measure has been claimed and the measurement is in D74 and D81.
+//
+// This header used to say it "becomes redundant and should be deleted rather than kept as a fast
+// path" once that happened. **It is kept, and the earlier instruction is withdrawn**, for one
+// reason that was not anticipated when it was written: it is the ONLY source of the accuracy
+// comparison `PRINCIPLES.md` §5.5 rests on. Measuring that the telescoped form is 39.7x closer to
+// truth on par rates and 53.5x on trade PVs requires two INDEPENDENTLY WRITTEN forms of the maths
+// evaluated on `double` and compared against the oracle, and no amount of engine-side rewriting
+// can supply the second one — the engine's collapse happens below `Rec`, not in the `double`
+// instantiation that serves as the reference.
+//
+// It therefore has two jobs now, both of them live:
+//
+//   1. the accuracy evidence for §5.5's claim that tier-1 algebra usually improves accuracy
+//      rather than trading it away — the one measurement that makes the pin's licence defensible
+//      rather than merely permitted;
+//   2. a REGRESSION gate. `tests/spike/telescoping_prize_test.cpp` now asserts that the two forms
+//      are identical; if `simplify` ever stops deriving the collapse, this is what says so in
+//      terms of the maths rather than of node counts.
+//
+// It remains test-only fixture code (D28) and must still never become production maths: §2 is
+// unchanged, and the pricing layer still declares no optimisation opportunity.
 //
 // ---------------------------------------------------------------------------------------------
 //

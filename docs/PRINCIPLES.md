@@ -483,6 +483,14 @@ That is roughly 21,500 lines on the execution path, all of it measured: the inte
 of a hand-fused kernel, the adjoint at 2.9e-9 against finite differences, the IFT ladder at 5.16x a
 specialist's on a thousand trades (D78).
 
+**The telescoping spike is kept, and D74's instruction to delete it is withdrawn** (D81). It was
+written to measure a prize the engine has now claimed, and its own header said to delete it at
+that point. It turns out to be the only source of the accuracy comparison §5.5 rests on: showing
+that the telescoped form is 39.7x closer to truth needs two INDEPENDENTLY WRITTEN forms evaluated
+on `double`, and the engine's collapse happens below `Rec`, so it cannot supply the second one. It
+also became the regression gate that says, in terms of the maths rather than of node counts, that
+`simplify` still derives the collapse. Still test-only fixture code; §2 is unchanged.
+
 The seven layout rules are **demoted, then deleted with the rest of §7.1**. They are cheap and
 tested and worth 1.73x–1.88x on a workload with that structure; that workload is not the one we
 have, and they can be rebuilt above a working pipeline if it ever is.

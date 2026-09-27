@@ -126,24 +126,31 @@ same family (D71: the closed form reproduces its sampled discount factors to 0.0
 
 ### Not matched — and these are the caveats on every number below
 
-1. **The compounded coupon's representation.** This engine evaluates the OIS float coupon as the
-   *daily product* over its projected observation days — 49,091 of them in the calibration
-   instruments and 45,851 more in a sixteen-trade book, each an ACT/360 overnight forward. (Those
-   are RECORDED days; the book's are then largely shared away by the E0 passes, which is item 6 —
-   do not read 45,851 as the book's cost. The calibration side's 49,091 are what dominate.) The
-   other engine is given, and **can only be given**, one telescoped sub-period per accrual: 197
-   coupon-periods on the calibration side. The two are algebraically equal for the plain
-   observation method (the daily forwards are discount-factor ratios whose product telescopes),
-   which is why the answers agree — but they are not the same arithmetic, and the ratio of work
-   is about 250:1 on the calibration side.
-   Handing the other engine the daily decomposition instead was **tried and does not work**:
-   splitting one observation period into equal sub-periods changes its calibrated curve
-   (one sub-period over [0,1] gives DF(1) = 0.961538461538461, two equal give 0.961168781237985,
-   four give 0.960980344482816), so its `obs` sub-period list is not a telescoping product and
-   cannot carry our daily ACT/360 semantics. Finding out what it *is* would mean reading its
-   source, which D11 forbids. `scripts/compare_swapengine.py --daily` keeps that experiment as
-   the evidence: it reports the disagreement and exits 1, and **no timing is quoted from it**.
-   This is the single largest asymmetry and it is not in our favour.
+*(Item 1 was the big one and was resolved on 2026-09-27; it is kept, struck through in substance, because every number recorded before that date was taken under it.)*
+
+1. **The compounded coupon's representation. RESOLVED 2026-09-27 (D81) — this was the single
+   largest asymmetry and it is gone.** It read, until tonight: this engine evaluates the OIS float
+   coupon as the *daily product* over its projected observation days — 49,091 of them in the
+   calibration instruments and 45,851 more in a sixteen-trade book — while the other engine is
+   given, and can only be given, one telescoped sub-period per accrual, 197 coupon-periods on the
+   calibration side. The two were algebraically equal and the ratio of work was about 250:1.
+
+   **The engine now derives the collapse itself.** `epykos::compile` runs `simplify`
+   (`src/tape/passes.cpp`), four algebraic peepholes above the pin, and the daily product reduces
+   to the same single ratio of endpoint discount factors the other engine is handed. Measured:
+   the sixteen-trade `compare_ois` tape goes from 1,020,583 recorded nodes to **1,183**, against
+   81,321 for the data-movement passes alone and 1,313 for D74's hand-written telescoped spike.
+   The two engines now do comparable arithmetic on this fixture, so a timing taken from it is a
+   comparison of two engines rather than of two coupon representations.
+
+   Two things from the old text survive and still matter. Handing the other engine the daily
+   decomposition instead was tried and **does not work** — splitting one observation period into
+   equal sub-periods changes its calibrated curve (one sub-period over [0,1] gives
+   DF(1) = 0.961538461538461, two equal give 0.961168781237985, four give 0.960980344482816), so
+   its `obs` sub-period list is not a telescoping product; `scripts/compare_swapengine.py --daily`
+   keeps that as evidence, reports the disagreement and exits 1. And the agreement is unaffected
+   by the collapse — it is TIGHTER: discount factors 7.355e-16 where they were 5.329e-15.
+
 2. **Book schedule generation.** We hand over explicit times for the calibration instruments, but
    the other engine's book takes trades by index and dates and regenerates their schedules from
    its own conventions. That the two agree is **measured, not assumed**: per-trade NPVs match to

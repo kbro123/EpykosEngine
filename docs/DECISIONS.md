@@ -30,6 +30,8 @@ belong to the solver (`pin`).
 Tape length must not depend on iteration count; derivatives must not depend on the solver's path.
 
 ## D8 — Every rewrite declares an exactness class (2026-09-22)
+
+> **Superseded by D79 (2026-09-27):** exactness is a pipeline stage boundary (the pin), not a per-rule class. See `docs/PRINCIPLES.md` §1.
 E0 bit-identical, E1 ≤ 1 ulp per op. Gates apply the matching tolerance. Bit-identity gates build the reference
 with `-ffp-contract=off`. No `-ffast-math`.
 
@@ -3841,6 +3843,8 @@ and each would be relaxed and replaced by a measured error the moment the thing 
 
 ## D74 — The telescoping prize, measured end to end before the machinery to find it is built: the 250:1 recorded ratio is 62:1 in surviving tape nodes, 143:1 in the work the calibration solve iterates, and 46.97x on evaluate, 168.73x on calibrate and 147.48x on the reverse risk ladder in wall clock (2026-09-25)
 
+> **Partly retracted by D79 (2026-09-27):** the measurements stand; the framing of telescoping as creative telescoping (Gosper/Zeilberger) does not. It is a first-order product recurrence with an elementary closed form.
+
 A MEASUREMENT SPIKE, not a feature, on `spike/telescoping-prize`. `PRINCIPLES.md` §8 orders the rebuild and puts
 telescoping fourth, "as the worked example — it exercises every part of this contract and is worth 250:1". That
 250:1 is `bench/compare/README.md` §4 item 1 and D71 §6(a), and it is a count of RECORDED observation days — 49,091
@@ -4100,6 +4104,8 @@ fixture and `epykos::Wide` live there and the spike needs both. Neither is modif
 two documents' append points.
 
 ## D77 — The telescoped ladder measured directly against the other engine: 2.8x FASTER, where the naive form is 42x slower (2026-09-26)
+
+> **Superseded by D78 (2026-09-26):** 2.82x does not survive an in-process comparison; it is 1.49x at the same book size.
 
 Closes the loop D76 left open. D76 measured the naive form against the other engine and inferred what telescoping
 would do by dividing our number by D74's ratio, across two runs taken hours apart at different loads. That is an

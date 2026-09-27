@@ -59,6 +59,16 @@
 // An _e0_test.cpp TU (-ffp-contract=off in every preset): the bitwise legs compare the
 // catalogue's generated kernels (src/catalogue/generated/kernels_e0.cpp, themselves E0) against
 // the interpreter's generic per-step path, so they must hold under release and reference alike.
+//
+// RE-ANCHORED 2026-09-27 (PRINCIPLES.md §5.2a). EVERY bitwise and fingerprint leg of this file is
+// case 1 — both sides evaluate the same pinned tape — and every one of them STILL PASSES, on both
+// fixtures, at every window, after the algebra phase landed: same Signature multiset, same hashes,
+// same registry entries, same coverage, same values with the catalogue on and off. The signature's
+// canonicality under node order is a property of the signature code and the algebra did not touch
+// it. Nothing here was loosened.
+//
+// One case-3 assertion moved, in the UNBOUNDED case at the bottom of the file: its own
+// non-vacuity witness. See that test.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -348,15 +358,23 @@ std::vector<double> run_all(const ir::Program& program, bool use_catalogue, cata
 //
 // At a BOUNDED window — a recording that stays as close to the original as a compiler's own local
 // freedom keeps it — everything must match: the catalogue's whole view, its coverage, and the
-// values. At an UNBOUNDED window a re-recording may additionally move a row between two levels of
-// a non-trivial SCC. That is `ir::infer`'s own level assignment, not the fingerprint: a domain
+// values. At an UNBOUNDED window a re-recording COULD additionally move a row between two levels
+// of a non-trivial SCC. That is `ir::infer`'s own level assignment, not the fingerprint: a domain
 // gains or loses a row, a constant slot that was uniform over the old row set stops being uniform,
 // and `assemble` emits a Column where it emitted a Literal — a genuinely different shape, and
-// correctly fingerprinted as one. Measured on the 60-trade Stage A fixture, three seeds per
-// window: at windows 1, 2, 4, 8 and 16 nothing moves at all; from window 64 upwards, one domain
-// goes from 27 rows at level 8 and 3 rows at level 9 to 25 and 5, its `mul(step, lit)` becomes
-// `mul(step, col)`, and the catalogue serves 54 rather than 53 of that fixture's 56 eligible
-// domains.
+// correctly fingerprinted as one. Measured for D69 on the 60-trade Stage A fixture as it was
+// then, three seeds per window: at windows 1, 2, 4, 8 and 16 nothing moved at all; from window 64
+// upwards, one domain went from 27 rows at level 8 and 3 rows at level 9 to 25 and 5, its
+// `mul(step, lit)` became `mul(step, col)`, and the catalogue served 54 rather than 53 of that
+// fixture's 56 eligible domains.
+//
+// RE-MEASURED 2026-09-27, after the algebra phase: that no longer happens on any fixture here.
+// 24 unbounded seeds move 29,195–29,199 of the collapsed 60-trade tape's 29,293 nodes and NOT ONE
+// of them changes the emitted operand order, the level assignment or the coverage; the same 24
+// seeds change nothing on the M1 book (75,182 nodes) or on a 200-trade Stage A either. The
+// degree of freedom is not gone from `ir::infer` — nothing below the pin was touched — but the
+// collapsed tape no longer presents a shape that exercises it, so the unbounded case can no longer
+// witness its own deliverable. See the test at the bottom of this file.
 //
 // That second regime is reported rather than gated because it is not something the two compilers
 // do. Appending to the tape is an observable side effect, so a conforming compiler may reorder
@@ -380,6 +398,7 @@ void check_tape_order_invariance(const epykos::Tape& tape, const std::string& la
   const std::vector<double> base_cat = run_all(base, /*use_catalogue=*/true, &base_cov);
 
   std::size_t witnessing_walks = 0;
+  std::size_t least_moved = tape.size();
   for (const Walk& w : walks) {
     const std::string what = label + ", walk '" + w.name + "'";
     std::size_t moved = 0;
@@ -398,6 +417,7 @@ void check_tape_order_invariance(const epykos::Tape& tape, const std::string& la
     ASSERT_NO_THROW(ir::validate(p)) << what;
     const bool witnessed = raw_shapes(p) != base_raw;
     if (witnessed) ++witnessing_walks;
+    if (w.window != 1) least_moved = std::min(least_moved, moved);
 
     // 1. The fingerprint: the same multiset of shapes, resolving to the same registry entries.
     const CatalogueView v = view_of(p);
@@ -442,16 +462,22 @@ void check_tape_order_invariance(const epykos::Tape& tape, const std::string& la
               << " of " << base_view.eligible << ")\n";
   }
 
-  // D53: a gate must say whether its deliverable actually fires. At a bounded window it does not,
-  // on either reference fixture, and that IS the measured result -- the recording order never
-  // reaches the emitted Program at the scale a compiler can reorder -- so it is reported here, not
-  // asserted. At an unbounded window it must fire, or that case is measuring nothing.
+  // D53: a gate must say whether its deliverable actually fires. It no longer does at EITHER
+  // window, on any fixture here, and that is the measured result (the file header has the numbers
+  // and the re-measurement date), so it is reported rather than asserted.
+  //
+  // The unbounded case used to assert `witnessing_walks > 0` -- "or this case is measuring
+  // nothing". On the collapsed tape that is no longer reachable and the assertion would only pin
+  // an accident of the old tape's shape, so what is gated instead is the floor that keeps the case
+  // from being vacuous for the OTHER reason: the schedules must really have re-recorded the tape.
+  // If `reorder` ever stopped permuting -- a broken window, an empty ready list, a silent early
+  // exit -- every leg above would pass trivially, and this is what would catch it.
+  std::cout << "[ tape order ] " << label << ": " << witnessing_walks << " of the " << walks.size()
+            << " re-recordings changed the emitted operand order; the least permuted moved " << least_moved << " of "
+            << tape.size() << " nodes\n";
   if (!strict) {
-    EXPECT_GT(witnessing_walks, 0u)
-        << label << ": no re-recording changed the emitted operand order at all -- this case is vacuous";
-  } else {
-    std::cout << "[ tape order ] " << label << ": " << witnessing_walks << " of the " << walks.size()
-              << " compiler-realisable re-recordings changed the emitted operand order\n";
+    EXPECT_GT(least_moved * 2, tape.size())
+        << label << ": an unbounded schedule left most nodes where they were -- `reorder` is not permuting";
   }
 }
 
@@ -493,13 +519,20 @@ TEST(CatalogueSignatureTapeOrderE0, StageA) {
 
 // ---- the finding, executed rather than asserted: beyond what a compiler can do ------------------
 //
-// D69's measured boundary. These recordings are not reachable by any conforming compiler, and the
-// catalogue's coverage really does move on them, because `ir::infer` reassigns a row between two
-// levels of a non-trivial SCC and a constant slot stops being uniform over its domain. What must
-// still hold, and is asserted, is that the values do not change and that the catalogue is never
-// WRONG -- every kernel it dispatches still reproduces the generic per-step path bit for bit.
+// D69's measured boundary. These recordings are not reachable by any conforming compiler. When
+// D69 measured it, the catalogue's coverage really did move on them, because `ir::infer`
+// reassigned a row between two levels of a non-trivial SCC and a constant slot stopped being
+// uniform over its domain -- hence the old name, `...IsValuePreservingButNotCoveragePreserving`.
+//
+// RE-MEASURED 2026-09-27 on the collapsed tape (§5.2a case 3): the coverage no longer moves.
+// 24 unbounded seeds permute 29,195-29,199 of the 29,293 nodes and every one of them reproduces
+// the base recording's shapes, coverage and values exactly -- and so do 24 seeds on the M1 book
+// and on a 200-trade Stage A, so it is not a matter of this fixture's size. The half of the name
+// that no longer holds is dropped rather than left standing over an assertion that was deleted.
+// What is asserted is unchanged and is the half that always mattered: the values do not change,
+// and the catalogue is never WRONG where it dispatches.
 
-TEST(CatalogueSignatureTapeOrderE0, StageAUnboundedReorderingIsValuePreservingButNotCoveragePreserving) {
+TEST(CatalogueSignatureTapeOrderE0, StageAUnboundedReorderingIsValuePreserving) {
   fixtures::StageAOptions opt;
   opt.trades = 60;
   opt.scenarios = 0;

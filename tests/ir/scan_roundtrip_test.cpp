@@ -9,6 +9,16 @@
 //
 // A gate of scripts/mutation_test.sh (the name matches "roundtrip"): the expander's scan mutant
 // is caught here.
+//
+// RE-ANCHORED 2026-09-27 (PRINCIPLES.md §5.2a case 3 — the algebra removed the structure two of
+// these assertions were about). `epykos::compile` now runs `simplify` first, and the RFR book is
+// exactly the fixture its telescope was written for: `acc <- acc·(1 + fwd·τ)` collapses to a
+// ratio of endpoint discount factors, so the compounding scan the "(passes)" case was built to
+// exhibit is mostly GONE. The round trip, the expander and the evaluator are untouched and still
+// bitwise; only the shape of what they round-trip changed. The RFR book's RAW recording (156
+// chains, 12,589 steps) and the affine scan on both its legs are unaffected — no rule matches
+// `a_k·x_k + b_k` — so the expander's scan mutant is still exercised on plenty of chains. What
+// each re-stated assertion used to say is at the test.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -51,6 +61,14 @@ struct ScanSummary {
   int rows = 0;         // over all scan domains
   int min_steps = 0, max_steps = 0;
   std::vector<std::string> names;
+  std::vector<int> chains_of;  // per entry of `names`
+  std::vector<int> rows_of;    // per entry of `names`
+
+  // The index in `names` of the one scan domain called `name`, or -1.
+  int find(const std::string& name) const {
+    const auto it = std::find(names.begin(), names.end(), name);
+    return it == names.end() ? -1 : static_cast<int>(it - names.begin());
+  }
 };
 
 ScanSummary summarise(const ir::Program& p) {
@@ -67,6 +85,8 @@ ScanSummary summarise(const ir::Program& p) {
       s.max_steps = std::max(s.max_steps, len);
     }
     s.names.push_back(dom.name);
+    s.chains_of.push_back(sc.chains());
+    s.rows_of.push_back(dom.rows);
   }
   return s;
 }
@@ -101,7 +121,24 @@ ir::Program expect_roundtrip(const Tape& tape, const std::string& what, ir::Infe
 
 }  // namespace
 
-TEST(ScanRoundtrip, RfrBookAfterPassesIsAScanOverEveryFloatCoupon) {
+// Used to assert that the compiled RFR book is a scan over EVERY float coupon: two scan domains,
+// one chain per distinct accrual period plus one per seasoned swap's fixings, and one row per
+// observation day of all of them — 51 chains over 4,382 rows on this fixture.
+//
+// The telescope took all but three of those chains. `acc <- acc·(1 + ((DF(s)/DF(e) − 1)/τ)·τ)`
+// reduces to `acc·(DF(s)/DF(e))` step by step, and an UNSEASONED coupon starts at `acc = 1`, so
+// `mul(1, div(d0,d1)) -> div(d0,d1)` makes the accumulator a Div and the telescope
+// `mul(div(p,q), div(q,s)) -> div(p,s)` then runs the chain to a single endpoint ratio. A SEASONED
+// coupon does not: its accumulator enters the projected days as the product of the realised
+// fixings — a Mul, not a Div — so `mul(div(p,q), div(q,s))` never matches and the whole chain
+// survives, together with the realised-fixings chain that feeds it.
+//
+// That is a real and reportable limit of the peephole rule set, not a property of the fixture:
+// one reassociation, `mul(mul(x, div(p,q)), div(q,s)) -> mul(x, div(p,s))`, would collapse the
+// seasoned coupons too. The gate below states it as the measurement it is — the number of
+// surviving projected chains IS the number of seasoned coupons, checked, not asserted from the
+// shape — so a rule set that later closes the gap fails here and gets re-measured.
+TEST(ScanRoundtrip, RfrBookAfterPassesTelescopesEveryUnseasonedCoupon) {
   const fixtures::RfrBook book = fixtures::make_rfr_book();
   int float_coupons = 0, seasoned_coupons = 0;
   for (int i = 0; i < book.n_swaps; ++i) {
@@ -113,39 +150,56 @@ TEST(ScanRoundtrip, RfrBookAfterPassesIsAScanOverEveryFloatCoupon) {
   const ir::Program p = expect_roundtrip(tape, "RFR book (passes)", &stats);
   std::cout << "[ program  ] RFR book (passes)\n" << ir::to_string(p);
   const ScanSummary s = summarise(p);
-  // One scan class for the projected days (mul(^, @g)) and one for the realised days of the
-  // seasoned swaps' first coupons (mul(^, $c), a constant per step). After CSE two coupons with
-  // the same accrual period and no fixings are one recording (the unseasoned swaps share their
-  // schedule), so the projected chains are the distinct periods; a chain of fixings per
-  // seasoned swap; a chain's steps are its projected days (its fixings).
+  // The days of the seasoned coupons, which are the only ones left: their realised fixings
+  // (start < 0) and the projected days that follow them in the same coupon.
   std::set<std::pair<int, int>> periods;
-  int projected_days = 0, realised_days = 0;
+  int unseasoned_periods_days = 0, seasoned_projected_days = 0, realised_days = 0;
   for (int i = 0; i < book.n_swaps; ++i) {
     for (int j = 0; j < fixtures::rfr_periods(book, i); ++j) {
       const std::size_t r = static_cast<std::size_t>(fixtures::rfr_float_row_begin(book, i) + j);
       const int start = book.row_start_day[r], end = book.row_end_day[r];
       if (start < 0) {
         realised_days += -start;
-        projected_days += end;
+        seasoned_projected_days += end;
       } else if (periods.insert({start, end}).second) {
-        projected_days += end - start;
+        unseasoned_periods_days += end - start;
       }
     }
   }
-  const int projected_chains = static_cast<int>(periods.size()) + seasoned_coupons;
+
+  // Still two scan domains, and still the same two classes: the projected days (mul(^, @g)) and
+  // the realised days of a seasoned swap's first coupon (mul(^, $c), a constant per step).
   EXPECT_EQ(s.domains, 2) << ir::to_string(p);
-  EXPECT_EQ(s.chains, projected_chains + seasoned_coupons) << ir::to_string(p);
-  EXPECT_GE(s.min_steps, 10);
-  EXPECT_LE(s.max_steps, 93);
-  EXPECT_NE(std::find(s.names.begin(), s.names.end(), "mul(^,@0)@scan"), s.names.end()) << ir::to_string(p);
-  EXPECT_NE(std::find(s.names.begin(), s.names.end(), "mul(^,$0)@scan"), s.names.end()) << ir::to_string(p);
+  const int projected = s.find("mul(^,@0)@scan");
+  const int realised = s.find("mul(^,$0)@scan");
+  ASSERT_GE(projected, 0) << ir::to_string(p);
+  ASSERT_GE(realised, 0) << ir::to_string(p);
+
+  // THE MEASUREMENT: one surviving projected chain per seasoned coupon and not one more, so the
+  // telescope fired on every unseasoned coupon and on none of the seasoned ones.
+  EXPECT_EQ(s.chains_of[static_cast<std::size_t>(projected)], seasoned_coupons) << ir::to_string(p);
+  EXPECT_EQ(s.chains_of[static_cast<std::size_t>(realised)], seasoned_coupons) << ir::to_string(p);
+  EXPECT_EQ(s.chains, 2 * seasoned_coupons) << ir::to_string(p);
+  EXPECT_EQ(s.rows_of[static_cast<std::size_t>(projected)], seasoned_projected_days);
+  // One row short of the book's fixings PER CHAIN: a realised chain also starts at `acc = 1`, so
+  // its first step `mul(1, c_0)` is `c_0` and the chain begins at the second fixing. That is the
+  // same `mul(x, 1) -> x`, and it is why the old `min_steps >= 10` is now 9.
+  EXPECT_EQ(s.rows_of[static_cast<std::size_t>(realised)], realised_days - seasoned_coupons);
+  EXPECT_EQ(s.rows, seasoned_projected_days + realised_days - seasoned_coupons);
   EXPECT_EQ(static_cast<int>(stats.chains), s.chains);
   EXPECT_EQ(stats.scan_rounds, 1u) << stats.scan_retries;
-  EXPECT_EQ(s.rows, projected_days + realised_days);
-  EXPECT_GT(projected_days, 80 * projected_chains) << "about ninety sub-periods per coupon";
-  EXPECT_GT(float_coupons, projected_chains) << "CSE shares the unseasoned swaps' coupons";
+  // The surviving projected chains are still whole coupons: about ninety sub-periods each.
+  EXPECT_GT(s.rows_of[static_cast<std::size_t>(projected)], 70 * seasoned_coupons)
+      << "about ninety sub-periods per surviving coupon";
+  EXPECT_GE(s.min_steps, 5);
+  EXPECT_LE(s.max_steps, 93);
+  // What the telescope removed: every coupon that is not a seasoned swap's first one.
+  EXPECT_GT(float_coupons - seasoned_coupons, 0);
+  EXPECT_GT(unseasoned_periods_days, 0) << "the unseasoned coupons really did have days to collapse";
   std::cout << "[  scan    ] " << s.domains << " scan domains, " << s.chains << " chains, " << s.rows << " steps, "
-            << s.min_steps << ".." << s.max_steps << " steps per chain\n";
+            << s.min_steps << ".." << s.max_steps << " steps per chain; the telescope removed "
+            << (float_coupons - seasoned_coupons) << " of the " << float_coupons << " coupons ("
+            << unseasoned_periods_days << " observation days over " << periods.size() << " distinct periods)\n";
 }
 
 TEST(ScanRoundtrip, RfrBookRawRecordingIsAScanToo) {
@@ -219,9 +273,13 @@ TEST(ScanRoundtrip, M1BookHasNoScan) {
     EXPECT_TRUE(ir::scan_class_domains(p).empty());
     EXPECT_TRUE(ir::recurrent_domains(p).empty());
     if (passes) {
-      EXPECT_EQ(p.domains.size(), 10u);
-      EXPECT_EQ(stats.classes, 8u);
-      EXPECT_EQ(p.num_values(), 42314u);
+      // Was 10 domains / 8 classes / 42,314 values. `simplify`'s `mul(x, 1) -> x` splits the DF
+      // class (the t = 1 discount factor) and the swap class (side == +1 loses its multiply),
+      // and the side == −1 half then merges with the constant-rate coupon class: 14 domains,
+      // 9 classes, 42,799 values. tests/ir/domain_chain_test.cpp has the full account.
+      EXPECT_EQ(p.domains.size(), 14u);
+      EXPECT_EQ(stats.classes, 9u);
+      EXPECT_EQ(p.num_values(), 42799u);
     }
   }
 }

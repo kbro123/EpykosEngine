@@ -9,6 +9,27 @@
 // same op tree as the fixed coupons N·τ·K·DF(e) and share their class; the swaps with T = 1 have
 // no leg Sum and form a level-0 domain of the swap class; legs, swaps and the book are one
 // class cycle split into levels.
+//
+// RE-ANCHORED 2026-09-27 (PRINCIPLES.md §5.2a case 3 — the algebra changed the structure these
+// assertions were about). `epykos::compile` now runs `simplify` before the data-movement passes,
+// and ONE of its peepholes, `mul(x, 1) -> x`, reshapes this book. It fires in exactly two places:
+//
+//   * the discount factor at t = 1 (on knot 4). `exp(-z·t)` with t == 1.0 loses its Mul, so that
+//     one row leaves the DF class `exp(mul(neg(@0),$0))` and becomes a one-row class of its own,
+//     `exp(neg(@0))`. Every other distinct time keeps its Mul.
+//   * the side multiply. A swap is `side·(fixed − float)` with side == ±1; the 515 swaps with
+//     side == +1 lose the Mul and are just `sub(@0,@1)`, while the 485 with side == −1 keep one
+//     whose factor is now the UNIFORM literal −1, i.e. `mul(#0,@0)` — the same op tree as the
+//     constant-rate coupon `mul($0,@0)`, so those two classes MERGE. That merge pulls the coupon
+//     domain into the leg/swap/book class cycle and re-levels the leg Sums.
+//
+// Measured on this fixture, data movement only -> with the algebra: the tape is 75,698 -> 75,182
+// nodes (516 Muls removed: 515 sides + the t = 1 time) and the emitted Program is 10 -> 14
+// domains, 8 -> 9 classes, 42,314 -> 42,799 values. Values RISE while nodes FALL because the
+// side == −1 swaps now need two rows (a `sub` row and a `mul(−1, ·)` row) where the fused
+// `mul($0,sub(@0,@1))` needed one: 485 of them, exactly the difference.
+//
+// What each test below used to assert, and why it moved, is recorded at the test.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -146,14 +167,21 @@ TEST(IrDomainChain, PrintsTheChain) {
   ::testing::Test::RecordProperty("values", std::to_string(f.program.num_values()));
 }
 
-TEST(IrDomainChain, NoScanDomainsAndTenDomains) {
+// Was `NoScanDomainsAndTenDomains`, asserting 10 domains and 8 classes. The algebra split the DF
+// class in two and the swap class in two, and merged one of those halves with the coupon class:
+// 9 classes over 14 domains (the file header has the arithmetic). No scan either way.
+TEST(IrDomainChain, NoScanDomainsAndFourteenDomains) {
   const Fixture& f = fixture();
   EXPECT_TRUE(ir::recurrent_domains(f.program).empty());
   EXPECT_TRUE(ir::scan_class_domains(f.program).empty()) << "no class of the M1 book reads itself (D16, D22)";
 
-  EXPECT_EQ(f.program.domains.size(), 10u);
-  EXPECT_EQ(f.stats.classes, 8u);   // input, affine, DF, const-rate coupon, forward, float coupon, sum, swap
-  EXPECT_EQ(f.stats.domains, 10u);  // sum and swap split by level: legs / book, T==1 / T>=2
+  EXPECT_EQ(f.program.domains.size(), 14u);
+  // input, affine, DF, DF at t == 1, const-rate coupon AND the negated swap (one class),
+  // forward, float coupon, sum, the un-negated swap.
+  EXPECT_EQ(f.stats.classes, 9u);
+  // sum splits into three levels (two leg levels, the book) and the two swap classes into two
+  // each (T == 1 / T >= 2).
+  EXPECT_EQ(f.stats.domains, 14u);
   EXPECT_EQ(f.program.inputs.size(), 12u);
   EXPECT_EQ(f.program.outputs.size(), 1001u);
   ASSERT_NO_THROW(ir::validate(f.program));
@@ -192,35 +220,58 @@ TEST(IrDomainChain, KnotsToTimesIsOneAffineDomainOverTheInputs) {
   }
 }
 
+// Used to assert ONE domain `exp(mul(neg(@0),$0))` with one row per distinct discount time, its
+// time column equal to the book's distinct times and three of its rows reading a knot directly.
+// `mul(x, 1) -> x` took the t = 1 row out of that class: it is now the one-row domain
+// `exp(neg(@0))`, with no time column at all (the time is gone, not folded to a literal). The
+// invariant — one Exp per distinct discount time, and the times are the book's — is re-stated
+// over the two domains together.
 TEST(IrDomainChain, TimesDomainHasOneExpPerDistinctTime) {
   const Fixture& f = fixture();
   const ir::Program& p = f.program;
   const ir::domain_id din = the_domain(p, "input");
   const ir::domain_id daff = the_domain(p, "affine(#0;%0)");
   const ir::domain_id ddf = the_domain(p, "exp(mul(neg(@0),$0))");
+  const ir::domain_id ddf1 = the_domain(p, "exp(neg(@0))");
   ASSERT_GE(ddf, 0);
+  ASSERT_GE(ddf1, 0);
   const ir::Domain& dom = p.domains[static_cast<std::size_t>(ddf)];
-  EXPECT_EQ(static_cast<std::size_t>(dom.rows), f.df_times.size());
+  const ir::Domain& dom1 = p.domains[static_cast<std::size_t>(ddf1)];
+  EXPECT_EQ(dom1.rows, 1) << "exactly one discount time is t == 1";
+  EXPECT_EQ(static_cast<std::size_t>(dom.rows + dom1.rows), f.df_times.size()) << "one Exp per distinct time";
   EXPECT_EQ(dom.reads, (std::vector<ir::domain_id>{din, daff}));
+  EXPECT_EQ(dom1.reads, std::vector<ir::domain_id>{din}) << "t == 1 is on knot 4, so it reads the Input";
   const ir::Group& g = p.groups[static_cast<std::size_t>(ddf)];
   ASSERT_EQ(g.steps.size(), 3u);
   EXPECT_EQ(g.steps[0].op, Op::Neg);
   EXPECT_EQ(g.steps[1].op, Op::Mul);
   EXPECT_EQ(g.steps[2].op, Op::Exp);
+  const ir::Group& g1 = p.groups[static_cast<std::size_t>(ddf1)];
+  ASSERT_EQ(g1.steps.size(), 2u) << "no Mul: `mul(neg(z), 1.0)` simplified to `neg(z)`";
+  EXPECT_EQ(g1.steps[0].op, Op::Neg);
+  EXPECT_EQ(g1.steps[1].op, Op::Exp);
   const ir::Gather& zt = gather_of(p, g.steps[0].a);
+  const ir::Gather& zt1 = gather_of(p, g1.steps[0].a);
   EXPECT_EQ(reads_from(p, zt, daff), f.n_interior);
-  EXPECT_EQ(reads_from(p, zt, din), f.df_times.size() - f.n_interior) << "the non-interpolated times read a knot";
+  EXPECT_EQ(reads_from(p, zt, din) + reads_from(p, zt1, din), f.df_times.size() - f.n_interior)
+      << "the non-interpolated times read a knot";
   EXPECT_EQ(f.df_times.size() - f.n_interior, 3u);
-  // The column is the time t: the same set as the book's distinct discount times.
-  const ir::Column& t_col = column_of(p, g.steps[1].b);
-  EXPECT_EQ(sorted_bits(t_col.values), sorted_bits(f.df_times));
+  // The column is the time t: with 1.0 (the time the other domain no longer carries) put back,
+  // the same set as the book's distinct discount times.
+  std::vector<double> times = column_of(p, g.steps[1].b).values;
+  times.push_back(1.0);
+  EXPECT_EQ(sorted_bits(times), sorted_bits(f.df_times));
 }
 
+// Unchanged in substance. The only assertions that moved are the three `reads` lists: every
+// coupon class now also reads the one-row `exp(neg(@0))` domain the algebra split off the DF
+// class, because the coupons whose discount time is t = 1 gather their DF from there.
 TEST(IrDomainChain, CouponClassesPartitionTheRowsWithSeasonedFirstOutsideFloat) {
   const Fixture& f = fixture();
   const ir::Program& p = f.program;
   const fixtures::Book& b = f.book;
   const ir::domain_id ddf = the_domain(p, "exp(mul(neg(@0),$0))");
+  const ir::domain_id ddf1 = the_domain(p, "exp(neg(@0))");
   const ir::domain_id dfix = the_domain(p, "mul($0,@0)");              // N·τ·K·DF(e) and N·τ·R·DF(e)
   const ir::domain_id dfwd = the_domain(p, "div(sub(div(@0,@1),#0),$0)");  // (DF(s)/DF(e) − 1)/τ
   const ir::domain_id dflt = the_domain(p, "mul(mul($0,@0),@1)");      // N·τ·fwd·DF(e)
@@ -236,9 +287,9 @@ TEST(IrDomainChain, CouponClassesPartitionTheRowsWithSeasonedFirstOutsideFloat) 
   EXPECT_EQ(static_cast<std::size_t>(flt.rows), f.n_float_plain);
   EXPECT_EQ(static_cast<std::size_t>(fix.rows + flt.rows), static_cast<std::size_t>(b.n_rows));
   EXPECT_EQ(static_cast<std::size_t>(fwd.rows), f.n_forwards) << "one forward per distinct (s, e) pair";
-  EXPECT_EQ(fix.reads, std::vector<ir::domain_id>{ddf});
-  EXPECT_EQ(fwd.reads, std::vector<ir::domain_id>{ddf});
-  EXPECT_EQ(flt.reads, (std::vector<ir::domain_id>{ddf, dfwd}));
+  EXPECT_EQ(fix.reads, (std::vector<ir::domain_id>{ddf, ddf1}));
+  EXPECT_EQ(fwd.reads, (std::vector<ir::domain_id>{ddf, ddf1}));
+  EXPECT_EQ(flt.reads, (std::vector<ir::domain_id>{ddf, ddf1, dfwd}));
 
   // The constant-rate class holds exactly the fixed coupons (N·τ·K) and the seasoned-first
   // coupons (N·τ·R): its column is that multiset, computed here exactly as the maths does.
@@ -281,6 +332,23 @@ TEST(IrDomainChain, CouponClassesPartitionTheRowsWithSeasonedFirstOutsideFloat) 
   for (double tau : column_of(p, gfwd.steps[2].b).values) EXPECT_TRUE(bits(tau) == bits(365.0 / 360.0) || bits(tau) == bits(366.0 / 360.0));
 }
 
+// Used to assert the chain coupons -> ONE leg Sum domain (level 0, 2·n_two_plus rows, the two
+// legs of a swap at consecutive rows) -> TWO swap domains `mul($0,sub(@0,@1))` carrying a side
+// column of ±1 (T >= 2 at level 1, T == 1 at level 0) -> the book Sum at level 2.
+//
+// `mul(x, 1) -> x` dissolved the swap class. There is no `mul($0,sub(@0,@1))` domain and no side
+// column anywhere: a swap is now `sub(@0,@1)`, and the 485 swaps with side == −1 carry a separate
+// `mul(#0,@0)` row on top of it whose literal is −1. That extra class shares its op tree with the
+// constant-rate coupon `mul($0,@0)`, so coupons, leg Sums, swaps, negations and the book are ONE
+// class cycle, and the leg Sums split across two levels by whether the leg reads a coupon of that
+// merged class (all 969 fixed legs and the 194 seasoned float legs) or not (the 775 remaining
+// float legs) — which is also why the two legs of one swap are no longer consecutive rows of one
+// domain, and why that assertion is not re-stated here.
+//
+// The chain itself is intact and is asserted below over the domains as they now are, per swap and
+// keyed on the IR rather than on domain ids: every swap's output is `fixed − float`, negated iff
+// its side is −1; every leg is a Sum over T coupons of the right classes; the book is one Sum over
+// the 1,000 swap PVs in output order.
 TEST(IrDomainChain, LegsSwapsAndBookAreSegmentsAndLevels) {
   const Fixture& f = fixture();
   const ir::Program& p = f.program;
@@ -288,90 +356,112 @@ TEST(IrDomainChain, LegsSwapsAndBookAreSegmentsAndLevels) {
   const ir::domain_id dfix = the_domain(p, "mul($0,@0)");
   const ir::domain_id dflt = the_domain(p, "mul(mul($0,@0),@1)");
   const std::vector<ir::domain_id> sums = domains_named(p, "sum(%0)");
-  const std::vector<ir::domain_id> swaps = domains_named(p, "mul($0,sub(@0,@1))");
-  ASSERT_EQ(sums.size(), 2u) << "legs and book";
-  ASSERT_EQ(swaps.size(), 2u) << "T == 1 and T >= 2";
+  const std::vector<ir::domain_id> subs = domains_named(p, "sub(@0,@1)");
+  const std::vector<ir::domain_id> negs = domains_named(p, "mul(#0,@0)");
+  ASSERT_EQ(sums.size(), 3u) << "two leg levels and the book";
+  ASSERT_EQ(subs.size(), 2u) << "fixed − float: T == 1 and T >= 2";
+  ASSERT_EQ(negs.size(), 2u) << "the side == −1 rows of each";
+  EXPECT_TRUE(domains_named(p, "mul($0,sub(@0,@1))").empty()) << "the fused side multiply is gone";
 
-  // Legs: level 0, one row per leg of a swap with T >= 2, fixed leg then float leg in swap order,
-  // segment length T, members from the two coupon domains.
-  const ir::domain_id dlegs = p.domains[static_cast<std::size_t>(sums[0])].level == 0 ? sums[0] : sums[1];
-  const ir::domain_id dbook = dlegs == sums[0] ? sums[1] : sums[0];
-  const ir::Domain& legs = p.domains[static_cast<std::size_t>(dlegs)];
-  EXPECT_EQ(static_cast<std::size_t>(legs.rows), 2 * f.n_two_plus);
-  EXPECT_EQ(legs.level, 0);
-  EXPECT_EQ(legs.reads, (std::vector<ir::domain_id>{dfix, dflt}));
-  const ir::Segment& lseg = p.segments[static_cast<std::size_t>(p.groups[static_cast<std::size_t>(dlegs)].steps[0].a.index)];
-  {
-    std::size_t row = 0;
-    for (int i = 0; i < b.n_swaps; ++i) {
-      const int T = b.tenor[static_cast<std::size_t>(i)];
-      if (T < 2) continue;
-      for (int leg = 0; leg < 2; ++leg, ++row) {
-        ASSERT_LT(row + 1, lseg.offsets.size());
-        EXPECT_EQ(lseg.offsets[row + 1] - lseg.offsets[row], T) << "swap " << i << " leg " << leg;
-        const auto m0 = static_cast<std::size_t>(lseg.offsets[row]);
-        if (leg == 0) {
-          for (int j = 0; j < T; ++j) EXPECT_EQ(p.domain_of(lseg.members[m0 + static_cast<std::size_t>(j)]), dfix);
-        } else {
-          const bool seasoned = b.seasoned[static_cast<std::size_t>(i)] != 0;
-          EXPECT_EQ(p.domain_of(lseg.members[m0]), seasoned ? dfix : dflt) << "swap " << i;
-          for (int j = 1; j < T; ++j) EXPECT_EQ(p.domain_of(lseg.members[m0 + static_cast<std::size_t>(j)]), dflt);
-        }
-      }
-    }
-    EXPECT_EQ(row, static_cast<std::size_t>(legs.rows));
+  const auto dom = [&](ir::domain_id d) -> const ir::Domain& { return p.domains[static_cast<std::size_t>(d)]; };
+  const auto grp = [&](ir::domain_id d) -> const ir::Group& { return p.groups[static_cast<std::size_t>(d)]; };
+  const auto is_one_of = [](const std::vector<ir::domain_id>& v, ir::domain_id d) {
+    return std::find(v.begin(), v.end(), d) != v.end();
+  };
+
+  // The book is the one-row Sum, the last output; the other two Sums are the legs.
+  const ir::domain_id dbook = p.domain_of(p.outputs.back());
+  ASSERT_TRUE(is_one_of(sums, dbook));
+  std::vector<ir::domain_id> legs;
+  for (ir::domain_id d : sums) {
+    if (d != dbook) legs.push_back(d);
+  }
+  ASSERT_EQ(legs.size(), 2u);
+  EXPECT_EQ(static_cast<std::size_t>(dom(legs[0]).rows + dom(legs[1]).rows), 2 * f.n_two_plus)
+      << "one Sum row per leg of a swap with T >= 2";
+  for (ir::domain_id d : legs) EXPECT_EQ(dom(d).reads.empty(), false);
+
+  // Every negation is `(−1) · <a swap difference>`; nothing else lives in those domains.
+  for (ir::domain_id d : negs) {
+    ASSERT_EQ(grp(d).steps.size(), 1u);
+    EXPECT_EQ(grp(d).steps[0].op, Op::Mul);
+    ASSERT_EQ(grp(d).steps[0].a.kind, ir::SlotKind::Literal);
+    EXPECT_EQ(bits(p.literals[static_cast<std::size_t>(grp(d).steps[0].a.index)]), bits(-1.0));
+    ASSERT_EQ(dom(d).reads.size(), 1u);
+    EXPECT_TRUE(is_one_of(subs, dom(d).reads[0]));
   }
 
-  // Swaps: side·(fixed − float). T >= 2 rows read the legs (level 1); T == 1 rows read coupons
-  // directly (level 0). Output i is the swap's row.
-  const ir::domain_id dsw2 = p.domains[static_cast<std::size_t>(swaps[0])].level == 1 ? swaps[0] : swaps[1];
-  const ir::domain_id dsw1 = dsw2 == swaps[0] ? swaps[1] : swaps[0];
-  const ir::Domain& sw2 = p.domains[static_cast<std::size_t>(dsw2)];
-  const ir::Domain& sw1 = p.domains[static_cast<std::size_t>(dsw1)];
-  EXPECT_EQ(static_cast<std::size_t>(sw2.rows), f.n_two_plus);
-  EXPECT_EQ(static_cast<std::size_t>(sw1.rows), f.n_one);
-  EXPECT_EQ(sw2.level, 1);
-  EXPECT_EQ(sw1.level, 0);
-  EXPECT_EQ(sw2.reads, std::vector<ir::domain_id>{dlegs});
-  EXPECT_EQ(sw1.reads, (std::vector<ir::domain_id>{dfix, dflt}));
-  const ir::Group& g2 = p.groups[static_cast<std::size_t>(dsw2)];
-  ASSERT_EQ(g2.steps.size(), 2u);
-  EXPECT_EQ(g2.steps[0].op, Op::Sub);
-  EXPECT_EQ(g2.steps[1].op, Op::Mul);
-  const ir::Gather& fixed_leg = gather_of(p, g2.steps[0].a);
-  const ir::Gather& float_leg = gather_of(p, g2.steps[0].b);
-  const ir::Column& side2 = column_of(p, g2.steps[1].a);
-  const ir::Column& side1 = column_of(p, p.groups[static_cast<std::size_t>(dsw1)].steps[1].a);
-  {
-    std::size_t r2 = 0, r1 = 0;
-    for (int i = 0; i < b.n_swaps; ++i) {
-      const auto s = static_cast<std::size_t>(i);
-      const ir::value_id out = p.outputs[s];
-      if (b.tenor[s] >= 2) {
-        EXPECT_EQ(out, ir::value_of(p, dsw2, static_cast<ir::row_id>(r2))) << i;
-        EXPECT_EQ(bits(side2.values[r2]), bits(static_cast<double>(b.side[s]))) << i;
-        // The two legs of swap i are consecutive rows of the legs domain.
-        EXPECT_EQ(p.row_of(fixed_leg.index[r2]) + 1, p.row_of(float_leg.index[r2])) << i;
-        ++r2;
-      } else {
-        EXPECT_EQ(out, ir::value_of(p, dsw1, static_cast<ir::row_id>(r1))) << i;
-        EXPECT_EQ(bits(side1.values[r1]), bits(static_cast<double>(b.side[s]))) << i;
-        ++r1;
-      }
+  // The members of the leg Sum row that holds value `v`.
+  const auto leg_members = [&](ir::value_id v) {
+    std::vector<ir::value_id> out;
+    const ir::domain_id d = p.domain_of(v);
+    EXPECT_TRUE(is_one_of(legs, d)) << "a T >= 2 swap reads a leg Sum";
+    if (!is_one_of(legs, d)) return out;
+    const ir::Segment& seg = p.segments[static_cast<std::size_t>(grp(d).steps[0].a.index)];
+    const auto r = static_cast<std::size_t>(p.row_of(v));
+    for (std::int32_t m = seg.offsets[r]; m < seg.offsets[r + 1]; ++m) out.push_back(seg.members[static_cast<std::size_t>(m)]);
+    return out;
+  };
+
+  std::size_t negated = 0, t1_rows = 0, t2_rows = 0;
+  for (int i = 0; i < b.n_swaps; ++i) {
+    const auto s = static_cast<std::size_t>(i);
+    const int T = b.tenor[s];
+    const bool seasoned = b.seasoned[s] != 0;
+    const ir::value_id out = p.outputs[s];
+
+    // side == −1: the output is the negation row, and its one gather reads the difference.
+    ir::value_id diff = out;
+    if (b.side[s] < 0) {
+      ASSERT_TRUE(is_one_of(negs, p.domain_of(out))) << "swap " << i << " has side −1";
+      const ir::Step& st = grp(p.domain_of(out)).steps[0];
+      diff = gather_of(p, st.b).index[static_cast<std::size_t>(p.row_of(out))];
+      ++negated;
+    }
+    const ir::domain_id dsub = p.domain_of(diff);
+    ASSERT_TRUE(is_one_of(subs, dsub)) << "swap " << i;
+    (T >= 2 ? t2_rows : t1_rows)++;
+
+    const ir::Group& gs = grp(dsub);
+    ASSERT_EQ(gs.steps.size(), 1u);
+    EXPECT_EQ(gs.steps[0].op, Op::Sub);
+    const auto r = static_cast<std::size_t>(p.row_of(diff));
+    const ir::value_id vfix = gather_of(p, gs.steps[0].a).index[r];
+    const ir::value_id vflt = gather_of(p, gs.steps[0].b).index[r];
+    if (T >= 2) {
+      const std::vector<ir::value_id> fixed_leg = leg_members(vfix);
+      const std::vector<ir::value_id> float_leg = leg_members(vflt);
+      ASSERT_EQ(fixed_leg.size(), static_cast<std::size_t>(T)) << "swap " << i;
+      ASSERT_EQ(float_leg.size(), static_cast<std::size_t>(T)) << "swap " << i;
+      for (ir::value_id m : fixed_leg) EXPECT_EQ(p.domain_of(m), dfix) << "swap " << i;
+      EXPECT_EQ(p.domain_of(float_leg[0]), seasoned ? dfix : dflt) << "swap " << i;
+      for (std::size_t j = 1; j < float_leg.size(); ++j) EXPECT_EQ(p.domain_of(float_leg[j]), dflt) << "swap " << i;
+    } else {
+      // T == 1: no leg Sum, the difference reads the two coupons directly.
+      EXPECT_EQ(p.domain_of(vfix), dfix) << "swap " << i;
+      EXPECT_EQ(p.domain_of(vflt), seasoned ? dfix : dflt) << "swap " << i;
     }
   }
+  EXPECT_EQ(negated, static_cast<std::size_t>(dom(negs[0]).rows + dom(negs[1]).rows))
+      << "the negation domains hold exactly the side == −1 swaps";
+  EXPECT_EQ(t1_rows, f.n_one);
+  EXPECT_EQ(t2_rows, f.n_two_plus);
+  EXPECT_EQ(static_cast<std::size_t>(dom(subs[0]).rows + dom(subs[1]).rows), f.n_one + f.n_two_plus);
 
-  // Book: one Sum over the 1,000 swap PVs in output order, level 2, the last output.
-  const ir::Domain& book = p.domains[static_cast<std::size_t>(dbook)];
-  EXPECT_EQ(book.rows, 1);
-  EXPECT_EQ(book.level, 2);
-  EXPECT_EQ(book.reads, (std::vector<ir::domain_id>{std::min(dsw1, dsw2), std::max(dsw1, dsw2)}));
-  const ir::Segment& bseg = p.segments[static_cast<std::size_t>(p.groups[static_cast<std::size_t>(dbook)].steps[0].a.index)];
+  // Book: one Sum over the 1,000 swap PVs in output order, the highest level, the last output.
+  EXPECT_EQ(dom(dbook).rows, 1);
+  const ir::Segment& bseg = p.segments[static_cast<std::size_t>(grp(dbook).steps[0].a.index)];
   ASSERT_EQ(bseg.members.size(), static_cast<std::size_t>(b.n_swaps));
   for (int i = 0; i < b.n_swaps; ++i) EXPECT_EQ(bseg.members[static_cast<std::size_t>(i)], p.outputs[static_cast<std::size_t>(i)]) << i;
   EXPECT_EQ(p.outputs.back(), ir::value_of(p, dbook, 0));
-  // Evaluation order follows the chain.
-  EXPECT_LT(dlegs, dsw2);
-  EXPECT_LT(dsw2, dbook);
-  EXPECT_LT(dsw1, dbook);
+  // Evaluation order follows the chain: every domain of the cycle is emitted after the ones it
+  // reads, and the book last of all.
+  for (ir::domain_id d : {legs[0], legs[1], subs[0], subs[1], negs[0], negs[1], dbook}) {
+    for (ir::domain_id src : dom(d).reads) EXPECT_LT(src, d) << "domain " << d << " reads " << src;
+    if (d != dbook) EXPECT_LT(d, dbook);
+    EXPECT_LE(dom(d).level, dom(dbook).level) << "the book is at the deepest level";
+  }
+  std::cout << "[  levels  ] legs " << dom(legs[0]).level << "/" << dom(legs[1]).level << " (" << dom(legs[0]).rows << "/"
+            << dom(legs[1]).rows << " rows), diffs " << dom(subs[0]).level << "/" << dom(subs[1]).level << ", negations "
+            << dom(negs[0]).level << "/" << dom(negs[1]).level << ", book " << dom(dbook).level << '\n';
 }

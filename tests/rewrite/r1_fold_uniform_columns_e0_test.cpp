@@ -6,6 +6,15 @@
 // row early shows up), verified with rewrite::verify_rule -- the same differential harness R0's own
 // rules use (rewrite/verifier.hpp), never a check written to know about either mutant's defect.
 // Then the M1 book and the Stage A tape: whichever domains the rule actually finds there.
+//
+// RE-ANCHORED 2026-09-27 (PRINCIPLES.md §5.2a case 3). R1's only non-synthetic source of work is
+// a domain R2 has just split (see the comment above the last two tests), and after the algebra
+// phase R2 FIRES NOWHERE on either real fixture -- 0 of the M1 book's 14 domains and 0 of the
+// Stage A tape's 73, where it used to find 3 of Stage A's 67 (r2_bucket_rows_e0_test.cpp's header
+// has the per-domain account of the two floors that now reject every candidate). So R1's measured
+// fire-count on a real fixture is 0 before R2 and 0 after it, on BOTH fixtures, and the
+// R1-after-R2 pairing D52 predicted is no longer observable anywhere. The synthetic gate above is
+// unaffected and still carries both of R1's own mutants.
 #include <gtest/gtest.h>
 
 #include <cstdint>
@@ -104,7 +113,9 @@ TEST(R1FoldUniformColumns, SyntheticDomainFoldsOnlyTheUniformColumnAndCatchesBot
 // own classification -- concretely, R2 bucket rows, whose own point is that every column of a
 // freshly-split bucket domain is uniform by construction (r2_bucket_rows.hpp's own header). Until
 // D65 that pairing was not observable end to end, because R2's own safety gate kept IT from firing
-// on either real fixture as well; the two tests at the bottom of this file now measure it.
+// on either real fixture as well; the two tests at the bottom of this file measure it, and as of
+// the algebra phase it is again not observable anywhere -- for the opposite reason, that R2 has no
+// shape left to match rather than that it is forbidden to match one.
 TEST(R1FoldUniformColumns, MatchesAndVerifiesOnTheM1Book) {
   const fixtures::Book book = fixtures::make_m1_book();
   const epykos::Tape tape = fixtures::record_m1(book);
@@ -148,12 +159,16 @@ TEST(R1FoldUniformColumns, MatchesAndVerifiesOnTheStageATape) {
 }
 
 // D53/D64's gate, and the point of D65: R1's fire-count on each named fixture ONCE R2 HAS RUN.
-// Fresh out of ir::infer it is 0 of the M1 book's 10 domains and 0 of the Stage A tape's 67 (the
-// two tests above). After one full R2 pass it is 0 of the M1 book's 10 (R2 finds no per-kind split
-// there at all: every one of its five bucketable domains has its kinds interleaved -- measured in
-// D65, e.g. domain 4 is 2,432 rows over 2 kinds in 1,243 contiguous runs) and 16 of the 80 domains
-// the Stage A tape becomes after its 3 splits. These two tests measure exactly that, rather than
-// arguing it from the rules' shapes.
+// Fresh out of ir::infer it is 0 of the M1 book's 14 domains and 0 of the Stage A tape's 73 (the
+// two tests above). After one full R2 pass it is STILL 0 on both, because R2 itself now reports no
+// site on either -- the second of these two tests used to assert the opposite and is re-stated
+// below.
+//
+// Before the algebra phase it read: 0 of the M1 book's 10 (R2 finds no per-kind split there at
+// all: every one of its five bucketable domains has its kinds interleaved -- measured in D65, e.g.
+// domain 4 is 2,432 rows over 2 kinds in 1,243 contiguous runs) and 16 of the 80 domains the Stage
+// A tape becomes after its 3 splits. These two tests measure whichever it is, rather than arguing
+// it from the rules' shapes, which is why the change shows up here as a number and not as a crash.
 TEST(R1FoldUniformColumns, DoesNotFireOnTheM1BookEvenAfterAnR2Pass) {
   const fixtures::Book book = fixtures::make_m1_book();
   const ir::Program program = ir::infer(fixtures::record_m1(book));
@@ -170,7 +185,13 @@ TEST(R1FoldUniformColumns, DoesNotFireOnTheM1BookEvenAfterAnR2Pass) {
   EXPECT_EQ(n_sites, 0u);
 }
 
-TEST(R1FoldUniformColumns, FiresOnTheStageATapeOnceR2HasSplitItsBucketDomains) {
+// Was `FiresOnTheStageATapeOnceR2HasSplitItsBucketDomains`, asserting `r2_sites > 0` ("R2 fires
+// nowhere on the Stage A tape: the pairing this test measures is gone") and then `sites > 0` over
+// the 80 domains the tape became. Both are now 0: the algebra removed the near-duplicate structure
+// R2 bucketed, so there is no split to fold after. The pass itself is still checked bit-exact,
+// which on a zero-site pass is the identity -- kept because it is what would catch an
+// apply_r2_everywhere that silently mangled the Program while finding nothing.
+TEST(R1FoldUniformColumns, DoesNotFireOnTheStageATapeEitherBecauseR2NoLongerSplitsIt) {
   const ir::Program program = ir::infer(epykos::test::stage_a_tape().tape);
   std::size_t r2_sites = 0;
   const ir::Program after_r2 = epykos::test::apply_r2_everywhere(program, r2_sites);
@@ -183,12 +204,17 @@ TEST(R1FoldUniformColumns, FiresOnTheStageATapeOnceR2HasSplitItsBucketDomains) {
   const std::vector<rewrite::MatchSite> sites = rule.match(after_r2, ir::PlanAnnotations{});
   std::cout << "[ r1 ] Stage A after " << r2_sites << " R2 split(s): " << sites.size() << " of " << after_r2.domains.size()
             << " domain(s) fold at least one column\n";
-  ASSERT_GT(r2_sites, 0u) << "R2 fires nowhere on the Stage A tape: the pairing this test measures is gone";
-  ASSERT_GT(sites.size(), 0u) << "R2 split " << r2_sites << " domain(s) and left R1 nothing to fold: the pairing D52 predicted is broken";
+  EXPECT_EQ(r2_sites, 0u) << "R2 fires on the Stage A tape again: re-measure R1's count here and "
+                             "restore the fold-after-split leg this test used to carry";
+  EXPECT_EQ(sites.size(), 0u) << "R1 folds a column with no R2 split ahead of it: re-measure";
 
-  const rewrite::Proposal p = rule.propose(after_r2, ir::PlanAnnotations{}, sites.front());
-  ASSERT_TRUE(p.is_structural());
-  ir::validate(*p.program);
-  const auto report = epykos::test::compare_at_record_point(after_r2, *p.program);
-  EXPECT_TRUE(report.passed) << "domain " << sites.front().domain << ": " << report.detail;
+  // Whatever R1 does find is still verified, so a mutant (or a rule set that starts splitting
+  // again) is checked here rather than merely counted.
+  for (const rewrite::MatchSite& site : sites) {
+    const rewrite::Proposal p = rule.propose(after_r2, ir::PlanAnnotations{}, site);
+    ASSERT_TRUE(p.is_structural());
+    ir::validate(*p.program);
+    const auto report = epykos::test::compare_at_record_point(after_r2, *p.program);
+    EXPECT_TRUE(report.passed) << "domain " << site.domain << ": " << report.detail;
+  }
 }

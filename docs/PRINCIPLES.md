@@ -351,7 +351,7 @@ that can say whether the engine is good, rather than whether it improved.
 
 Audited against the code 2026-09-27. Line counts measured, not estimated.
 
-### 7.1 Severable now — no execution path reaches it
+### 7.1 Quarantined now — no execution path reaches it
 
 | | engine | tests |
 |---|---|---|
@@ -361,13 +361,32 @@ Audited against the code 2026-09-27. Line counts measured, not estimated.
 
 **12,219 lines.** `grep -rn "optimise::" src/solver src/exec` returns nothing; the only references
 outside the subsystem are comments, the mutation registry's strings, and two measurement tools.
+Quarantined, not deleted — see below.
 
-**Procedure, and it matters that step 2 has a trigger:**
+**Quarantine behind a default-OFF build flag. Do NOT delete.** One commit; nothing that runs is
+touched; fully recoverable.
 
-1. **Quarantine** behind a default-OFF build flag. One commit; nothing that runs is touched; fully
-   recoverable if the algebra phase turns out to want the `Rule` interface or the verifier.
-2. **Delete** — **trigger: the algebra phase passing its first end-to-end gate.** A named condition,
-   not "later". Quarantine without a trigger is how a cull becomes more accretion.
+**Why not delete, corrected 2026-09-27 (owner: "Do we truly not need the e-graph at all? I thought
+this was how we search the space of optimisations after the algebra is fully optimised down").** He
+is right and the first draft of this section conflated two things:
+
+* **The e-graph as a TECHNIQUE has a future here.** Equality saturation exists for rewrites where
+  you do not know which direction is better, and the algebra phase has exactly such a residual after
+  canonicalisation: factoring against distribution (`a·b + a·c` ↔ `a·(b+c)`), reassociation, and
+  common subexpressions that only appear under a different association. Those are context-dependent
+  and phase-ordering-sensitive, which is the problem equality saturation solves and directed
+  rewriting does not. D75's own verdict was **"write the term e-graph, do not wrap one"**, and D73's
+  `include/epykos/algebra/egraph.hpp` is the design for it.
+* **The e-graph we HAVE is at the wrong altitude.** Its e-nodes are whole `ir::Program`s (D62
+  recorded this as its own known limitation), it sits below the pin, and its rule set is layout-only
+  by specification. Nothing in it is reusable for term-level algebra, which is why it is quarantined
+  rather than extended.
+
+So the sequence is: canonicalise and simplify by DIRECTED rewriting first, because that is linear and
+because every e-graph needs a canonical form underneath it anyway; then measure what bidirectional
+space is left; then build the term-level e-graph against that measurement rather than against a
+guess. Deleting the quarantined code is a decision to take **after** step 6, with that measurement in
+hand — not tonight, and not on a trigger set before the evidence exists.
 
 ### 7.2 The structures that caused it, for the record
 
@@ -394,7 +413,8 @@ Stated plainly so they are not cited again:
 * **D74's framing** of telescoping as creative telescoping (Gosper/Zeilberger). It is a first-order
   product recurrence with an elementary closed form.
 * **D75's argument** that no e-graph can find telescoping by AC-closing products. True, and the
-  wrong question — its measurements stand, the conclusion drawn from them does not.
+  wrong question — its measurements stand, the conclusion drawn from them does not. Note what D75
+  itself concluded and which this document does NOT retract: *write* the term e-graph. §7.1.
 * **D77's headline** of 2.82x, superseded by D78's in-process measurement: 1.49x at the same book
   size.
 * **"The tape is the right layer"**, the steer given to the P1 term-rewriting design. It is both
@@ -458,11 +478,15 @@ A decision entry that changes a principle lands in the same commit as the rewrit
 6. **Solve recurrences.** The closed-form rule kind on detected scans, product-of-consecutive-ratios
    first. Telescoping is the worked example and the end-to-end proof: it exercises every part of
    this contract and is worth 33x–132x (D78).
-7. **Delete §7.1.** The trigger in §7.1 step 2 fires here.
+7. **Measure the residual bidirectional space**, now that directed rewriting has taken everything
+   it can. Factoring against distribution, reassociation, association-dependent CSE. That
+   measurement is what a term-level e-graph (D73's `algebra/egraph.hpp`) is built against, and it
+   is also what decides whether the quarantined §7.1 code is deleted or partly revived.
 8. **Vector transcendentals**, under the §5.3 policy. Likely the largest remaining win below the pin
    and currently untried.
 9. **The arithmetic-dominated workload** of §6.
 10. **Tier 2 opens**, with `ExpMode::poly` as its first citizen.
 
-Steps 4–6 are the front half of the compiler. Steps 2, 3 and 7 are the cull. Nothing in this list
+Steps 4–6 are the front half of the compiler. Steps 3 and 7 are the cull, and step 7 is a
+measurement before it is a deletion. Nothing in this list
 rewrites anything below the pin, because nothing below the pin is implicated.

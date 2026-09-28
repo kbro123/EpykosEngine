@@ -6248,7 +6248,12 @@ Re-anchored to 1e-12 relative, matching the derivative assertion in the same loo
 number invented for the line. **The bound is reasoned, not measured, and the test says so**: there
 is no GCC on the development machine (`/usr/bin/g++` is Apple's clang shim), one contraction
 difference is about one ulp or 2.2e-16 relative, and 1e-12 leaves four decades of margin. The worst
-observed divergence is now PRINTED, so the measurement arrives from whichever platform runs it.
+observed divergence is now PRINTED — but note what that does and does not buy, because the first
+draft of this entry overstated it: `ctest` shows a test's stdout only when it FAILS, so a green GCC
+run does not report the number. The print is there for the moment the gate trips, not as a
+measurement channel. On Apple clang the divergence is exactly 0, which is why the `memcmp` ever
+passed here. **The GCC figure remains unmeasured**, and the bound stands on the contraction
+argument alone.
 
 Both failures are pre-existing and neither involves the algebra phase: the probes record with
 `standard_passes`, never `compile`.

@@ -6024,3 +6024,93 @@ the arithmetic was never what we were losing on: **what remains is purely solver
 frozen-Newton tick on a compiled W-cache at 12 us against our 88 us with the calibration Jacobian
 rebuilt on every call. §4 puts the solver out of scope and §4's named exception now carries the
 best-evidenced open item in the repository.
+
+## D82 — Where the calibration gap actually is: 87% of a warm solve is one Jacobian build, and neither closed form nor partial closed form will remove it (2026-09-28)
+
+D81 §7 measured the engine 1.7x slower than a specialist on cold calibration and 7–9x on warm, and
+showed the algebra phase moved that ratio by nothing after collapsing the residual slice 200x. This
+entry decomposes it, because `PRINCIPLES.md` §4's named exception should carry a mechanism and not
+just a ratio. **No code changed.**
+
+### 1. The decomposition
+
+25 instruments on 25 knots, no book, medians of 40, `d448afd70180`:
+
+| | |
+|---|---|
+| warm + chord policy | **74.9 us** — solves=1, residual_evals=5, jacobians=1, refreshed=0 |
+| warm, own Jacobian per iterate | 196.4 us — jacobians=3 |
+| ONE forward pass of the whole residual program | **2.1 us** |
+
+And against how far the quotes moved from the record point:
+
+| move | time | residual_evals | jacobians |
+|---|---|---|---|
+| 0 bp | 66.9 us | 1 | 1 |
+| 1 bp | 69.2 us | 4 | 1 |
+| 10 bp | 74.3 us | 6 | 1 |
+| 50 bp | 91.5 us | 10 | 1 |
+
+**At zero move, with a single 2.1 us residual evaluation, the call still costs 66.9 us.** So about
+**65 us is a fixed Jacobian-build-and-factorise cost paid on every call** whatever happens, and the
+other engine's entire warm tick is 9.3 us — our fixed cost alone is 7x their whole tick. The
+evaluation count is a real but second-order effect: it scales with seed distance, 1 to 10 over 0 to
+50 bp, worth about 2.1 us each.
+
+### 2. What `warm_start` and `chord` actually are today
+
+Neither carries anything between calls, and that is deliberate:
+
+* `rt.z[j] = options.warm_start ? rt.record_z[j] : blk.start[j]` — "warm" means **seeded from the
+  tape's RECORD POINT**, a constant baked in at recording, not from the last solve.
+* `chord` shares the **record-point** factorisation across every LANE of one call and refreshes per
+  lane on a contraction stall.
+
+So `ImplicitProgram::run` is a pure function of (state, B). That is why it is reproducible, and it
+is why `full_state()` and `report()` are "after the last run" accessors rather than accumulators.
+
+### 3. Two structural routes measured and DECLINED
+
+**Closed-form Jacobian — does not apply.** `adjoint::block_jacobian`'s `ClosedFormAffine` mode reads
+a Jacobian straight off the Program's tables, exactly and with no evaluation, when every residual
+output domain satisfies `rewrite::is_linmap_domain`. Measured on this block: **0 of 1 residual
+output domains are linmaps.** The residual is `sub(div(@0,@1),@2)` — a par rate minus a quote, where
+the par rate is a ratio and every discount factor is `exp` of an affine function of the knots.
+Nothing there is affine in the unknowns.
+
+This corrects a conflation worth recording, because it will recur: **the other engine's "W-cache" is
+not its Jacobian.** `PRIOR_ART.md` says what it is — "affine collapse recovers the hand-built
+W-cache, 857 rows = the compiled engine's DF times, exactly" — the constant INTERPOLATION matrix,
+knots to log-DFs. That part is affine, and `affine_collapse` already recovers it. Their 9.3 us tick
+is a separate thing: a frozen-Newton step reusing a factorised Jacobian from the previous solve.
+
+**Partial closed form — not worth building.** If the interpolation weights were read rather than
+differentiated through, the saving is bounded by that domain's share of the reverse pass. Measured:
+the one linmap domain, `affine(#0;%0)`, is 76 rows and **14.4% of the block's steps x rows**. So at
+most ~14% of 65 us, before the cost of multiplying by W. Against a cache that removes all of it.
+
+The Jacobian build is also already the efficient shape — `ResidualProgram::jacobian` is ONE batched
+reverse pass seeded with an identity block, not n_r forward passes. There is no algorithmic slack in
+how it is built. The only win available is **not building it**.
+
+### 4. What would close it, and the price
+
+An explicit, caller-held cache carrying the last solution and the last factorisation, passed to
+`run`. `nullptr` (the default) is today's behaviour bit-for-bit, so the uncached path remains the
+reference every gate verifies against. It generalises to any implicit block with **no eligibility
+test**, because the validity condition is numerical rather than structural — the Jacobian varies
+slowly between ticks — and the detection already exists: chord refreshes on contraction stall and
+`RunStats.refreshed` counts it. That is also what the other engine does ("LM warm solve only if the
+tick cannot converge").
+
+State belongs to the CALLER, not the program object: only the caller knows whether two successive
+calls are one problem ticking or two different problems, and an object that caches silently makes
+results depend on invisible history.
+
+**The price is unavoidable and is why §4 excluded the solver.** Reusing a stale factorisation changes
+the iteration path. Newton reaches the same root, so the answer is the same to within the solve
+tolerance — but not bit-identical, and the landing point becomes call-history dependent at ~1e-13.
+Reproducibility becomes "same build, same inputs, **same call sequence**". An explicit cache at least
+puts that history in the caller's code instead of hiding it.
+
+Estimated prize: 74.9 us to roughly 5–10 us, against their 9.3. Not taken here; §4 still excludes it.

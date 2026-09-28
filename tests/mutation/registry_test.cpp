@@ -93,6 +93,7 @@ const std::vector<std::string> documented = {
     "interpreter.duplicate_output_unwritten",
     "simplify.cancel_mismatched_operand",
     "simplify.telescope_wrong_endpoint",
+    "adjoint.div_aliased_targets",
 };
 
 std::vector<std::string> registry_names() {

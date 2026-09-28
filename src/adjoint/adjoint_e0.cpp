@@ -150,6 +150,34 @@ inline void acc_recip(size_t N, double* EPY_RESTRICT t, const double* EPY_RESTRI
 inline void acc_recip_wrong_sign(size_t N, double* EPY_RESTRICT t, const double* EPY_RESTRICT yb, const double* EPY_RESTRICT y) {
   for (size_t e = 0; e < N; ++e) t[e] += (yb[e] * y[e]) * y[e];
 }
+// Div when the two operands are THE SAME slot, so both contributions land in one buffer:
+// abar += (ybar/b)·(1 − y). At a == b that is y == 1 and the contribution is exactly zero, which
+// is the derivative of x/x and the thing this exists to get right.
+//
+// It is a separate function, dispatched at the CALL SITE, because `acc_div` declares `ta` and
+// `tb` EPY_RESTRICT. When they alias, that declaration is a lie and the behaviour is undefined —
+// so the aliased case cannot be detected inside it (the compiler may assume the test is false and
+// fold the branch away). GCC 13 exploits exactly that: measured in CI on tests/adjoint/
+// review_probe_test.cpp, d(x/x)/dx came back as 1/x = 1.4285714285714286 instead of 0, because
+// the second accumulation was written to a register the first had already superseded. Apple
+// clang 21 happened not to, which is why five months of local runs never saw it.
+//
+// `acc_div` is the ONLY adjoint kernel that takes two output accumulators at once — every other
+// op issues two separate calls, each with a single restrict output — so this is the one site.
+inline void acc_div_aliased(size_t N, double* EPY_RESTRICT t, const double* EPY_RESTRICT yb,
+                            const double* EPY_RESTRICT b, const double* EPY_RESTRICT y) {
+  // Mutant: only the numerator's contribution is accumulated and the denominator's `-(ybar/b)·y`
+  // is dropped. That reproduces the ORIGINAL defect's observable symptom -- d(x/x)/dx reads 1/x
+  // instead of 0 -- on every compiler, which a mutant of the DISPATCH could not: clang does not
+  // exploit the restrict UB, so sending aliased pointers to `acc_div` still answers correctly
+  // there, and such a mutant would survive the harness on clang while being caught on GCC.
+  if (mutant("adjoint.div_aliased_targets")) {
+    for (size_t e = 0; e < N; ++e) t[e] += yb[e] / b[e];
+    return;
+  }
+  for (size_t e = 0; e < N; ++e) t[e] += (yb[e] / b[e]) * (1.0 - y[e]);
+}
+
 // Div: abar += ybar/b; bbar -= (ybar/b)·y — the quotient t is computed once per element.
 inline void acc_div(size_t N, double* EPY_RESTRICT ta, double* EPY_RESTRICT tb, const double* EPY_RESTRICT yb,
                     const double* EPY_RESTRICT b, const double* EPY_RESTRICT y) {
@@ -388,7 +416,12 @@ struct Lanes {
             if (ta) acc_plus_mul(N, ta, yb, b);
             if (tb) acc_plus_mul(N, tb, yb, a);
             break;
-          case Op::Div: acc_div(N, ta, tb, yb, b, y); break;
+          // The operands may be the same slot; see acc_div_aliased. `ta` and `tb` are plain
+          // pointers here, so comparing them is well defined -- inside acc_div it would not be.
+          case Op::Div:
+            if (ta != nullptr && ta == tb) acc_div_aliased(N, ta, yb, b, y);
+            else acc_div(N, ta, tb, yb, b, y);
+            break;
           case Op::Neg:
             if (ta) acc_minus(N, ta, yb);
             break;

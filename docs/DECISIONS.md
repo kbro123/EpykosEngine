@@ -6176,3 +6176,63 @@ That bound is the reason the cache is an explicit object the caller holds rather
 inside `ImplicitProgram`: only the caller knows whether two successive calls are one problem ticking
 or two different problems, and an object that caches silently makes results depend on invisible
 history. Estimated prize: 74.9 us to roughly 5-10 us against their 9.3.
+
+## D84 — CI's first look at the rebuild finds a restrict-aliasing defect in the Div adjoint, GCC-only and pre-existing (2026-09-28)
+
+`integrate/rebuild` pushed for the first time. macOS/clang release and the GCC mutation job passed;
+**both GCC jobs that run the whole suite failed, 104 of 105**, on `adjoint_review_probe_test`.
+
+### 1. The defect
+
+`acc_div` is the only adjoint kernel that takes TWO output accumulators in one call, and both are
+declared `EPY_RESTRICT`:
+
+```
+inline void acc_div(size_t N, double* EPY_RESTRICT ta, double* EPY_RESTRICT tb, ...) {
+  for (...) { const double t = yb[e] / b[e];  ta[e] += t;  tb[e] -= t * y[e]; }
+```
+
+When a `Div`'s two operand slots alias, `ta == tb` and that declaration is a lie. GCC 13 is entitled
+to keep the two accumulations in separate registers and write back independently, losing one; Apple
+clang 21 happens not to. Measured: `d(x/x)/dx` returns `1/x = 1.4285714285714286` instead of 0 —
+the numerator's contribution only, the denominator's `−(ybar/b)·y` dropped.
+
+Every other adjoint op issues two separate calls, each with a single restrict output, so this is
+the unique site.
+
+### 2. Not caused by the rebuild, and why it took until now to see
+
+The probe records with `passes=false`, so `simplify` never runs on it — none of D81's work is
+involved. The defect is as old as `acc_div`. It had never met GCC because the probe was written for
+M2's review, never landed, and only reached the tree when D80 consolidated twelve branches. **The
+first CI run after that consolidation found it.** That is the whole argument for pushing.
+
+### 3. The fix, and the part that is easy to get wrong
+
+Dispatched at the CALL SITE, not inside `acc_div`. Testing `ta == tb` inside a function whose
+parameters are already `restrict` is itself unsound — the compiler may assume the test is false and
+fold the branch away. At the call site they are plain `double*` and the comparison is well defined.
+`acc_div_aliased` then accumulates both contributions into the one buffer:
+`t[e] += (ybar/b)·(1 − y)`, which at `a == b` is `y == 1` and therefore exactly zero.
+
+### 4. The mutant was wrong the first time, and the reason generalises
+
+`adjoint.div_aliased_targets` first mutated the DISPATCH — send aliased pointers to `acc_div`
+anyway. That is only catchable on a compiler that exploits the UB: it survived on clang while being
+caught on GCC, which would have made `scripts/mutation_test.sh` red on one platform and green on
+the other. **A mutant whose detection depends on undefined behaviour is not a mutant.** Re-aimed at
+the aliased kernel's ARITHMETIC — drop the `(1 − y)` factor — which reproduces the same observable
+symptom deterministically everywhere. Verified caught on clang with the baseline green.
+
+### 5. Reachability, stated rather than assumed
+
+`simplify`'s `div(x, x) -> 1` means a RECORDING can no longer produce an aliased Div. But
+`ir::validate` accepts one — checked — so the IR contract permits it and any future rewrite could
+emit one. The engine is made correct for what its own contract allows rather than for what today's
+recorder happens to emit.
+
+The new gate is `tests/adjoint/div_aliased_verify_test.cpp`, named to match
+`scripts/mutation_test.sh`'s GATE_REGEX. The probe that FOUND the defect does not match it, and
+would have left the mutant with no catcher — the same trap D80 records walking into.
+
+`ctest` 131/131, mutation harness: every mutant caught.

@@ -6235,4 +6235,22 @@ The new gate is `tests/adjoint/div_aliased_verify_test.cpp`, named to match
 `scripts/mutation_test.sh`'s GATE_REGEX. The probe that FOUND the defect does not match it, and
 would have left the mutant with no catcher — the same trap D80 records walking into.
 
+### 6. And a second one behind it, in the same probe
+
+With the aliased Div fixed, GCC's `reference` job went green and `release` did not: the same file's
+`CurveAtKnotsAndFlatRegions` compares the adjoint engine's forward value against the templated
+maths instantiated on `Dual<nk>` with a bitwise `memcmp`. That is **§5.2a case 2, not case 1** —
+two different instantiations of one source, which D46 records GCC may contract differently under
+`release`. The `memcmp` held on Apple clang and under `-ffp-contract=off` and was a cross-compiler
+accident either way.
+
+Re-anchored to 1e-12 relative, matching the derivative assertion in the same loop rather than a
+number invented for the line. **The bound is reasoned, not measured, and the test says so**: there
+is no GCC on the development machine (`/usr/bin/g++` is Apple's clang shim), one contraction
+difference is about one ulp or 2.2e-16 relative, and 1e-12 leaves four decades of margin. The worst
+observed divergence is now PRINTED, so the measurement arrives from whichever platform runs it.
+
+Both failures are pre-existing and neither involves the algebra phase: the probes record with
+`standard_passes`, never `compile`.
+
 `ctest` 131/131, mutation harness: every mutant caught.

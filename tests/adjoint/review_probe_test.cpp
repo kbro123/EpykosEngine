@@ -186,8 +186,24 @@ TEST(ReviewProbe, CurveAtKnotsAndFlatRegions) {
     const std::vector<Dual<nk>> dout = curve_shapes<Dual<nk>>(zd.data());
     ASSERT_EQ(dout.size(), J.size());
     std::size_t nonzero = 0;
+    double worst_fwd = 0.0;
     for (std::size_t o = 0; o < dout.size(); ++o) {
-      EXPECT_EQ(std::memcmp(&fwd[o], &dout[o].v, sizeof(double)), 0) << "forward, output " << o << ": " << fwd[o] << " vs " << dout[o].v;
+      // PRINCIPLES.md §5.2a CASE 2, not case 1. The two sides are the ADJOINT ENGINE over the
+      // inferred Program and the templated maths instantiated on `Dual<nk>` — two different
+      // instantiations of the same source, which D46 records GCC may contract differently under
+      // `release`. A bitwise `memcmp` here was therefore a cross-compiler accident: it held on
+      // Apple clang and on `-ffp-contract=off`, and failed on GCC 13 `release` the first time CI
+      // ever saw this probe (D84 §6).
+      //
+      // The bound is 1e-12 relative, matching the derivative assertion below rather than being
+      // invented for this line. It is REASONED, not measured: one contraction difference is about
+      // one ulp, ~2.2e-16 relative, so 1e-12 is four decades of margin — it cannot flake on
+      // legitimate rounding and still catches a genuinely wrong forward value. The actual worst
+      // divergence is PRINTED, so the real number arrives from whichever platform runs it.
+      const double scale = std::max(std::fabs(dout[o].v), 1e-3);
+      worst_fwd = std::max(worst_fwd, std::fabs(fwd[o] - dout[o].v) / scale);
+      EXPECT_LE(std::fabs(fwd[o] - dout[o].v), 1e-12 * scale)
+          << "forward, output " << o << ": " << fwd[o] << " vs " << dout[o].v;
       for (int k = 0; k < nk; ++k) {
         const double a = J[o][static_cast<std::size_t>(k)];
         const double d = dout[o].d[static_cast<std::size_t>(k)];
@@ -197,7 +213,9 @@ TEST(ReviewProbe, CurveAtKnotsAndFlatRegions) {
             << "), knot " << k << ": adjoint " << a << " vs dual " << d;
       }
     }
-    std::cout << "nonzero Jacobian entries: " << nonzero << " of " << dout.size() * nk << '\n';
+    std::cout << "nonzero Jacobian entries: " << nonzero << " of " << dout.size() * nk
+              << "; worst forward divergence from the Dual instantiation " << worst_fwd
+              << " relative (gate 1e-12)\n";
   }
 }
 

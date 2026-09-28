@@ -197,23 +197,53 @@ geometric, arithmetic, linear with constant coefficients. That list is the work 
 
 ---
 
-## 4. Scope: expression, then algorithm. Not the solver, yet
+## 4. Scope: expression, then algorithm, and now one part of the solver
 
 **In scope.** The arithmetic the engine was handed, and the algorithmic form of how a quantity is
 obtained: a closed-form Jacobian for a linear block instead of a numerical one; the implicit
 function theorem instead of bump-and-recalibrate.
 
-**Out of scope for now.** The solver itself — Jacobian policy, iteration strategy, convergence
-criteria. A solver change can alter convergence rather than a value, which is a different and harder
-verification problem. Revisit once tier 1 is proven.
+### 4a. The solver exclusion, partly lifted (owner, 2026-09-28)
 
-**Named exception, on evidence.** D78 measured warm recalibration at **7.1x slower than a
-specialist** — 114 µs against 16 µs, flat in book size, with our calibration Jacobian rebuilt on
-every call. That is a pure engine-against-engine loss and the clearest single target in the
-repository. It is solver work and therefore excluded here. Recorded so the exclusion is a decision
-and not an oversight.
+This section said "out of scope for now: the solver itself — Jacobian policy, iteration strategy,
+convergence criteria… **revisit once tier 1 is proven**". Tier 1 is proven (D81), so the condition
+the exclusion set for itself has fired, and the owner has lifted it for one part.
 
----
+**Now in scope: Jacobian reuse and warm-start state.** A solve may be seeded from a previous
+solution and may reuse a previously factorised Jacobian, refreshing when contraction stalls.
+
+**Still out of scope: iteration strategy and convergence criteria.** Neither is touched. The
+narrowing is deliberate — the measured prize needs only the first.
+
+**Why, measured (D82).** Of a 74.9 us warm solve, **about 65 us is a Jacobian build paid on every
+call** whatever else happens: at zero quote move, with a single 2.1 us residual evaluation, the call
+still costs 66.9 us. The other engine's entire warm tick is 9.3 us, so our fixed Jacobian cost alone
+is seven times their whole tick. It is the largest measured loss in the repository and the algebra
+phase moved it by nothing — collapsing the residual slice 200x left the ratio where it was, which is
+what proves the gap is not arithmetic.
+
+Two structural alternatives were measured and declined rather than assumed: a closed-form Jacobian
+does not apply (0 of 1 residual output domains satisfy `is_linmap_domain` — the residual is a par
+rate minus a quote and every discount factor is `exp` of an affine function), and a partial closed
+form is bounded at 14.4% of the block's work against a cache that removes 100% of it.
+
+**The verification obligation this section was protecting.** The old text's reason for excluding the
+solver was exact and still stands: *a solver change can alter convergence rather than a value, which
+is a different and harder verification problem.* Lifting the exclusion means discharging it, so the
+gate is stated here rather than left to whoever writes the code:
+
+1. **The uncached path stays the reference and stays the default.** Reuse is opt-in, carried in an
+   explicit caller-held object; passing nothing must be today's behaviour bit-for-bit.
+2. **The cached path lands within the block's own solve tolerance of the uncached path**, on every
+   lane, over a ball of quote moves large enough to force a refresh. That is the differential test,
+   and the uncached path is what it differs against.
+3. **`RunStats.refreshed` becomes load-bearing and is reported**: a cache that never refreshes is
+   indistinguishable from one that never goes stale until it silently fails to converge.
+4. **A mutant for "never refresh on stall"**, which must show as non-convergence on a large move.
+
+**The price, stated where it cannot be missed.** Reusing a stale factorisation changes the iteration
+path. Newton reaches the same root, so the answer is the same *to within the solve tolerance* — and
+not bit-identical. §5.2's reproducibility becomes conditional: see there.
 
 ## 5. The error contract
 
@@ -260,7 +290,15 @@ Two things follow that matter in practice.
 **Reproducible ≠ identical to the naive evaluation.** Above the pin is a deterministic pure function
 of the tape: same recording in, same collapsed tape out, on every machine. Below the pin is
 bit-identical. So the composed pipeline is **bit-reproducible** — same build, same inputs, same
-bits, every run. What is given up is agreement with the *unoptimised* form, which pinned one
+bits, every run.
+
+**One conditional exception, and it is the whole price of §4a.** When a caller passes a solve cache,
+the solve is seeded from, and reuses a factorisation from, whatever that cache last held — so the
+iterate path, and therefore the landing point within the solve tolerance, depends on the SEQUENCE of
+calls. Reproducibility there reads *same build, same inputs, **same call sequence***. It is bounded:
+it applies only when a cache is passed, only to the solved unknowns, and only at the solve
+tolerance. Passing nothing leaves every word of the paragraph above intact, which is why the cache
+is an explicit object the caller holds rather than state hidden in the program. What is given up is agreement with the *unoptimised* form, which pinned one
 arbitrary rounding sequence as though it were the answer. Reproducibility is what people mean when
 they ask for bit-identity, and it is kept.
 
@@ -548,10 +586,12 @@ arithmetic was never what that gap was made of, and what is left is solver algor
 
 What is next, in order:
 
-8. **The solver gap**, which §4 excludes and §4's named exception now documents with the best
-   evidence in the repository: their frozen-Newton tick on a compiled W-cache at 12 us against our
-   88 us with the calibration Jacobian rebuilt on every call. It is the largest measured loss left
-   and it is out of scope until tier 1 is proven; this is the entry that should reopen that.
+8. **The solver gap — IN PROGRESS.** §4a lifted the exclusion on 2026-09-28 (tier 1 being proven
+   was the condition §4 set for itself) for Jacobian reuse and warm-start state, and only those.
+   D82 decomposed it: ~65 us of a 74.9 us warm solve is one Jacobian build paid every call, against
+   a 9.3 us tick on the other side. The shape is an explicit caller-held cache, opt-in, with the
+   uncached path staying the default and the reference. §4a states the four-part gate that has to
+   come with it, and §5.2 states the price.
 9. **Vector transcendentals**, under the §5.3 policy. 81 of the pinned tape's 1,183 nodes are
    `exp`, and it has never been tried.
 10. **The arithmetic-dominated workload** of §6 — and note it is now also the only workload that

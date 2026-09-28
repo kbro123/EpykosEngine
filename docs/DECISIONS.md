@@ -6114,3 +6114,65 @@ Reproducibility becomes "same build, same inputs, **same call sequence**". An ex
 puts that history in the caller's code instead of hiding it.
 
 Estimated prize: 74.9 us to roughly 5–10 us, against their 9.3. Not taken here; §4 still excludes it.
+
+## D83 — §4's solver exclusion is partly lifted: Jacobian reuse and warm-start state come into scope (2026-09-28)
+
+Owner, asked to choose between pushing for CI evidence and reopening the solver: **both**. This is
+the second. It is a contract change, so it lands with the in-place rewrite of `PRINCIPLES.md` §4,
+§5.2 and §10 step 8, per §9. **No code changed.**
+
+### 1. The condition the exclusion set for itself has fired
+
+§4 read: "out of scope for now: the solver itself — Jacobian policy, iteration strategy, convergence
+criteria… **revisit once tier 1 is proven**". D81 proved tier 1 — the engine derives telescoping and
+the algebra phase is end to end. So this is not an override of the exclusion; it is the exclusion
+expiring on its own terms.
+
+### 2. What is lifted, and what is not
+
+**In scope now:** Jacobian reuse and warm-start state. A solve may be seeded from a previous
+solution and may reuse a previously factorised Jacobian, refreshing when contraction stalls.
+
+**Still out:** iteration strategy and convergence criteria. The narrowing is deliberate — D82's
+measured prize needs only the first, and the parsimonious reopening is the smallest one that
+collects it.
+
+### 3. Why, and what was declined first
+
+D82: of a 74.9 us warm solve, **~65 us is a Jacobian build paid on every call**. At zero quote move,
+with one 2.1 us residual evaluation, the call still costs 66.9 us. The other engine's whole warm
+tick is 9.3 us. It is the largest measured loss in the repository, and the algebra phase moved it by
+nothing — collapsing the residual slice 200x left the ratio unchanged, which is the proof that the
+gap is not arithmetic.
+
+Two structural alternatives were measured and declined rather than assumed, and that matters because
+both looked right on paper:
+
+* **Closed-form Jacobian: does not apply.** 0 of 1 residual output domains satisfy
+  `is_linmap_domain`; the residual is `sub(div(@0,@1),@2)` and every discount factor is `exp` of an
+  affine function of the knots.
+* **Partial closed form: bounded at 14.4%** of the block's steps x rows, against a cache that
+  removes 100%. The Jacobian build is also already ONE batched reverse pass, not n_r forward
+  passes, so there is no algorithmic slack in how it is built. The only win is not building it.
+
+### 4. The obligation that comes with it
+
+The old text's reason for the exclusion was exact and is not withdrawn: *a solver change can alter
+convergence rather than a value, which is a different and harder verification problem.* Lifting the
+exclusion means discharging it, so §4a states the gate rather than leaving it to whoever writes the
+code: the uncached path stays default and reference; the cached path must land within the block's
+own solve tolerance of it on every lane over a ball large enough to force a refresh;
+`RunStats.refreshed` becomes load-bearing and reported; and a mutant for "never refresh on stall"
+must show as non-convergence.
+
+### 5. The price, which is a real weakening and is written where it cannot be missed
+
+Reusing a stale factorisation changes the iteration path, so the landing point within the solve
+tolerance depends on the SEQUENCE of calls. §5.2's reproducibility becomes conditional: *same build,
+same inputs, **same call sequence***, and only when a cache is passed, only for the solved unknowns,
+only at the solve tolerance. Passing nothing leaves it untouched.
+
+That bound is the reason the cache is an explicit object the caller holds rather than state hidden
+inside `ImplicitProgram`: only the caller knows whether two successive calls are one problem ticking
+or two different problems, and an object that caches silently makes results depend on invisible
+history. Estimated prize: 74.9 us to roughly 5-10 us against their 9.3.

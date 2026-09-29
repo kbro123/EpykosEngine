@@ -1,0 +1,84 @@
+{
+  "meta": {
+    "title": "Currencies, day-count names and central-bank meeting schedules (USD, EUR)",
+    "description": "Currencies point at their settlement calendar, discount index and default instrument. Day counts are CODE (include/epykos/conventions/daycount.hpp); the names listed here are documentation and are checked against the implemented set at load. Central-bank meeting dates are data for curve knot placement (G5).",
+    "sources": [
+      "2006 ISDA Definitions section 4.16 (day count fractions); 2021 ISDA Interest Rate Derivatives Definitions",
+      "Federal Reserve, FOMC Meeting calendars (federalreserve.gov/monetarypolicy/fomccalendars.htm, read 2026-09-23)",
+      "ECB, Governing Council monetary policy meeting calendar (ecb.europa.eu/press/calendars/mgcgc, read 2026-09-23)"
+    ],
+    "imported_from": {
+      "imported_from": "SwapEngine/conventions/conventions.json (D37 data import), currencies.USD, currencies.EUR, day_counts, cb_schedules.USD, cb_schedules.EUR (as_of 2026-09-08)",
+      "imported_on": "2026-09-23",
+      "cross_check": "partial",
+      "notes": [
+        "cb_schedules: USD 2026 Jan-Sep and 2027 Jan-Sep verified against federalreserve.gov on 2026-09-23; USD 2026-10-28, 2026-12-09, 2027-10-27, 2027-12-08 imported, UNVERIFIED by the fetch. EUR 2026-10-29, 2026-12-17 and all 2027 dates verified against ecb.europa.eu (decision day = second day of the two-day meeting); EUR 2026 Jan-Sep imported (past meetings), UNVERIFIED by the fetch."
+      ]
+    }
+  },
+  "currencies": {
+    "USD": {
+      "name": "US dollar",
+      "minor_units": 2,
+      "settlement_calendar": "USD-SOFR-SWAP",
+      "discount_index": "USD-SOFR",
+      "default_instrument": "USD-SOFR-OIS",
+      "sources": {
+        "discount_index": "SOFR discounting for cleared USD swaps since 2020-10-16 (CME / LCH discounting switch) - background, UNVERIFIED by fetch; PROBLEM.md Stage A: SOFR OIS is the USD discount curve",
+        "settlement_calendar": "ISDA MPN 2022-04-08 (USD-SOFR-SWAP joint calendar)"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json currencies.USD", "imported_on": "2026-09-23", "imported_key": "currencies.USD", "cross_check": "agree",
+        "notes": ["SwapEngine settlement_calendar 'USD' (SIFMA) replaced by the joint SOFR swap calendar for swap dates; repo_day_count not imported (no bonds at Stage A)"]}
+    },
+    "EUR": {
+      "name": "Euro",
+      "minor_units": 2,
+      "settlement_calendar": "EUR-TARGET",
+      "discount_index": "EUR-ESTR",
+      "default_instrument": "EUR-ESTR-OIS",
+      "sources": {
+        "discount_index": "€STR discounting for cleared EUR swaps since 2020-07-27 (CCP discounting switch) - background, UNVERIFIED by fetch; PROBLEM.md Stage A: €STR OIS is the EUR discount curve",
+        "settlement_calendar": "ECB TARGET closing days (calendar EUR-TARGET)"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json currencies.EUR", "imported_on": "2026-09-23", "imported_key": "currencies.EUR", "cross_check": "agree"}
+    }
+  },
+  "day_counts": {
+    "ACT/360": {
+      "description": "Actual/360 (money market): actual days / 360.",
+      "sources": {"definition": "2006 ISDA Definitions 4.16(e) 'Actual/360'"}
+    },
+    "ACT/365F": {
+      "description": "Actual/365 (Fixed): actual days / 365.",
+      "sources": {"definition": "2006 ISDA Definitions 4.16(d) 'Actual/365 (Fixed)'"}
+    },
+    "30/360": {
+      "description": "30/360 (Bond Basis, '30U/360'): D1 = 30 if D1 = 31; D2 = 30 if D2 = 31 and D1 is 30 or 31. The EUR IRS fixed-leg basis (CFTC MAT, Bloomberg SEF, Strata THIRTY_U_360).",
+      "sources": {"definition": "2006 ISDA Definitions 4.16(f) '30/360' or 'Bond Basis'"}
+    },
+    "30E/360": {
+      "description": "30E/360 (Eurobond Basis): D1 = 30 if D1 = 31; D2 = 30 if D2 = 31. SwapEngine's EUR fixed-leg basis (recorded disagreement).",
+      "sources": {"definition": "2006 ISDA Definitions 4.16(g) '30E/360' or 'Eurobond Basis'"}
+    },
+    "ACT/ACT ISDA": {
+      "description": "Actual/Actual (ISDA): days in a leap year / 366 plus days in a non-leap year / 365.",
+      "sources": {"definition": "2006 ISDA Definitions 4.16(b) 'Actual/Actual' or 'Actual/Actual (ISDA)'"}
+    }
+  },
+  "cb_schedules": {
+    "USD": {
+      "bank": "FOMC",
+      "source": "federalreserve.gov/monetarypolicy/fomccalendars.htm (decision day of each two-day meeting; 'Each meeting date is tentative until confirmed at the meeting immediately preceding it'); 2026-01-28 .. 2027-09-15 verified 2026-09-23, the Oct/Dec dates imported from SwapEngine as_of 2026-09-08 (UNVERIFIED)",
+      "as_of": "2026-09-23",
+      "meetings": ["2026-01-28", "2026-03-18", "2026-04-29", "2026-06-17", "2026-07-29", "2026-09-16", "2026-10-28", "2026-12-09",
+                   "2027-01-27", "2027-03-17", "2027-04-28", "2027-06-09", "2027-07-28", "2027-09-15", "2027-10-27", "2027-12-08"]
+    },
+    "EUR": {
+      "bank": "ECB Governing Council",
+      "source": "ecb.europa.eu/press/calendars/mgcgc (monetary policy meetings; decision day = second day); 2026-10-29 onward verified 2026-09-23, the 2026 Jan-Sep dates imported from SwapEngine as_of 2026-09-08 (past meetings, UNVERIFIED)",
+      "as_of": "2026-09-23",
+      "meetings": ["2026-01-29", "2026-03-19", "2026-04-30", "2026-06-11", "2026-07-23", "2026-09-10", "2026-10-29", "2026-12-17",
+                   "2027-02-04", "2027-03-18", "2027-04-29", "2027-06-10", "2027-07-22", "2027-09-09", "2027-10-28", "2027-12-16"]
+    }
+  }
+}

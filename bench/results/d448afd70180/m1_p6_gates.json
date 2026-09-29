@@ -1,0 +1,22 @@
+{
+ "preset": "reference (-ffp-contract=off in every TU)",
+ "engine_commit": "b32182a",
+ "roundtrip_ok": true,
+ "e0_ok": true,
+ "hand_e1_ok": true,
+ "supplementary_ok": {
+  "hand_m1_hand_e0_test": true,
+  "exec_interp_e0_test": true,
+  "ctest_reference": true,
+  "ctest_release": true
+ },
+ "evidence": {
+  "ir_roundtrip_test": "exit 0; [  PASSED  ] 5 tests.",
+  "exec_m1_interp_e0_test": "exit 0; [  PASSED  ] 5 tests.",
+  "hand_m1_hand_test": "exit 0; [  PASSED  ] 9 tests.",
+  "hand_m1_hand_e0_test": "exit 0; [  PASSED  ] 4 tests.",
+  "exec_interp_e0_test": "exit 0; [  PASSED  ] 7 tests.",
+  "ctest_reference": "100% tests passed out of 24",
+  "ctest_release": "100% tests passed out of 24"
+ }
+}

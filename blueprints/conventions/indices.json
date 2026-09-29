@@ -1,0 +1,92 @@
+{
+  "meta": {
+    "title": "Index definitions: SOFR, €STR, EURIBOR 3M / 6M",
+    "description": "Name, currency, kind (overnight | term), day count, fixing calendar, fixing / publication lag and the publication convention of each index. Interpreted by include/epykos/conventions/registry.hpp; the research is docs/G4_BUNDLE.md sections USD.2 and EUR.2.",
+    "sources": [
+      "FRBNY, Secured Overnight Financing Rate Data / Additional Information about Reference Rates (publication at approximately 8:00 a.m. ET on the next business day; actual/360)",
+      "ECB, Euro short-term rate (€STR) page and methodology (published each TARGET2 business day for the previous business day's transactions, three decimals)",
+      "EMMI, EURIBOR (Act/360 the only official day count since 2018-12-03; tenors 1W, 1M, 3M, 6M, 12M)",
+      "Bloomberg SEF EUR EURIBOR swap submission 2013-09-30: 'The first Euribor Fixing Date is 2 Target business days prior to the Effective Date'",
+      "LCH Product Eligibility EUR (Oct 2019): EURIBOR fixing T-2, €STR fixing T+1"
+    ],
+    "imported_from": {
+      "imported_from": "SwapEngine/conventions/conventions.json (D37 data import), indices.USD-SOFR, indices.EUR-ESTR, indices.EUR-EURIBOR-3M, indices.EUR-EURIBOR-6M",
+      "imported_on": "2026-09-23",
+      "cross_check": "agree",
+      "notes": ["Fed Funds (USD-FEDFUNDS) is not imported: Stage A has no Fed Funds instrument (PROBLEM.md section 4)."]
+    }
+  },
+  "indices": {
+    "USD-SOFR": {
+      "description": "Secured Overnight Financing Rate, administered by the Federal Reserve Bank of New York.",
+      "currency": "USD",
+      "type": "overnight",
+      "day_count": "ACT/360",
+      "fixing_calendar": "USD-SOFR",
+      "publication_lag": 1,
+      "publication": "approximately 8:00 a.m. ET on the next U.S. Government Securities Business Day, for the previous business day (T+1); rounded to the nearest basis point",
+      "administrator": "Federal Reserve Bank of New York",
+      "sources": {
+        "day_count": "FRBNY Additional Information: 'actual number of calendar days, but assuming a 360-day year'",
+        "publication": "FRBNY SOFR page: 'Each business day, the New York Fed publishes the SOFR on the New York Fed website at approximately 8:00 a.m. ET'; ISDA 2026-03-27 guidance: 'SOFR is published on a T+1 basis and the rate for a given day is published at 8:00 a.m., New York City time, on the following U.S. Government Securities Business Day'",
+        "fixing_calendar": "FRBNY Additional Information: published every business day including SIFMA early closes, not on or for SIFMA full closes; Good Friday 2026 exception per NY Fed operating policy 260312a (calendar USD-SOFR)",
+        "rounding": "FRBNY Additional Information: volume-weighted median 'rounded to the nearest basis point'"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json indices.USD-SOFR", "imported_on": "2026-09-23", "imported_key": "indices.USD-SOFR", "cross_check": "agree"}
+    },
+    "EUR-ESTR": {
+      "description": "Euro short-term rate, administered by the European Central Bank.",
+      "currency": "EUR",
+      "type": "overnight",
+      "day_count": "ACT/360",
+      "fixing_calendar": "EUR-TARGET",
+      "publication_lag": 1,
+      "publication": "08:00 CET on each TARGET2 business day, for the previous TARGET2 business day (T+1); three decimal places (the March 2021 methodology text says 'no later than 09:00 CET')",
+      "administrator": "European Central Bank",
+      "sources": {
+        "publication": "ECB €STR page: 'published on each TARGET2 business day based on transactions conducted and settled on the previous TARGET2 business day' (rate shown at 08:00 on 2026-09-23 for reference date 2026-09-22); ECB €STR methodology and policies: 'The ECB publishes the euro short-term rate with three decimal places no later than 09:00 CET on the next TARGET2 business day'",
+        "day_count": "ACT/360: TP ICAP EUR OIS MET template (2021 ISDA Definitions), 'Floating Rate Day Count Fraction: ACT/360'; OpenGamma Strata EUR_FIXED_1Y_ESTR_OIS 'Both legs ... use day count Act/360'",
+        "fixing_calendar": "ECB methodology: 'The rate is published for each TARGET2 business day'",
+        "rounding": "ECB methodology: 'volume-weighted trimmed mean rounded to the third decimal'"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json indices.EUR-ESTR", "imported_on": "2026-09-23", "imported_key": "indices.EUR-ESTR", "cross_check": "agree"}
+    },
+    "EUR-EURIBOR-3M": {
+      "description": "3-month EURIBOR, administered by EMMI (hybrid methodology).",
+      "currency": "EUR",
+      "type": "term",
+      "tenor": "3M",
+      "day_count": "ACT/360",
+      "fixing_calendar": "EUR-TARGET",
+      "fixing_lag": 2,
+      "publication": "11:00 CET on each TARGET business day, for value two TARGET days later",
+      "administrator": "European Money Markets Institute",
+      "sources": {
+        "day_count": "EMMI press release 2018-11-28: 'Euribor under its official Act/360 day count convention is not affected ... and will continue to be published' (Act/365 and 30/360 variants discontinued 2019-03-31)",
+        "fixing_lag": "Bloomberg SEF EUR EURIBOR swap submission (2013-09-30): 'The first Euribor Fixing Date is 2 Target business days prior to the Effective Date'; LCH Product Eligibility EUR (2019): EURIBOR 'Fixing T-2'",
+        "fixing_calendar": "Bloomberg SEF submission: 'Fixing Calendar: Target'",
+        "publication": "EMMI Euribor methodology: publication at 11:00 CET - UNVERIFIED by fetch (harvested EMMI methodology text does not state the time in the extracted pages)",
+        "tenors": "EMMI 2018-11-28: 2W, 2M and 9M tenors ceased 2018-12-03; remaining 1W, 1M, 3M, 6M, 12M"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json indices.EUR-EURIBOR-3M", "imported_on": "2026-09-23", "imported_key": "indices.EUR-EURIBOR-3M", "cross_check": "agree"}
+    },
+    "EUR-EURIBOR-6M": {
+      "description": "6-month EURIBOR, administered by EMMI (hybrid methodology).",
+      "currency": "EUR",
+      "type": "term",
+      "tenor": "6M",
+      "day_count": "ACT/360",
+      "fixing_calendar": "EUR-TARGET",
+      "fixing_lag": 2,
+      "publication": "11:00 CET on each TARGET business day, for value two TARGET days later",
+      "administrator": "European Money Markets Institute",
+      "sources": {
+        "day_count": "as EUR-EURIBOR-3M (EMMI 2018-11-28)",
+        "fixing_lag": "as EUR-EURIBOR-3M (Bloomberg SEF 2013-09-30; LCH 2019)",
+        "fixing_calendar": "as EUR-EURIBOR-3M",
+        "publication": "as EUR-EURIBOR-3M (UNVERIFIED time)"
+      },
+      "provenance": {"imported_from": "SwapEngine/conventions/conventions.json indices.EUR-EURIBOR-6M", "imported_on": "2026-09-23", "imported_key": "indices.EUR-EURIBOR-6M", "cross_check": "agree"}
+    }
+  }
+}

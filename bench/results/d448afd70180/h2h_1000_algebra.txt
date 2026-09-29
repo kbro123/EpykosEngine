@@ -1,0 +1,34 @@
+# tools/h2h, D81: the algebra phase ON. Both engines, one process, one steady_clock.
+# fingerprint d448afd70180, release, 2026-09-27T21:30:21Z
+# 25 knots, 1000 trades, 189 distinct schedules, 20 repetitions.
+# load before: 2.17 2.73 2.95
+
+[h2h] building this engine's programs (1000 trades, 25 knots)
+[h2h]   recording naive
+[h2h]   recording telescoped
+[h2h] compiling the other engine's sessions
+[h2h] warm-up
+[h2h] the two coupon forms agree to 0.000e+00 relative on this engine's book NPV
+[h2h] agreement, ours naive      vs theirs: book NPV 1.083e-13, ladder 4.142e-15  ok
+[h2h] agreement, ours telescoped vs theirs: book NPV 1.083e-13, ladder 4.142e-15  ok
+[h2h] measuring, 20 repetitions, interleaved
+
+EpykosEngine 0.1.0 [-O3 -march=x86-64-v3 -fno-math-errno] vs the other engine -- one process, one steady_clock, interleaved
+25 calibration instruments on 25 knots, 1000 book trades, 20 repetitions
+
+phase, median us  ours naive ours telesc      theirs |   naive x  telesc x | note
+calibrate_cold         367.6       350.6       213.1 |     0.58x     0.61x | ours O1+O2 in one pass; theirs O1 only
+calibrate_hot           88.3        89.9        12.0 |     0.14x     0.13x | ours warm+chord; theirs frozen-Newton tick
+price_all               59.1        57.1      2625.1 |    44.40x    45.96x | ours book AND instruments; theirs book only
+price_cal_only           3.2         3.5         0.0 |         -         - | ours only: the same pass, no book
+risk_ladder            395.5       389.2      2254.8 |     5.70x     5.79x | d(book PV)/d(quote), both analytic
+
+book-attributable forward pass = price_all - price_cal_only: naive 56.0 us, telescoped 53.6 us  (arithmetic on two measurements, not a measurement)
+
+the other engine's OWN reported times (medians, us): cold 212.8  hot 9.1  price 974.9  risk 2136.1
+  its risk_us EXCLUDES forming the risk operator M; our risk_ladder includes its Jacobian,
+  so the outer-clock column is the honest one and its own column is the floor.
+  ours naive       tape 16877315 raw -> 42026 after passes; ladder solves=1 residual_evals=5 jacobians=1
+  ours telescoped  tape 119631 raw -> 42026 after passes; ladder solves=1 residual_evals=5 jacobians=1
+
+# load after: 2.46 2.77 2.96

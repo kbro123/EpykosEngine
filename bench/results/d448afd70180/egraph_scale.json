@@ -1,0 +1,60 @@
+{
+  "format": "epykos-egraph-scale 1",
+  "fingerprint": "d448afd70180",
+  "decision": "D62",
+  "preset": "release",
+  "tool": "tools/egraph_scale/egraph_scale",
+  "note": "Informational only (D9): not a benchmark bench/run.sh produced, no bench/targets.json entry, no baseline, never compared across fingerprints. Reproduce with the command in each block. `--policy all-rules --no-dedup` is the pre-D62 behaviour in the same binary.",
+  "load_1min_range": [7.4, 14.2],
+  "cores": 16,
+  "fixture": "fixtures::make_stage_a with scenarios = 0, trades as given (docs/WORKLOADS.md seed)",
+  "lane_tile": 8,
+
+  "before": {
+    "command": "egraph_scale --trades 60 --rounds 4 --policy all-rules --no-dedup --max-program-nodes 100000 --max-plan-nodes 1000000",
+    "trades": 60,
+    "domains": 57,
+    "tape_nodes": 184749,
+    "reached_fixpoint": false,
+    "rounds": [
+      {"round": 1, "program_nodes": 7,   "program_classes": 7,   "plan_nodes": 14,   "ms": 429,   "peak_rss_mib": 408.6},
+      {"round": 2, "program_nodes": 39,  "program_classes": 29,  "plan_nodes": 126,  "ms": 2485,  "peak_rss_mib": 480.5},
+      {"round": 3, "program_nodes": 191, "program_classes": 73,  "plan_nodes": 876,  "ms": 11722, "peak_rss_mib": 876.2},
+      {"round": 4, "program_nodes": 831, "program_classes": 138, "plan_nodes": 4944, "ms": 49006, "peak_rss_mib": 2341.5}
+    ],
+    "structural_proposals_built": 1064,
+    "structural_proposals_discarded_as_known": 234,
+    "comment": "Reproduces D54's own 7/39/191/831 and 1.87-2.3 GB to the node. Round 5 onward was not run: the trajectory has no fixpoint."
+  },
+
+  "after": {
+    "command": "egraph_scale --trades <N> --rounds 24 --max-program-nodes 100000 --max-plan-nodes 1000000 --extract --fingerprint d448afd70180",
+    "policy": "pipeline-ordered-plans",
+    "dedup_before_construction": true,
+    "rounds_60_trades": [
+      {"round": 1, "program_nodes": 7,  "program_classes": 7,  "plan_nodes": 14,  "ms": 461,  "peak_rss_mib": 427.6},
+      {"round": 2, "program_nodes": 21, "program_classes": 15, "plan_nodes": 81,  "ms": 1134, "peak_rss_mib": 444.7},
+      {"round": 3, "program_nodes": 35, "program_classes": 21, "plan_nodes": 230, "ms": 1344, "peak_rss_mib": 466.5},
+      {"round": 4, "program_nodes": 39, "program_classes": 22, "plan_nodes": 418, "ms": 507,  "peak_rss_mib": 482.6},
+      {"round": 5, "program_nodes": 39, "program_classes": 22, "plan_nodes": 563, "ms": 168,  "peak_rss_mib": 482.7},
+      {"round": 6, "program_nodes": 39, "program_classes": 22, "plan_nodes": 628, "ms": 133,  "peak_rss_mib": 482.9},
+      {"round": 7, "program_nodes": 39, "program_classes": 22, "plan_nodes": 641, "ms": 76,   "peak_rss_mib": 483.1},
+      {"round": 8, "program_nodes": 39, "program_classes": 22, "plan_nodes": 641, "ms": 32,   "peak_rss_mib": 483.1, "fixpoint": true}
+    ],
+    "ladder": [
+      {"trades": 60,   "domains": 57, "tape_nodes": 184749, "rounds_to_fixpoint": 8, "program_nodes": 39, "program_classes": 22, "plan_nodes": 641, "saturate_s": 3.9,  "peak_rss_mib": 483.1, "extracted_over_default_fitted": 0.999707},
+      {"trades": 250,  "domains": 61, "tape_nodes": 235546, "rounds_to_fixpoint": 9, "program_nodes": 54, "program_classes": 25, "plan_nodes": 677, "saturate_s": 7.0,  "peak_rss_mib": 885.1, "extracted_over_default_fitted": 0.999583},
+      {"trades": 500,  "domains": 63, "tape_nodes": 280076, "rounds_to_fixpoint": 9, "program_nodes": 54, "program_classes": 25, "plan_nodes": 677, "saturate_s": 8.3,  "peak_rss_mib": 1228.2, "extracted_over_default_fitted": 0.999459},
+      {"trades": 1000, "domains": 63, "tape_nodes": 360878, "rounds_to_fixpoint": 9, "program_nodes": 54, "program_classes": 25, "plan_nodes": 677, "saturate_s": 10.5, "peak_rss_mib": 2061.9, "extracted_over_default_fitted": 0.999221},
+      {"trades": 2000, "domains": 67, "tape_nodes": 517036, "rounds_to_fixpoint": 7, "program_nodes": 14, "program_classes": 9,  "plan_nodes": 197, "saturate_s": 3.9,  "peak_rss_mib": 3084.8, "extracted_over_default_fitted": 0.999055}
+    ],
+    "extraction_history_full_tape": ["r5.group_formation", "r5.group_formation", "r5.group_formation", "planner.reduction_fusion"],
+    "cost_model": "bench/results/d448afd70180/cost_model.json (the real fitted one, D48; never CostCoefficients::defaults(), D57)",
+    "comment": "Every row reached a real fixpoint (the last round queues nothing), not a bound. The 2,000-trade peak RSS is the RECORDING's own: it is already 3084.8 MiB at round 0 and does not change through round 7. All five extraction ratios are noise (0.03-0.09%), far inside the cost model's own 84.4% mean relative error and with no wall-clock bench behind them."
+  },
+
+  "default_policy_60_trades": {
+    "policy": "no-fresh-cross-rule",
+    "comment": "The default policy bounds the PROGRAM tier only: 39 nodes / 22 classes at a fixpoint by round 4, after which the PLAN tier's own 2^k subset lattice runs to 105,977 plan nodes and 10,528 MiB before its fixpoint at round 11. That is why the ladder above uses pipeline-ordered-plans; both are described in include/epykos/optimise/egraph.hpp."
+  }
+}

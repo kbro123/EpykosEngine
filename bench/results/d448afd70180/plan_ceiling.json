@@ -1,0 +1,758 @@
+{
+ "format": "epykos-plan-ceiling 1",
+ "fingerprint": "d448afd70180",
+ "decision": "D68",
+ "preset": "release",
+ "tool": "tools/costmodel/costmodel_collect --ceiling",
+ "note": "Informational only (D9): not a bench/run.sh product, no baseline, no bench/targets.json entry, never compared across fingerprints. THE PLAN-LEVEL CEILING: what exec::Interpreter's three planning decisions are worth in WALL CLOCK, per configuration, forward and adjoint. Supersedes D63 section 3's knob sweep, which was two repetitions at one configuration on the `profile` preset and read the summed per-domain profile table. Every timed loop here runs in ONE process with its fixture built once, each knob-off loop immediately after its own all-on twin, three rounds, on the uninstrumented release build. `adjoint::Options` carries no fuse/inline knob, so every mode=adjoint row is the SAME Adjoint object timed eight times per round: its spread is this harness's own noise floor, not an effect.",
+ "cores": 16,
+ "configurations": [
+  {
+   "case": "m1",
+   "mode": "forward",
+   "B": 1,
+   "tile": 256,
+   "lane_tile": 8,
+   "Lt": 1,
+   "reps_per_timed_loop": 12000,
+   "rounds": 3,
+   "load_1min_range": [
+    4.8,
+    5.03
+   ],
+   "greedy_default_us_per_rep_median": 59.438950000000006,
+   "noise_floor_max_over_min_of_the_12_identical_all_on_runs": 1.0107116036452943,
+   "contrasts": {
+    "no_fuse_pairs": {
+     "on_us_median": 59.374,
+     "off_us_median": 60.9828,
+     "off_over_on_median": 1.0270960353016472,
+     "off_over_on_per_round": [
+      1.0252715064817748,
+      1.0270960353016472,
+      1.0292466695590468
+     ]
+    },
+    "no_fuse_reductions": {
+     "on_us_median": 59.4491,
+     "off_us_median": 98.4555,
+     "off_over_on_median": 1.6561310431949348,
+     "off_over_on_per_round": [
+      1.6671774679142397,
+      1.6441591608176271,
+      1.6561310431949348
+     ]
+    },
+    "no_inline_producers": {
+     "on_us_median": 59.5645,
+     "off_us_median": 67.5472,
+     "off_over_on_median": 1.1351056417832768,
+     "off_over_on_per_round": [
+      1.129372287878356,
+      1.141715500761457,
+      1.1351056417832768
+     ]
+    },
+    "all_three_off": {
+     "on_us_median": 59.4288,
+     "off_us_median": 106.4905,
+     "off_over_on_median": 1.7919005599978461,
+     "off_over_on_per_round": [
+      1.7965875608911852,
+      1.7919005599978461,
+      1.7835518047529875
+     ]
+    }
+   },
+   "best_of_the_measured_settings_over_greedy": 1.0
+  },
+  {
+   "case": "m1",
+   "mode": "forward",
+   "B": 64,
+   "tile": 256,
+   "lane_tile": 1,
+   "Lt": 1,
+   "reps_per_timed_loop": 200,
+   "rounds": 3,
+   "load_1min_range": [
+    4.57,
+    4.8
+   ],
+   "greedy_default_us_per_rep_median": 4028.9963,
+   "noise_floor_max_over_min_of_the_12_identical_all_on_runs": 1.1216575004693787,
+   "contrasts": {
+    "no_fuse_pairs": {
+     "on_us_median": 4032.6898,
+     "off_us_median": 4165.4294,
+     "off_over_on_median": 1.0307685951942052,
+     "off_over_on_per_round": [
+      0.9271817961312703,
+      1.0307685951942052,
+      1.0369601012601706
+     ]
+    },
+    "no_fuse_reductions": {
+     "on_us_median": 4016.5643,
+     "off_us_median": 6578.8286,
+     "off_over_on_median": 1.6357910876000177,
+     "off_over_on_per_round": [
+      1.6348187812783155,
+      1.6357910876000177,
+      1.637924382288614
+     ]
+    },
+    "no_inline_producers": {
+     "on_us_median": 4030.4952,
+     "off_us_median": 4546.0207,
+     "off_over_on_median": 1.1274753037790495,
+     "off_over_on_per_round": [
+      1.1313764475722765,
+      1.1270583574726643,
+      1.1274753037790495
+     ]
+    },
+    "all_three_off": {
+     "on_us_median": 4027.9197,
+     "off_us_median": 7096.9613,
+     "off_over_on_median": 1.759192120935281,
+     "off_over_on_per_round": [
+      1.757527251417192,
+      1.7728968217039467,
+      1.759192120935281
+     ]
+    }
+   },
+   "best_of_the_measured_settings_over_greedy": 1.0
+  },
+  {
+   "case": "m1",
+   "mode": "forward",
+   "B": 64,
+   "tile": 256,
+   "lane_tile": 8,
+   "Lt": 8,
+   "reps_per_timed_loop": 400,
+   "rounds": 3,
+   "load_1min_range": [
+    4.26,
+    4.66
+   ],
+   "greedy_default_us_per_rep_median": 1861.4186,
+   "noise_floor_max_over_min_of_the_12_identical_all_on_runs": 1.0122023226220893,
+   "contrasts": {
+    "no_fuse_pairs": {
+     "on_us_median": 1862.1445,
+     "off_us_median": 1946.8181,
+     "off_over_on_median": 1.0427655784290295,
+     "off_over_on_per_round": [
+      1.0427655784290295,
+      1.04200039255815,
+      1.0484849920675068
+     ]
+    },
+    "no_fuse_reductions": {
+     "on_us_median": 1865.9202,
+     "off_us_median": 3210.5604,
+     "off_over_on_median": 1.727802828866958,
+     "off_over_on_per_round": [
+      1.731889085662839,
+      1.727802828866958,
+      1.7176862944320044
+     ]
+    },
+    "no_inline_producers": {
+     "on_us_median": 1859.6539,
+     "off_us_median": 1861.5529,
+     "off_over_on_median": 1.0016168062239967,
+     "off_over_on_per_round": [
+      1.001775312691548,
+      1.0016168062239967,
+      0.9995105410062849
+     ]
+    },
+    "all_three_off": {
+     "on_us_median": 1860.6927,
+     "off_us_median": 3210.8913,
+     "off_over_on_median": 1.7255160940868957,
+     "off_over_on_per_round": [
+      1.7350479169885205,
+      1.719942211899241,
+      1.7255160940868957
+     ]
+    }
+   },
+   "best_of_the_measured_settings_over_greedy": 1.0
+  },
+  {
+   "case": "m1",
+   "mode": "forward",
+   "B": 64,
+   "tile": 256,
+   "lane_tile": 32,
+   "Lt": 32,
+   "reps_per_timed_loop": 400,
+   "rounds": 3,
+   "load_1min_range": [
+    3.87,
+    4.32
+   ],
+   "greedy_default_us_per_rep_median": 1596.29185,
+   "noise_floor_max_over_min_of_the_12_identical_all_on_runs": 1.0145487814977179,
+   "contrasts": {
+    "no_fuse_pairs": {
+     "on_us_median": 1591.5275,
+     "off_us_median": 1804.4784,
+     "off_over_on_median": 1.1338028403530571,
+     "off_over_on_per_round": [
+      1.1338028403530571,
+      1.1287988744777109,
+      1.1384478607396202
+     ]
+    },
+    "no_fuse_reductions": {
+     "on_us_median": 1601.6677,
+     "off_us_median": 2871.2708,
+     "off_over_on_median": 1.7930743226978791,
+     "off_over_on_per_round": [
+      1.7930743226978791,
+      1.7943139440846951,
+      1.7926757216868392
+     ]
+    },
+    "no_inline_producers": {
+     "on_us_median": 1598.2357,
+     "off_us_median": 1706.1118,
+     "off_over_on_median": 1.0674969905878087,
+     "off_over_on_per_round": [
+      1.051702042526527,
+      1.2202735648362817,
+      1.0674969905878087
+     ]
+    },
+    "all_three_off": {
+     "on_us_median": 1594.0835,
+     "off_us_median": 2995.7097,
+     "off_over_on_median": 1.882159874310223,
+     "off_over_on_per_round": [
+      1.8880005309098031,
+      1.882159874310223,
+      1.8575182816849103
+     ]
+    }
+   },
+   "best_of_the_measured_settings_over_greedy": 1.0
+  },
+  {
+   "case": "stage_a",
+   "mode": "forward",
+   "B": 1,
+   "tile": 256,
+   "lane_tile": 8,
+   "Lt": 8,
+   "reps_per_timed_loop": 450,
+   "rounds": 3,
+   "load_1min_range": [
+    3.85,
+    4.28
+   ],
+   "greedy_default_us_per_rep_median": 1599.49485,
+   "noise_floor_max_over_min_of_the_12_identical_all_on_runs": 1.0278921782047004,
+   "contrasts": {
+    "no_fuse_pairs": {
+     "on_us_median": 1603.8462,
+     "off_us_median": 1586.8229,
+     "off_over_on_median": 0.9933344241929757,
+     "off_over_on_per_round": [
+      0.9942304389644487,
+      0.9933344241929757,
+      0.9878593720520085
+     ]
+    },
+    "no_fuse_reductions": {
+     "on_us_median": 1597.3845,
+     "off_us_median": 1596.9734,
+     "off_over_on_median": 1.0091666887758468,
+     "off_over_on_per_round": [
+      1.056098389641843,
+      1.0091666887758468,
+      0.9997426417997671
+     ]
+    },
+    "no_inline_producers": {
+     "on_us_median": 1600.9338,
+     "off_us_median": 1589.5653,
+     "off_over_on_median": 0.9928081348522968,
+     "off_over_on_per_round": [
+      0.9842154304894133,
+      0.9983844695711613,
+      0.9928081348522968
+     ]
+    },
+    "all_three_off": {
+     "on_us_median": 1598.0559,
+     "off_us_median": 1635.1972,
+     "off_over_on_median": 1.03078595798834,
+     "off_over_on_per_round": [
+      1.0720861214245505,
+      1.0037143256377952,
+      1.03078595798834
+     ]
+    }
+   },
+   "best_of_the_measured_settings_over_greedy": 0.9928081348522968
+  },
+  {
+   "case": "stage_a",
+   "mode": "forward",
+   "B": 64,
+   "tile": 256,
+   "lane_tile": 1,
+   "Lt": 1,
+   "reps_per_timed_loop": 8,
+   "rounds": 3,
+   "load_1min_range": [
+    3.29,
+    3.52
+   ],
+   "greedy_default_us_per_rep_median": 102264.0887,
+   "noise_floor_max_over_min_of_the_12_identical_all_on_runs": 1.0302738219926635,
+   "contrasts": {
+    "no_fuse_pairs": {
+     "on_us_median": 101824.5621,
+     "off_us_median": 102977.1715,
+     "off_over_on_median": 1.0132281263776162,
+     "off_over_on_per_round": [
+      0.9956336164850231,
+      1.0132281263776162,
+      1.0321212478850426
+     ]
+    },
+    "no_fuse_reductions": {
+     "on_us_median": 102490.2956,
+     "off_us_median": 105624.3415,
+     "off_over_on_median": 1.0273131917061378,
+     "off_over_on_per_round": [
+      1.0273131917061378,
+      1.1862675691496896,
+      0.9989000119539122
+     ]
+    },
+    "no_inline_producers": {
+     "on_us_median": 102055.3328,
+     "off_us_median": 106076.4284,
+     "off_over_on_median": 1.0341872490038453,
+     "off_over_on_per_round": [
+      1.0415019752892325,
+      1.0341872490038453,
+      1.0168948688785575
+     ]
+    },
+    "all_three_off": {
+     "on_us_median": 102707.1206,
+     "off_us_median": 106967.6334,
+     "off_over_on_median": 1.0421420227054303,
+     "off_over_on_per_round": [
+      1.0421420227054303,
+      1.0215649891784584,
+      1.0501828653153773
+     ]
+    }
+   },
+   "best_of_the_measured_settings_over_greedy": 1.0
+  },
+  {
+   "case": "stage_a",
+   "mode": "forward",
+   "B": 64,
+   "tile": 256,
+   "lane_tile": 8,
+   "Lt": 8,
+   "reps_per_timed_loop": 14,
+   "rounds": 3,
+   "load_1min_range": [
+    3.32,
+    3.77
+   ],
+   "greedy_default_us_per_rep_median": 53705.49065,
+   "noise_floor_max_over_min_of_the_12_identical_all_on_runs": 1.2018118649730556,
+   "contrasts": {
+    "no_fuse_pairs": {
+     "on_us_median": 53814.831,
+     "off_us_median": 54053.7399,
+     "off_over_on_median": 1.0046712903363015,
+     "off_over_on_per_round": [
+      1.0046712903363015,
+      0.9924107932160592,
+      1.0086958797354737
+     ]
+    },
+    "no_fuse_reductions": {
+     "on_us_median": 53520.6956,
+     "off_us_median": 55138.1892,
+     "off_over_on_median": 1.0318754593741057,
+     "off_over_on_per_round": [
+      1.0266669964580954,
+      1.0318754593741057,
+      1.0320854012118275
+     ]
+    },
+    "no_inline_producers": {
+     "on_us_median": 53948.7041,
+     "off_us_median": 53615.2159,
+     "off_over_on_median": 0.9938184205614682,
+     "off_over_on_per_round": [
+      0.9938184205614682,
+      0.8396100582985527,
+      1.0013778567675022
+     ]
+    },
+    "all_three_off": {
+     "on_us_median": 53596.1503,
+     "off_us_median": 55363.5671,
+     "off_over_on_median": 1.032976562497624,
+     "off_over_on_per_round": [
+      1.0402473861961101,
+      1.003960614427489,
+      1.032976562497624
+     ]
+    }
+   },
+   "best_of_the_measured_settings_over_greedy": 0.9938184205614682
+  },
+  {
+   "case": "stage_a",
+   "mode": "forward",
+   "B": 64,
+   "tile": 256,
+   "lane_tile": 32,
+   "Lt": 32,
+   "reps_per_timed_loop": 14,
+   "rounds": 3,
+   "load_1min_range": [
+    3.03,
+    3.42
+   ],
+   "greedy_default_us_per_rep_median": 51932.25265,
+   "noise_floor_max_over_min_of_the_12_identical_all_on_runs": 1.0125686466660273,
+   "contrasts": {
+    "no_fuse_pairs": {
+     "on_us_median": 52062.9025,
+     "off_us_median": 52990.0596,
+     "off_over_on_median": 1.0239970847788475,
+     "off_over_on_per_round": [
+      1.0061718224190856,
+      1.0239970847788475,
+      1.1378197152953584
+     ]
+    },
+    "no_fuse_reductions": {
+     "on_us_median": 52027.9198,
+     "off_us_median": 52308.8379,
+     "off_over_on_median": 1.005926976036462,
+     "off_over_on_per_round": [
+      1.005926976036462,
+      1.0079699262750954,
+      1.0053993721271168
+     ]
+    },
+    "no_inline_producers": {
+     "on_us_median": 51915.811,
+     "off_us_median": 52531.0234,
+     "off_over_on_median": 1.0114263244120831,
+     "off_over_on_per_round": [
+      1.0149133475445578,
+      1.0114263244120831,
+      1.0095540547368123
+     ]
+    },
+    "all_three_off": {
+     "on_us_median": 51926.9374,
+     "off_us_median": 53540.4364,
+     "off_over_on_median": 1.0268078875762852,
+     "off_over_on_per_round": [
+      1.0232639031008464,
+      1.0268078875762852,
+      1.0344486303421516
+     ]
+    }
+   },
+   "best_of_the_measured_settings_over_greedy": 1.0
+  },
+  {
+   "case": "m1",
+   "mode": "adjoint",
+   "B": 1,
+   "tile": 256,
+   "lane_tile": 8,
+   "Lt": 1,
+   "reps_per_timed_loop": 1600,
+   "rounds": 3,
+   "load_1min_range": [
+    3.03,
+    3.48
+   ],
+   "greedy_default_us_per_rep_median": 455.2917,
+   "noise_floor_max_over_min_of_the_12_identical_all_on_runs": 1.023684233741487,
+   "contrasts": {
+    "no_fuse_pairs": {
+     "on_us_median": 457.6375,
+     "off_us_median": 461.1035,
+     "off_over_on_median": 1.0075736800415176,
+     "off_over_on_per_round": [
+      1.0075736800415176,
+      0.9843061596895917,
+      1.1508416795959533
+     ]
+    },
+    "no_fuse_reductions": {
+     "on_us_median": 454.6953,
+     "off_us_median": 454.2251,
+     "off_over_on_median": 1.0008797099948032,
+     "off_over_on_per_round": [
+      0.9981192359162434,
+      1.0016439359186986,
+      1.0008797099948032
+     ]
+    },
+    "no_inline_producers": {
+     "on_us_median": 455.2759,
+     "off_us_median": 455.2012,
+     "off_over_on_median": 0.9987973651303468,
+     "off_over_on_per_round": [
+      0.9974874216707621,
+      1.003397500284992,
+      0.9987973651303468
+     ]
+    },
+    "all_three_off": {
+     "on_us_median": 455.3075,
+     "off_us_median": 457.5509,
+     "off_over_on_median": 1.0058756387973748,
+     "off_over_on_per_round": [
+      0.9976270981699181,
+      1.0058756387973748,
+      1.0088231400974774
+     ]
+    }
+   },
+   "best_of_the_measured_settings_over_greedy": 0.9987973651303468
+  },
+  {
+   "case": "m1",
+   "mode": "adjoint",
+   "B": 64,
+   "tile": 256,
+   "lane_tile": 8,
+   "Lt": 8,
+   "reps_per_timed_loop": 50,
+   "rounds": 3,
+   "load_1min_range": [
+    3.12,
+    3.48
+   ],
+   "greedy_default_us_per_rep_median": 14836.6232,
+   "noise_floor_max_over_min_of_the_12_identical_all_on_runs": 1.0604613010191353,
+   "contrasts": {
+    "no_fuse_pairs": {
+     "on_us_median": 14826.909,
+     "off_us_median": 14786.162,
+     "off_over_on_median": 0.9972518209965409,
+     "off_over_on_per_round": [
+      0.995389512848056,
+      0.9972518209965409,
+      0.9973639413233891
+     ]
+    },
+    "no_fuse_reductions": {
+     "on_us_median": 14846.3374,
+     "off_us_median": 14880.3241,
+     "off_over_on_median": 1.0003769683962591,
+     "off_over_on_per_round": [
+      0.9920975994833349,
+      1.0067256740745878,
+      1.0003769683962591
+     ]
+    },
+    "no_inline_producers": {
+     "on_us_median": 14814.8962,
+     "off_us_median": 14786.4162,
+     "off_over_on_median": 0.9961423084422286,
+     "off_over_on_per_round": [
+      0.9594815510817616,
+      0.9961423084422286,
+      0.9984779750642513
+     ]
+    },
+    "all_three_off": {
+     "on_us_median": 14918.4787,
+     "off_us_median": 14813.9176,
+     "off_over_on_median": 0.9929911687308975,
+     "off_over_on_per_round": [
+      0.9884179206136275,
+      1.0023407259660264,
+      0.9929911687308975
+     ]
+    }
+   },
+   "best_of_the_measured_settings_over_greedy": 0.9929911687308975
+  },
+  {
+   "case": "stage_a",
+   "mode": "adjoint",
+   "B": 1,
+   "tile": 256,
+   "lane_tile": 8,
+   "Lt": 8,
+   "reps_per_timed_loop": 55,
+   "rounds": 3,
+   "load_1min_range": [
+    3.06,
+    3.27
+   ],
+   "greedy_default_us_per_rep_median": 12759.9769,
+   "noise_floor_max_over_min_of_the_12_identical_all_on_runs": 1.0105337912524572,
+   "contrasts": {
+    "no_fuse_pairs": {
+     "on_us_median": 12764.7682,
+     "off_us_median": 12756.5854,
+     "off_over_on_median": 0.9960717813896535,
+     "off_over_on_per_round": [
+      1.0017676639459356,
+      0.9960717813896535,
+      0.9949661903680913
+     ]
+    },
+    "no_fuse_reductions": {
+     "on_us_median": 12764.1039,
+     "off_us_median": 12760.7214,
+     "off_over_on_median": 0.9975695747822925,
+     "off_over_on_per_round": [
+      0.9963540267046355,
+      0.9975695747822925,
+      1.0018434287157927
+     ]
+    },
+    "no_inline_producers": {
+     "on_us_median": 12754.8063,
+     "off_us_median": 12758.1324,
+     "off_over_on_median": 1.000260772286287,
+     "off_over_on_per_round": [
+      0.996797819499854,
+      1.002849017007561,
+      1.000260772286287
+     ]
+    },
+    "all_three_off": {
+     "on_us_median": 12737.5889,
+     "off_us_median": 12759.5605,
+     "off_over_on_median": 0.9995652238391836,
+     "off_over_on_per_round": [
+      0.9995652238391836,
+      1.0049846514024507,
+      0.9989507727657255
+     ]
+    }
+   },
+   "best_of_the_measured_settings_over_greedy": 0.9960717813896535
+  },
+  {
+   "case": "stage_a",
+   "mode": "adjoint",
+   "B": 64,
+   "tile": 256,
+   "lane_tile": 8,
+   "Lt": 8,
+   "reps_per_timed_loop": 3,
+   "rounds": 3,
+   "load_1min_range": [
+    2.82,
+    2.99
+   ],
+   "greedy_default_us_per_rep_median": 235144.19165,
+   "noise_floor_max_over_min_of_the_12_identical_all_on_runs": 1.0092793241759104,
+   "contrasts": {
+    "no_fuse_pairs": {
+     "on_us_median": 236009.571,
+     "off_us_median": 235790.0283,
+     "off_over_on_median": 0.9990697720475074,
+     "off_over_on_per_round": [
+      0.9990697720475074,
+      1.003821583529589,
+      0.9963511468372124
+     ]
+    },
+    "no_fuse_reductions": {
+     "on_us_median": 235156.273,
+     "off_us_median": 234928.6993,
+     "off_over_on_median": 0.9990322448255506,
+     "off_over_on_per_round": [
+      0.995635399538316,
+      0.9990322448255506,
+      0.9994844797159834
+     ]
+    },
+    "no_inline_producers": {
+     "on_us_median": 234879.0773,
+     "off_us_median": 235249.484,
+     "off_over_on_median": 0.9982878908140368,
+     "off_over_on_per_round": [
+      1.002408180895537,
+      0.9982878908140368,
+      0.9965308744850045
+     ]
+    },
+    "all_three_off": {
+     "on_us_median": 234671.1787,
+     "off_us_median": 235432.018,
+     "off_over_on_median": 1.0005332315344462,
+     "off_over_on_per_round": [
+      1.0058654880741007,
+      0.9958652564479928,
+      1.0005332315344462
+     ]
+    }
+   },
+   "best_of_the_measured_settings_over_greedy": 0.9982878908140368
+  }
+ ],
+ "stage_a_workload_shares": {
+  "source": "bench/results/d448afd70180/stage_a_stage_a.json (release, 20 repetitions, load 7.2 before / 3.4 after)",
+  "exec_interpreter_share_of_one_O4_lane_batch": {
+   "B=1": 0.08911562553266356,
+   "B=8": 0.05146971445152004,
+   "B=64": 0.051970882717278476
+  },
+  "exec_interpreter_share_of_the_O3_reverse_ladder": 0.0,
+  "whole_problem_ms": {
+   "O4_scenario_grid_1000_lanes": 15789.633524036617,
+   "O3_reverse_ladder_2043_outputs": 8052.564861091014,
+   "record_plus_build": 8806.977832573466,
+   "total": 32649.176217701097,
+   "exec_Interpreter_within_it": 820.6011920265155,
+   "ESTIMATE": "Labelled an estimate per CLAUDE.md. The committed benchmarks measure 64-lane batches; these figures scale each linearly to PROBLEM.md section 4's own size (1,000 O4 lanes, 2,043 ladder outputs). Linear is right for how run_lanes and ladder chunk by max_batch, but the true totals are a few percent higher because the last chunk of each is partial (16 O4 chunks not 15.6, 32 ladder chunks not 31.9)."
+  },
+  "exec_interpreter_share_of_the_whole_stage_a_problem": 0.02513390189555894,
+  "exec_interpreter_share_note": "'exec::Interpreter' here is the WHOLE-PROGRAM one (ImplicitProgram's im.interp): the object the three plan knobs configure and the only one optimise::estimate_program models. The per-block residual solves build their own exec::Interpreter (solver::ResidualProgram::interp_) from local hardcoded options no caller reaches, on slice programs no rule touches; they are counted in the solve cost."
+ },
+ "ceiling_multiplied_out": {
+  "stage_a_plan_dynamic_range_B64_L8": 1.033,
+  "saving_as_a_fraction_of_exec_Interpreter_own_time": 0.031945788964181876,
+  "as_a_fraction_of_one_O4_lane_batch": 0.0016602508515684254,
+  "as_a_fraction_of_the_whole_stage_a_problem": 0.0008029223258019767,
+  "as_a_fraction_of_one_O4_lane_batch_NOTE": "Two measured quantities multiplied; no extrapolation.",
+  "as_a_fraction_of_the_whole_stage_a_problem_NOTE": "Rests on the extrapolated whole-problem split above; an estimate."
+ },
+ "d63_reconciliation": {
+  "note": "D63 section 3 recorded Stage A fuse_reductions off at 1.066x (1583.5 -> 1687.5 us). Re-run here with D63's own protocol -- `profile` preset, one process per setting, 2 repetitions, alternating -- both quantities read out of the same processes.",
+  "wall_clock_off_over_on": 1.0196,
+  "profile_table_sum_off_over_on": 1.0196,
+  "wall_us_on_mean": 1592.9,
+  "wall_us_off_mean": 1624.2,
+  "load_1min_range": [
+   3.64,
+   3.88
+  ],
+  "finding": "The profile-table sum and the wall clock agree exactly, so the instrumentation is not the difference. D63's 1.066x was a two-repetition measurement of a contrast whose per-round spread this entry measures at 0.9997-1.0561 at that configuration. It does not reproduce."
+ }
+}

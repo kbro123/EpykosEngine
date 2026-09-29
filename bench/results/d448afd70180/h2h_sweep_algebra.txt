@@ -1,0 +1,67 @@
+# D81 sweep, ALL phases. algebra on, idle box, 20 reps, 25 knots.
+# 2026-09-28T04:30:58Z, load 1.86 2.02 1.88
+
+######## 16 trades
+phase, median us  ours naive ours telesc      theirs |   naive x  telesc x | note
+calibrate_cold         353.7       333.6       208.5 |     0.59x     0.63x | ours O1+O2 in one pass; theirs O1 only
+calibrate_hot           80.3        80.6         9.4 |     0.12x     0.12x | ours warm+chord; theirs frozen-Newton tick
+price_all                8.1         7.0        95.8 |    11.86x    13.70x | ours book AND instruments; theirs book only
+price_cal_only           2.4         2.3         0.0 |         -         - | ours only: the same pass, no book
+risk_ladder            103.1        98.1       129.2 |     1.25x     1.32x | d(book PV)/d(quote), both analytic
+
+book-attributable forward pass = price_all - price_cal_only: naive 5.7 us, telescoped 4.7 us  (arithmetic on two measurements, not a measurement)
+
+the other engine's OWN reported times (medians, us): cold 208.3  hot 7.0  price 36.2  risk 72.1
+  its risk_us EXCLUDES forming the risk operator M; our risk_ladder includes its Jacobian,
+  so the outer-clock column is the honest one and its own column is the floor.
+  ours naive       tape 1840295 raw -> 1593 after passes; ladder solves=1 residual_evals=5 jacobians=1
+  ours telescoped  tape 11583 raw -> 1593 after passes; ladder solves=1 residual_evals=5 jacobians=1
+
+######## 64 trades
+phase, median us  ours naive ours telesc      theirs |   naive x  telesc x | note
+calibrate_cold         355.0       334.3       208.7 |     0.59x     0.62x | ours O1+O2 in one pass; theirs O1 only
+calibrate_hot           80.7        82.8         9.3 |     0.12x     0.11x | ours warm+chord; theirs frozen-Newton tick
+price_all               11.1         9.8       234.1 |    21.12x    23.89x | ours book AND instruments; theirs book only
+price_cal_only           2.5         2.4         0.0 |         -         - | ours only: the same pass, no book
+risk_ladder            114.4       111.0       235.5 |     2.06x     2.12x | d(book PV)/d(quote), both analytic
+
+book-attributable forward pass = price_all - price_cal_only: naive 8.6 us, telescoped 7.4 us  (arithmetic on two measurements, not a measurement)
+
+the other engine's OWN reported times (medians, us): cold 208.5  hot 6.9  price 87.2  risk 176.4
+  its risk_us EXCLUDES forming the risk operator M; our risk_ladder includes its Jacobian,
+  so the outer-clock column is the honest one and its own column is the floor.
+  ours naive       tape 2595245 raw -> 3599 after passes; ladder solves=1 residual_evals=5 jacobians=1
+  ours telescoped  tape 16991 raw -> 3599 after passes; ladder solves=1 residual_evals=5 jacobians=1
+
+######## 256 trades
+phase, median us  ours naive ours telesc      theirs |   naive x  telesc x | note
+calibrate_cold         354.5       335.8       205.3 |     0.58x     0.61x | ours O1+O2 in one pass; theirs O1 only
+calibrate_hot           81.2        80.9         9.3 |     0.11x     0.12x | ours warm+chord; theirs frozen-Newton tick
+price_all               17.5        17.2       749.5 |    42.87x    43.52x | ours book AND instruments; theirs book only
+price_cal_only           2.5         2.4         0.0 |         -         - | ours only: the same pass, no book
+risk_ladder            163.4       161.4       644.3 |     3.94x     3.99x | d(book PV)/d(quote), both analytic
+
+book-attributable forward pass = price_all - price_cal_only: naive 15.0 us, telescoped 14.8 us  (arithmetic on two measurements, not a measurement)
+
+the other engine's OWN reported times (medians, us): cold 205.0  hot 7.0  price 267.7  risk 571.4
+  its risk_us EXCLUDES forming the risk operator M; our risk_ladder includes its Jacobian,
+  so the outer-clock column is the honest one and its own column is the floor.
+  ours naive       tape 5446631 raw -> 11330 after passes; ladder solves=1 residual_evals=5 jacobians=1
+  ours telescoped  tape 37511 raw -> 11330 after passes; ladder solves=1 residual_evals=5 jacobians=1
+
+######## 1000 trades
+phase, median us  ours naive ours telesc      theirs |   naive x  telesc x | note
+calibrate_cold         365.5       352.3       217.3 |     0.59x     0.62x | ours O1+O2 in one pass; theirs O1 only
+calibrate_hot           86.7        90.8        12.5 |     0.14x     0.14x | ours warm+chord; theirs frozen-Newton tick
+price_all               59.5        59.1      2640.8 |    44.35x    44.70x | ours book AND instruments; theirs book only
+price_cal_only           3.5         3.3         0.0 |         -         - | ours only: the same pass, no book
+risk_ladder            391.8       390.7      2263.0 |     5.78x     5.79x | d(book PV)/d(quote), both analytic
+
+book-attributable forward pass = price_all - price_cal_only: naive 56.1 us, telescoped 55.7 us  (arithmetic on two measurements, not a measurement)
+
+the other engine's OWN reported times (medians, us): cold 217.1  hot 9.3  price 979.1  risk 2146.1
+  its risk_us EXCLUDES forming the risk operator M; our risk_ladder includes its Jacobian,
+  so the outer-clock column is the honest one and its own column is the floor.
+  ours naive       tape 16877315 raw -> 42026 after passes; ladder solves=1 residual_evals=5 jacobians=1
+  ours telescoped  tape 119631 raw -> 42026 after passes; ladder solves=1 residual_evals=5 jacobians=1
+# load after: 2.09 2.07 1.91

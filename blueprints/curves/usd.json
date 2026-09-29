@@ -1,0 +1,61 @@
+{
+  "meta": {
+    "title": "USD curve definitions: the SOFR OIS discount / projection curve on four schemes",
+    "description": "The calibration instrument set of PROBLEM.md section 4 Stage A: the overnight SOFR fixing, the front SOFR OIS (1M-3M), eight SR3 futures (the front two years, convexity zero and stated) and SOFR OIS from 3Y; knots at the instruments' maturities (the last cash-flow time). The same set is recorded on a linear zero-rate curve (the M1 scheme), on log-DF, on a monotone cubic (Hyman) zero curve and on a composite (linear zero to 3Y, monotone cubic to 15Y, log-linear DF beyond). Tenors from the convention's cited standard tenor set (blueprints/conventions/instruments.json USD-SOFR-OIS.tenors; docs/G4_BUNDLE.md USD.3-USD.5).",
+    "sources": [
+      "docs/G4_BUNDLE.md USD.3 (SOFR OIS tenor set: CFTC MAT 2023-07-07 + the commonly quoted front end), USD.4 (SR3 reference quarters), USD.5 (the overnight fixing as the first instrument)",
+      "PROBLEM.md section 3 (interpolation schemes and the composite curve by region) and section 4 Stage A (the SOFR curve recorded on log-DF, monotone cubic and a composite variant)"
+    ],
+    "notes": ["The 1M-3M OIS bridge the overnight fixing and the first IMM quarter (own construction, a curve-definition matter: the exact front-end set is UNVERIFIED market practice, G4_BUNDLE.md section 4 item 5)."]
+  },
+  "curves": {
+    "USD-SOFR": {
+      "index": "USD-SOFR", "currency": "USD",
+      "description": "SOFR OIS curve, linear in the zero rate (the M1 scheme), knots at the instrument maturities.",
+      "scheme": "linear", "variable": "zero",
+      "instruments": [
+        {"blueprint": "USD-SOFR-ON-DEPOSIT", "tenor": "1D"},
+        {"blueprint": "USD-SOFR-OIS", "tenors": ["1M", "2M", "3M"]},
+        {"blueprint": "USD-SOFR-3M-FUTURE", "contracts": 8},
+        {"blueprint": "USD-SOFR-OIS", "tenors": ["3Y", "4Y", "5Y", "7Y", "10Y", "12Y", "15Y", "20Y", "25Y", "30Y"]}
+      ]
+    },
+    "USD-SOFR-LOGDF": {
+      "index": "USD-SOFR", "currency": "USD",
+      "description": "The same instrument set on log-linear discount factors (piecewise-constant forwards).",
+      "scheme": "linear", "variable": "logdf",
+      "instruments": [
+        {"blueprint": "USD-SOFR-ON-DEPOSIT", "tenor": "1D"},
+        {"blueprint": "USD-SOFR-OIS", "tenors": ["1M", "2M", "3M"]},
+        {"blueprint": "USD-SOFR-3M-FUTURE", "contracts": 8},
+        {"blueprint": "USD-SOFR-OIS", "tenors": ["3Y", "4Y", "5Y", "7Y", "10Y", "12Y", "15Y", "20Y", "25Y", "30Y"]}
+      ]
+    },
+    "USD-SOFR-MONOTONE": {
+      "index": "USD-SOFR", "currency": "USD",
+      "description": "The same instrument set on a monotone cubic (Hyman-filtered) zero curve.",
+      "scheme": "monotone_cubic", "variable": "zero",
+      "instruments": [
+        {"blueprint": "USD-SOFR-ON-DEPOSIT", "tenor": "1D"},
+        {"blueprint": "USD-SOFR-OIS", "tenors": ["1M", "2M", "3M"]},
+        {"blueprint": "USD-SOFR-3M-FUTURE", "contracts": 8},
+        {"blueprint": "USD-SOFR-OIS", "tenors": ["3Y", "4Y", "5Y", "7Y", "10Y", "12Y", "15Y", "20Y", "25Y", "30Y"]}
+      ]
+    },
+    "USD-SOFR-COMPOSITE": {
+      "index": "USD-SOFR", "currency": "USD",
+      "description": "The same instrument set on a composite: linear zero to the 3Y knot, monotone cubic zero to 15Y, log-linear DF beyond.",
+      "regions": [
+        {"scheme": "linear", "variable": "zero"},
+        {"from": "3Y", "scheme": "monotone_cubic", "variable": "zero"},
+        {"from": "15Y", "scheme": "linear", "variable": "logdf"}
+      ],
+      "instruments": [
+        {"blueprint": "USD-SOFR-ON-DEPOSIT", "tenor": "1D"},
+        {"blueprint": "USD-SOFR-OIS", "tenors": ["1M", "2M", "3M"]},
+        {"blueprint": "USD-SOFR-3M-FUTURE", "contracts": 8},
+        {"blueprint": "USD-SOFR-OIS", "tenors": ["3Y", "4Y", "5Y", "7Y", "10Y", "12Y", "15Y", "20Y", "25Y", "30Y"]}
+      ]
+    }
+  }
+}

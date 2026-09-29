@@ -1,0 +1,14 @@
+costmodel_collect: case=m1 B=64 tile=256 lane_tile=1 Lt=1 fuse_pairs=1 fuse_reductions=1 inline_producers=1 domains=10 reps=20000
+exec profile over 20000 runs (us per run):
+  slot    0:        13.68 us (  0.3%)
+  slot    1:         8.97 us (  0.2%)
+  slot    2:      1189.21 us ( 27.6%)
+  slot    3:        19.85 us (  0.5%)
+  slot    4:       350.01 us (  8.1%)
+  slot    5:        19.95 us (  0.5%)
+  slot    6:      2211.04 us ( 51.3%)
+  slot    7:        72.66 us (  1.7%)
+  slot    8:        13.94 us (  0.3%)
+  slot    9:       167.85 us (  3.9%)
+  slot 4095:       244.68 us (  5.7%)
+  total    :      4311.85 us

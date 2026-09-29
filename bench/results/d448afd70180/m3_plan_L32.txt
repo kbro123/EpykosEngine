@@ -1,0 +1,71 @@
+interpreter plan: tile 256 rows, lane_tile 32 (buffers hold 32 lanes), max_batch 64, exp std::exp, fuse_reductions on
+  lane-width kernels: runtime, 1, 4, 8, 16, 32, 64; a chunk of L lanes uses the L kernel or the runtime one
+  values: 423235 rows x 32 lanes = 103.3 MB (42885 rows fused or inlined, never materialised); scratch: 3 step + 3 temporary + accumulator + member + 1 inlined-producer buffers x 256 x 32 doubles = 576.0 KB; plan tables 3.1 MB
+  d0 input rows 148 level 0 reads {} | 1 tile(s): input -> values
+  d1 neg(@0) rows 70 level 0 reads {d0} | 1 tile(s): neg(gat) -> values
+  d2 const($0) rows 511 level 0 reads {} | 2 tile(s): const(col) -> values
+  d3 exp(mul(@0,$0)) rows 177 level 0 reads {d1} | 1 tile(s): mul(gat,col) -> s0; exp(vec) -> values
+  d4 affine(#0;%0) rows 16917 level 0 reads {d0} | inlined into d5 (evaluated per consumer tile for the rows it gathers, not materialised): whole-domain affine: members per row 2..2, 33834 members, 1 (length, producer) bucket(s) in 67 block(s) of <= 256 rows, transposed, c_0 lit
+  d5 exp(mul(neg(@0),$0)) rows 16917 level 0 reads {d4} | inlines {d4} per tile; 67 tile(s): mul(neg(gat),col) => exp(vec) -> values
+  d6 div(sub(div(@0,@1),#0),$0) rows 17083 level 0 reads {d3 d5} | 67 tile(s): sub(div(gat,gat),lit) -> s1; div(vec,col) -> values
+  d7 sub(@0,@1) rows 4 level 0 reads {d0 d6} | 1 tile(s): sub(gat,gat) -> values
+  d8 mul(@0,$0) rows 34685 level 0 reads {d3 d5 d6} | 136 tile(s): mul(gat,col) -> values
+  d9 sum(%0) rows 17076 level 1 reads {d2 d8} | whole-domain sum: members per row 2..253, 91930 members, 54 (length, producer) bucket(s) in 114 block(s) of <= 256 rows, transposed
+  d10 mul(^,@0) rows 255687 level 2 reads {d2 d9 d10} | scan: 1102 chain(s), 262 wave(s) in 1126 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes): mul(gat,gat) -> values
+  d11 div(sub(@0,#0),$0) rows 1138 level 3 reads {d10} | fused into {d35} (evaluated per reduction block, not materialised; 8 rows read elsewhere kept in 1 tile(s)): div(sub(gat,lit),col) -> member
+  d12 sub(@1,sub(#1,div(@0,#0))) rows 16 level 0 reads {d0 d6 d11} | 1 tile(s): sub(lit,div(gat,lit)) -> s1; sub(gat,vec) -> values
+  d13 sum(^,@0) rows 8 level 1 reads {d8 d13} | scan: 2 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes): sum:add(gat,gat) -> values
+  d14 mul(@0,#0) rows 1 level 2 reads {d9} | 1 tile(s): mul(gat,lit) -> values
+  d15 mul(^,@0) rows 256 level 3 reads {d9 d14 d15} | scan: 1 chain(s), 256 wave(s) in 256 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes): mul(gat,gat) -> values
+  d16 mul(@0,@1) rows 120 level 1 reads {d5 d8} | fused into {d17 d27 d35 d38 d39 d47 d48 d49 d56} (evaluated per reduction block, not materialised): mul(gat,gat) -> member
+  d17 sum(%0) rows 7 level 2 reads {d8 d9 d13 d16} | whole-domain sum: members per row 2..12, 30 members, 4 (length, producer) bucket(s) in 4 block(s) of <= 256 rows, transposed; 12 members evaluated in the block from {d16 (operands in member order, epilogue)}, 18 gathered
+  d18 div(@0,$0) rows 213 level 2 reads {d9} | fused into {d27} (evaluated per reduction block, not materialised): div(gat,col) -> member
+  d19 mul(@0,@1) rows 102 level 3 reads {d9 d10} | 1 tile(s): mul(gat,gat) -> values
+  d20 div(sub(@0,#0),$0) rows 10 level 4 reads {d15 d19} | fused into {d38} (evaluated per reduction block, not materialised): div(sub(gat,lit),col) -> member
+  d21 mul(@0,@1) rows 94 level 4 reads {d9 d19} | 1 tile(s): mul(gat,gat) -> values
+  d22 div(sub(@0,#0),$0) rows 88 level 5 reads {d21} | fused into {d39} (evaluated per reduction block, not materialised): div(sub(gat,lit),col) -> member
+  d23 div(sub(#0,#1),#2) rows 1 level 0 reads {} | fused into {d24} (evaluated per reduction block, not materialised): sub(lit,lit) -> s0; div(vec,lit) -> member
+  d24 sum(%0) rows 6639 level 0 reads {d2 d6 d23} | whole-domain sum: members per row 2..2, 13278 members, 2 (length, producer) bucket(s) in 27 block(s) of <= 256 rows, transposed; 1 members evaluated in the block from {d23 (operands in member order, epilogue)}, 13277 gathered
+  d25 mul(@0,$0) rows 15358 level 1 reads {d24} | 60 tile(s): mul(gat,col) -> values
+  d26 mul(@0,@1) rows 15358 level 2 reads {d3 d5 d25} | fused into {d27 d38 d39 d47 d48 d49 d56} (evaluated per reduction block, not materialised; 30 rows read elsewhere kept in 1 tile(s)): mul(gat,gat) -> member
+  d27 sum(%0) rows 1025 level 3 reads {d2 d8 d16 d17 d18 d26} | whole-domain sum: members per row 2..120, 15723 members, 50 (length, producer) bucket(s) in 98 block(s) of <= 256 rows, transposed; 15494 members evaluated in the block from {d26 (operands in member order, epilogue) d18 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 229 gathered
+  d28 sum(^,@0,@1) rows 4 level 4 reads {d26 d27 d28} | scan: 1 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes): sum:add(gat,gat) -> s0; sum:add(vec,gat) -> values
+  d29 mul($0,sub(@0,@1)) rows 605 level 4 reads {d8 d9 d26 d27} | 3 tile(s): mul(sub(gat,gat),col) -> values
+  d30 mul($0,sub(@0,@1)) rows 11 level 3 reads {d8 d26} | 1 tile(s): mul(sub(gat,gat),col) -> values
+  d31 mul(@0,$0) rows 1406 level 4 reads {d27 d30} | 6 tile(s): mul(gat,col) -> values
+  d32 mul(@0,@1) rows 1401 level 5 reads {d3 d5 d9 d21 d31} | fused into {d39 d47} (evaluated per reduction block, not materialised; 26 rows read elsewhere kept in 1 tile(s)): mul(gat,gat) -> member
+  d33 mul($0,sub(@0,@1)) rows 20 level 6 reads {d8 d32} | 1 tile(s): mul(sub(gat,gat),col) -> values
+  d34 div(@0,#0) rows 2 level 3 reads {d17} | fused into {d35} (evaluated per reduction block, not materialised): div(gat,lit) -> member
+  d35 sum(%0) rows 1137 level 4 reads {d2 d8 d11 d16 d27 d34} | whole-domain sum: members per row 2..9, 2287 members, 5 (length, producer) bucket(s) in 13 block(s) of <= 256 rows, transposed; 1136 members evaluated in the block from {d11 (operands in member order, epilogue) d34 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 1151 gathered
+  d36 mul(@0,$0) rows 6989 level 5 reads {d29 d35} | 28 tile(s): mul(gat,col) -> values
+  d37 mul(@0,@1) rows 6384 level 6 reads {d3 d5 d36} | fused into {d47 d48 d49 d56 d59 d61 d62 d63 d64 d65} (evaluated per reduction block, not materialised; 149 rows read elsewhere kept in 1 tile(s)): mul(gat,gat) -> member
+  d38 sum(%0) rows 16 level 5 reads {d2 d8 d16 d20 d26 d28 d35} | whole-domain sum: members per row 2..13, 59 members, 5 (length, producer) bucket(s) in 5 block(s) of <= 256 rows, transposed; 22 members evaluated in the block from {d20 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 37 gathered
+  d39 sum(%0) rows 271 level 6 reads {d2 d8 d16 d22 d26 d32 d38} | whole-domain sum: members per row 2..30, 1575 members, 21 (length, producer) bucket(s) in 22 block(s) of <= 256 rows, transposed; 1461 members evaluated in the block from {d32 (operands in member order, epilogue) d22 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 114 gathered
+  d40 sum(^,@0) rows 4 level 7 reads {d37 d40} | scan: 1 chain(s), 4 wave(s) in 4 tile(s) (indirect rows, sequential along a chain, parallel across chains and lanes): sum:add(gat,gat) -> values
+  d41 mul(@0,$0) rows 13 level 6 reads {d38} | 1 tile(s): mul(gat,col) -> values
+  d42 mul(@0,@1) rows 13 level 7 reads {d3 d5 d41} | fused into {d48 d49 d56 d62} (evaluated per reduction block, not materialised): mul(gat,gat) -> member
+  d43 mul($0,sub(@0,@1)) rows 313 level 7 reads {d8 d9 d37 d39} | 2 tile(s): mul(sub(gat,gat),col) -> values
+  d44 mul(@0,$0) rows 1203 level 7 reads {d39} | 5 tile(s): mul(gat,col) -> values
+  d45 mul(@0,@1) rows 1203 level 8 reads {d3 d5 d44} | fused into {d49 d56} (evaluated per reduction block, not materialised; 22 rows read elsewhere kept in 1 tile(s)): mul(gat,gat) -> member
+  d46 div(sub(@0,#0),$0) rows 6 level 6 reads {d32} | fused into {d47} (evaluated per reduction block, not materialised): div(sub(gat,lit),col) -> member
+  d47 sum(%0) rows 769 level 7 reads {d2 d8 d16 d26 d32 d37 d39 d46} | whole-domain sum: members per row 2..30, 5045 members, 31 (length, producer) bucket(s) in 44 block(s) of <= 256 rows, transposed; 4998 members evaluated in the block from {d37 (operands in member order, epilogue) d26 (operands in member order, epilogue) d46 (operands in member order, epilogue) d32 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 47 gathered
+  d48 sum(%0) rows 10 level 8 reads {d8 d16 d26 d37 d40 d42 d47} | whole-domain sum: members per row 2..30, 117 members, 9 (length, producer) bucket(s) in 9 block(s) of <= 256 rows, transposed; 86 members evaluated in the block from {d37 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 31 gathered
+  d49 sum(%0) rows 269 level 9 reads {d8 d16 d26 d37 d42 d45 d48} | whole-domain sum: members per row 2..41, 2365 members, 41 (length, producer) bucket(s) in 41 block(s) of <= 256 rows, transposed; 2314 members evaluated in the block from {d37 (operands in member order, epilogue) d45 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 51 gathered
+  d50 mul($0,sub(@0,@1)) rows 755 level 8 reads {d9 d47} | 3 tile(s): mul(sub(gat,gat),col) -> values
+  d51 mul(@0,#0) rows 261 level 9 reads {d50} | fused into {d59 d61} (evaluated per reduction block, not materialised; 261 output rows written from the reduction blocks): mul(gat,lit) -> member
+  d52 mul(@0,$0) rows 44 level 8 reads {d43 d47} | 1 tile(s): mul(gat,col) -> values
+  d53 mul($0,sub(@0,@1)) rows 26 level 9 reads {d8 d9 d45 d48} | 1 tile(s): mul(sub(gat,gat),col) -> values
+  d54 mul(@0,#0) rows 2 level 10 reads {d53} | 1 tile(s): mul(gat,lit) -> values
+  d55 mul(@0,@1) rows 7 level 9 reads {d5 d52} | fused into {d56} (evaluated per reduction block, not materialised; 2 rows read elsewhere kept in 1 tile(s)): mul(gat,gat) -> member
+  d56 sum(%0) rows 11 level 10 reads {d8 d16 d26 d29 d30 d37 d42 d43 d45 d49 d50 d53 d55} | whole-domain sum: members per row 3..916, 1069 members, 10 (length, producer) bucket(s) in 10 block(s) of <= 256 rows, transposed; 143 members evaluated in the block from {d37 (operands in member order, epilogue) d45 (operands in member order, epilogue) d55 (operands in member order, epilogue) d42 (operands in member order, epilogue) d26 (operands in member order, epilogue) d16 (operands in member order, epilogue)}, 926 gathered
+  d57 sub(div(sub(@0,@1),@2),@3) rows 9 level 0 reads {d0 d9 d17 d27 d28 d35 d38 d39 d47 d48 d49 d56} | 1 tile(s): div(sub(gat,gat),gat) -> s1; sub(vec,gat) -> values
+  d58 mul($0,sub(@0,@1)) rows 265 level 10 reads {d8 d9 d49 d55} | 2 tile(s): mul(sub(gat,gat),col) -> values
+  d59 sum(%0) rows 37 level 11 reads {d31 d33 d36 d37 d43 d50 d51 d52 d53 d54 d56 d58} | whole-domain sum: members per row 4..67, 1756 members, 36 (length, producer) bucket(s) in 36 block(s) of <= 256 rows, transposed; 241 members evaluated in the block from {d37 (operands in member order, epilogue) d51 (operands in member order, epilogue)}, 1515 gathered
+  d60 mul($0,sub(@0,@1)) rows 5 level 11 reads {d9 d56} | 1 tile(s): mul(sub(gat,gat),col) -> values
+  d61 sum(%0) rows 9 level 12 reads {d31 d33 d36 d37 d43 d50 d51 d52 d53 d54 d58 d59 d60} | whole-domain sum: members per row 3..2000, 3345 members, 9 (length, producer) bucket(s) in 9 block(s) of <= 256 rows, transposed; 294 members evaluated in the block from {d37 (operands in member order, epilogue) d51 (operands in member order, epilogue)}, 3051 gathered
+  d62 sum(%0) rows 2 level 13 reads {d37 d42 d61} | whole-domain sum: members per row 4..11, 15 members, 2 (length, producer) bucket(s) in 2 block(s) of <= 256 rows, transposed; 13 members evaluated in the block from {d37 (operands in member order, epilogue) d42 (operands in member order, epilogue)}, 2 gathered
+  d63 sum(%0) rows 1 level 14 reads {d37 d62} | whole-domain sum: members per row 6..6, 6 members, 1 (length, producer) bucket(s) in 1 block(s) of <= 256 rows, transposed; 5 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered
+  d64 sum(%0) rows 1 level 15 reads {d37 d63} | whole-domain sum: members per row 6..6, 6 members, 1 (length, producer) bucket(s) in 1 block(s) of <= 256 rows, transposed; 5 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered
+  d65 sum(%0) rows 1 level 16 reads {d37 d64} | whole-domain sum: members per row 6..6, 6 members, 1 (length, producer) bucket(s) in 1 block(s) of <= 256 rows, transposed; 5 members evaluated in the block from {d37 (operands in member order, epilogue)}, 1 gathered
+  d66 sub(div(@0,@1),@2) rows 41 level 0 reads {d0 d8 d9 d13 d17 d27 d28 d35 d37 d38 d39 d40 d47 d48 d49 d56 d59 d61 d62 d63 d64 d65} | 1 tile(s): sub(div(gat,gat),gat) -> values
+  per lane chunk: 1815 tile passes, 1956 kernel calls outside reductions; outputs 8191 (7930 copied from the value buffer, 261 emitted by reduction blocks), inputs 148

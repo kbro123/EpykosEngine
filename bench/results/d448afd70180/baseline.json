@@ -1,0 +1,922 @@
+{
+ "format": "epykos-baseline 1",
+ "fingerprint": {
+  "id": "d448afd70180",
+  "cpu": "Intel(R) Xeon(R) W-3223 CPU @ 3.50GHz",
+  "cores_physical": 8,
+  "cores_logical": 16,
+  "compiler": "Apple clang version 21.0.0 (clang-2100.1.1.101)",
+  "flags": "-O3 -march=x86-64-v3 -fno-math-errno",
+  "os": "Darwin",
+  "arch": "x86_64"
+ },
+ "updated": "2026-09-23T17:30:22+01:00",
+ "note": "accepted baseline per benchmark (medians); updated only by scripts/perf_gate.py --accept in perf commits",
+ "runs": {
+  "hand_m1_hand": {
+   "benchmarks": {
+    "BM_HandEval/0": {
+     "median": 46.41511630567932,
+     "unit": "us",
+     "n": 20,
+     "min": 46.07903779464295,
+     "p90": 46.75090088922857,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:14:42+01:00"
+    },
+    "BM_HandEval/1": {
+     "median": 47.1337015233651,
+     "unit": "us",
+     "n": 20,
+     "min": 46.50572016206472,
+     "p90": 47.398845897005074,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:14:42+01:00"
+    },
+    "BM_HandEval/2": {
+     "median": 54.231671143024755,
+     "unit": "us",
+     "n": 20,
+     "min": 53.65847271143375,
+     "p90": 54.51215406045053,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:14:42+01:00"
+    },
+    "BM_HandEval/3": {
+     "median": 65.90000047284232,
+     "unit": "us",
+     "n": 20,
+     "min": 65.55899382175936,
+     "p90": 66.18183250703382,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:14:42+01:00"
+    },
+    "BM_HandEvalBatch/0": {
+     "median": 708.6548406308643,
+     "unit": "us",
+     "n": 20,
+     "min": 701.4754689286899,
+     "p90": 711.8635617177887,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:14:42+01:00"
+    },
+    "BM_HandEvalBatch/1": {
+     "median": 912.1352246225317,
+     "unit": "us",
+     "n": 20,
+     "min": 906.8710166742534,
+     "p90": 916.4850975323093,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:14:42+01:00"
+    },
+    "BM_HandEvalBatch/2": {
+     "median": 1467.680847175264,
+     "unit": "us",
+     "n": 20,
+     "min": 1460.5155362611792,
+     "p90": 1477.1291765403778,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:14:42+01:00"
+    },
+    "BM_HandEvalBatch/3": {
+     "median": 2246.2523272261024,
+     "unit": "us",
+     "n": 20,
+     "min": 2231.7403350025415,
+     "p90": 2252.328895032406,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:14:42+01:00"
+    },
+    "BM_HandBuild": {
+     "median": 2395.1118501524134,
+     "unit": "us",
+     "n": 20,
+     "min": 2320.825308561325,
+     "p90": 2420.0073579171053,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:14:42+01:00"
+    }
+   },
+   "source": "hand_m1_hand.json",
+   "binary": "build/release/bench/hand_m1_hand_bench",
+   "preset": "release",
+   "commit": "b32182a",
+   "commit_full": "b32182a64f3d1653b1e435bae300955b6a305f3a",
+   "date": "2026-09-23T08:14:42+01:00",
+   "accepted": "2026-09-23T09:12:31+01:00"
+  },
+  "exec_m1_interp": {
+   "benchmarks": {
+    "BM_InterpEval/tile:128/lane_tile:1/exp:0": {
+     "median": 60.267095453031445,
+     "unit": "us",
+     "n": 20,
+     "min": 59.85839935079957,
+     "p90": 60.71699976309587,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEval/tile:256/lane_tile:1/exp:0": {
+     "median": 58.497313747510276,
+     "unit": "us",
+     "n": 20,
+     "min": 57.92785290208386,
+     "p90": 58.710291091977325,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEval/tile:512/lane_tile:1/exp:0": {
+     "median": 56.60011783249736,
+     "unit": "us",
+     "n": 20,
+     "min": 56.279954667608706,
+     "p90": 57.10151754394774,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:128/lane_tile:4/exp:0": {
+     "median": 2100.3808464799354,
+     "unit": "us",
+     "n": 20,
+     "min": 2088.5831179486504,
+     "p90": 2112.6703133306173,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:128/lane_tile:8/exp:0": {
+     "median": 1790.6451274516287,
+     "unit": "us",
+     "n": 20,
+     "min": 1776.5339991896396,
+     "p90": 1800.9076378409081,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:128/lane_tile:16/exp:0": {
+     "median": 1610.6440351333817,
+     "unit": "us",
+     "n": 20,
+     "min": 1603.4768723752784,
+     "p90": 1616.814080355039,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:128/lane_tile:32/exp:0": {
+     "median": 1587.4868937368904,
+     "unit": "us",
+     "n": 20,
+     "min": 1576.3653375740562,
+     "p90": 1596.5896459030253,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:128/lane_tile:64/exp:0": {
+     "median": 1809.2805422061392,
+     "unit": "us",
+     "n": 20,
+     "min": 1802.6615417892895,
+     "p90": 1818.1142832843527,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:256/lane_tile:4/exp:0": {
+     "median": 2035.3630443827974,
+     "unit": "us",
+     "n": 20,
+     "min": 2017.6016967053768,
+     "p90": 2046.9694657044279,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:256/lane_tile:8/exp:0": {
+     "median": 1743.2971340895165,
+     "unit": "us",
+     "n": 20,
+     "min": 1728.068944066763,
+     "p90": 1753.8227184559219,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:256/lane_tile:16/exp:0": {
+     "median": 1608.5325544488364,
+     "unit": "us",
+     "n": 20,
+     "min": 1599.1209154228934,
+     "p90": 1616.212796017697,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:256/lane_tile:32/exp:0": {
+     "median": 1584.0015991918997,
+     "unit": "us",
+     "n": 20,
+     "min": 1571.4922112899578,
+     "p90": 1591.6968298948962,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:256/lane_tile:64/exp:0": {
+     "median": 1821.7518726097687,
+     "unit": "us",
+     "n": 20,
+     "min": 1803.8326940898385,
+     "p90": 1840.034584430131,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:512/lane_tile:4/exp:0": {
+     "median": 1990.6341113324324,
+     "unit": "us",
+     "n": 20,
+     "min": 1976.8318630379738,
+     "p90": 1997.7903730577702,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:512/lane_tile:8/exp:0": {
+     "median": 1738.2994255120432,
+     "unit": "us",
+     "n": 20,
+     "min": 1724.1997751320557,
+     "p90": 1749.5079628359642,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:512/lane_tile:16/exp:0": {
+     "median": 1604.9460030225073,
+     "unit": "us",
+     "n": 20,
+     "min": 1596.005304299038,
+     "p90": 1614.2910857545746,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:512/lane_tile:32/exp:0": {
+     "median": 1586.5418787920073,
+     "unit": "us",
+     "n": 20,
+     "min": 1579.323376717276,
+     "p90": 1597.1666120850805,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:512/lane_tile:64/exp:0": {
+     "median": 1821.746938531437,
+     "unit": "us",
+     "n": 20,
+     "min": 1809.5564457678026,
+     "p90": 1841.2937094727831,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEval/tile:128/lane_tile:1/exp:1": {
+     "median": 53.78825581528399,
+     "unit": "us",
+     "n": 20,
+     "min": 53.37062957107952,
+     "p90": 54.23142661374658,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEval/tile:256/lane_tile:1/exp:1": {
+     "median": 51.714343452556626,
+     "unit": "us",
+     "n": 20,
+     "min": 51.22244584600668,
+     "p90": 51.87570600455179,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEval/tile:512/lane_tile:1/exp:1": {
+     "median": 49.98660004276709,
+     "unit": "us",
+     "n": 20,
+     "min": 49.29578404321099,
+     "p90": 50.3951524569321,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:128/lane_tile:4/exp:1": {
+     "median": 1344.9102007856995,
+     "unit": "us",
+     "n": 20,
+     "min": 1331.7422503057649,
+     "p90": 1350.7361519241742,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:128/lane_tile:8/exp:1": {
+     "median": 1036.8402779999155,
+     "unit": "us",
+     "n": 20,
+     "min": 1032.4205815171201,
+     "p90": 1042.2680811542605,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:128/lane_tile:16/exp:1": {
+     "median": 919.1581371875591,
+     "unit": "us",
+     "n": 20,
+     "min": 909.9800195174896,
+     "p90": 925.2530698423947,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:128/lane_tile:32/exp:1": {
+     "median": 883.0783847566659,
+     "unit": "us",
+     "n": 20,
+     "min": 872.1809337732356,
+     "p90": 888.8623878442056,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:128/lane_tile:64/exp:1": {
+     "median": 1098.4407625512622,
+     "unit": "us",
+     "n": 20,
+     "min": 1087.2574166144727,
+     "p90": 1111.0132839168325,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:256/lane_tile:4/exp:1": {
+     "median": 1288.1294840277271,
+     "unit": "us",
+     "n": 20,
+     "min": 1278.3139347515073,
+     "p90": 1297.4677422869315,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:256/lane_tile:8/exp:1": {
+     "median": 1007.9892189410664,
+     "unit": "us",
+     "n": 20,
+     "min": 994.2783010732113,
+     "p90": 1015.7196919190819,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:256/lane_tile:16/exp:1": {
+     "median": 912.8727889450715,
+     "unit": "us",
+     "n": 20,
+     "min": 905.9063274192043,
+     "p90": 920.0056306341595,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:256/lane_tile:32/exp:1": {
+     "median": 878.9619389296652,
+     "unit": "us",
+     "n": 20,
+     "min": 868.5918872282609,
+     "p90": 884.0083632162746,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:256/lane_tile:64/exp:1": {
+     "median": 1103.49389845023,
+     "unit": "us",
+     "n": 20,
+     "min": 1094.4172791928884,
+     "p90": 1116.6322909562712,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:512/lane_tile:4/exp:1": {
+     "median": 1254.013038424132,
+     "unit": "us",
+     "n": 20,
+     "min": 1247.041040171155,
+     "p90": 1265.6706813388741,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:512/lane_tile:8/exp:1": {
+     "median": 1006.0783536997137,
+     "unit": "us",
+     "n": 20,
+     "min": 997.6859634829557,
+     "p90": 1016.2748519116037,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:512/lane_tile:16/exp:1": {
+     "median": 915.9538227494454,
+     "unit": "us",
+     "n": 20,
+     "min": 907.3452312644898,
+     "p90": 921.6762053801493,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:512/lane_tile:32/exp:1": {
+     "median": 886.5290766175932,
+     "unit": "us",
+     "n": 20,
+     "min": 874.6096058390461,
+     "p90": 895.2239131292281,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpEvalBatch/tile:512/lane_tile:64/exp:1": {
+     "median": 1111.8340437704942,
+     "unit": "us",
+     "n": 20,
+     "min": 1102.1988169546146,
+     "p90": 1123.0869324454868,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpBuild": {
+     "median": 2299.119360084889,
+     "unit": "us",
+     "n": 20,
+     "min": 2147.890261184533,
+     "p90": 2396.783630987539,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    },
+    "BM_InterpPipeline": {
+     "median": 140.48159401863813,
+     "unit": "ms",
+     "n": 20,
+     "min": 135.50229545217007,
+     "p90": 143.71630549430847,
+     "commit": "b32182a",
+     "date": "2026-09-23T08:15:34+01:00"
+    }
+   },
+   "source": "exec_m1_interp.json",
+   "binary": "build/release/bench/exec_m1_interp_bench",
+   "preset": "release",
+   "commit": "b32182a",
+   "commit_full": "b32182a64f3d1653b1e435bae300955b6a305f3a",
+   "date": "2026-09-23T08:15:34+01:00",
+   "accepted": "2026-09-23T09:12:31+01:00"
+  },
+  "adjoint_m1_adjoint": {
+   "benchmarks": {
+    "BM_AdjointEval/tile:128/lane_tile:1": {
+     "median": 416.41153735599937,
+     "unit": "us",
+     "n": 20,
+     "min": 411.21227928280916,
+     "p90": 419.21237860024416,
+     "commit": "8914934",
+     "date": "2026-09-23T10:13:28+01:00"
+    },
+    "BM_AdjointEval/tile:256/lane_tile:1": {
+     "median": 416.2414779314788,
+     "unit": "us",
+     "n": 20,
+     "min": 411.98655347252054,
+     "p90": 418.6532764460631,
+     "commit": "8914934",
+     "date": "2026-09-23T10:13:28+01:00"
+    },
+    "BM_AdjointEval/tile:512/lane_tile:1": {
+     "median": 419.6011493837718,
+     "unit": "us",
+     "n": 20,
+     "min": 415.45545481654636,
+     "p90": 422.1894176341981,
+     "commit": "8914934",
+     "date": "2026-09-23T10:13:28+01:00"
+    },
+    "BM_AdjointEvalBatch/tile:128/lane_tile:8": {
+     "median": 14609.57681564124,
+     "unit": "us",
+     "n": 20,
+     "min": 14415.628999765766,
+     "p90": 14750.545954723892,
+     "commit": "8914934",
+     "date": "2026-09-23T10:13:28+01:00"
+    },
+    "BM_AdjointEvalBatch/tile:256/lane_tile:8": {
+     "median": 15141.095804412746,
+     "unit": "us",
+     "n": 20,
+     "min": 14955.058952586518,
+     "p90": 15288.099452542761,
+     "commit": "8914934",
+     "date": "2026-09-23T10:13:28+01:00"
+    },
+    "BM_AdjointBuild": {
+     "median": 2742.952928464446,
+     "unit": "us",
+     "n": 20,
+     "min": 2472.4704316920706,
+     "p90": 2935.5655889958143,
+     "commit": "8914934",
+     "date": "2026-09-23T10:13:28+01:00"
+    }
+   },
+   "source": "adjoint_m1_adjoint.json",
+   "binary": "build/release/bench/adjoint_m1_adjoint_bench",
+   "preset": "release",
+   "commit": "8914934",
+   "commit_full": "891493472f4b43fffb3ab44aa588c121d872af07",
+   "date": "2026-09-23T10:13:28+01:00",
+   "accepted": "2026-09-23T10:40:47+01:00",
+   "args": [
+    "--benchmark_repetitions=20",
+    "--benchmark_min_time=0.2s",
+    "--benchmark_report_aggregates_only=false",
+    "--benchmark_out_format=json",
+    "--benchmark_filter=^BM_AdjointEval/|^BM_AdjointEvalBatch/tile:(128|256)/lane_tile:8$|^BM_AdjointBuild$"
+   ],
+   "note": "M2 gate: value+adjoint (out_bar = e_book) on the M1 book; B=1 at the D15 tiles, B=64 at lane tile 8 (informational, D9); compare with exec_m1_interp BM_InterpEval exp:0 for the adjoint cost ratio; written by bench/run.sh --name m2 at the M2 gate (raw output tmp/m2.gbench.json, gitignored) and re-keyed by M2/m2-fix to adjoint_m1_adjoint, the name run.sh derives from the binary, so the default invocation is gated (D34); the measurement itself is unchanged"
+  },
+  "solver_m1_implicit": {
+   "benchmarks": {
+    "BM_Run/1/0/0": {
+     "median": 154.44560626486833,
+     "unit": "us",
+     "n": 20,
+     "min": 152.21997692417926,
+     "p90": 155.62743390602623,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/8/0/0": {
+     "median": 909.7209383201387,
+     "unit": "us",
+     "n": 20,
+     "min": 900.5536920959493,
+     "p90": 914.2518082827136,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/64/0/0": {
+     "median": 6986.789987422526,
+     "unit": "us",
+     "n": 20,
+     "min": 6917.760980020209,
+     "p90": 7029.029608863156,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/1/1/0": {
+     "median": 96.14440492666273,
+     "unit": "us",
+     "n": 20,
+     "min": 94.98843636007793,
+     "p90": 96.50745150890482,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/8/1/0": {
+     "median": 476.612541658554,
+     "unit": "us",
+     "n": 20,
+     "min": 472.4139847329395,
+     "p90": 478.6056488537323,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/64/1/0": {
+     "median": 3594.2013715752046,
+     "unit": "us",
+     "n": 20,
+     "min": 3564.1750511832724,
+     "p90": 3601.494689997381,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/1/0/1": {
+     "median": 137.57945570367198,
+     "unit": "us",
+     "n": 20,
+     "min": 136.73741313912853,
+     "p90": 138.22454485515286,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/8/0/1": {
+     "median": 792.8780327016615,
+     "unit": "us",
+     "n": 20,
+     "min": 789.2912584462796,
+     "p90": 798.3613746050237,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/64/0/1": {
+     "median": 6200.4990901591045,
+     "unit": "us",
+     "n": 20,
+     "min": 6147.148025532563,
+     "p90": 6238.66591292123,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/1/1/1": {
+     "median": 94.66917289272476,
+     "unit": "us",
+     "n": 20,
+     "min": 93.65661854154327,
+     "p90": 95.43163439693112,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/8/1/1": {
+     "median": 468.6440209237238,
+     "unit": "us",
+     "n": 20,
+     "min": 464.3394732071708,
+     "p90": 472.0682247231404,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Run/64/1/1": {
+     "median": 3514.658975049476,
+     "unit": "us",
+     "n": 20,
+     "min": 3501.0903920459596,
+     "p90": 3534.797570208394,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_RunSameState/64": {
+     "median": 1674.1005175406794,
+     "unit": "us",
+     "n": 20,
+     "min": 1664.6331795184556,
+     "p90": 1681.0225453896971,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Adjoint/1/0/1": {
+     "median": 505.7942265533718,
+     "unit": "us",
+     "n": 20,
+     "min": 501.03736811045167,
+     "p90": 509.7230614771535,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Adjoint/8/0/1": {
+     "median": 2485.710602611237,
+     "unit": "us",
+     "n": 20,
+     "min": 2464.496499409766,
+     "p90": 2500.795233312861,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Adjoint/1/1/1": {
+     "median": 461.8208504006739,
+     "unit": "us",
+     "n": 20,
+     "min": 457.21196469995436,
+     "p90": 465.0284423460198,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Adjoint/8/1/1": {
+     "median": 2153.9795230357695,
+     "unit": "us",
+     "n": 20,
+     "min": 2138.283639214933,
+     "p90": 2207.193661552782,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_TwoCurves/0/0": {
+     "median": 123.74411614319868,
+     "unit": "us",
+     "n": 20,
+     "min": 123.0410606909701,
+     "p90": 124.39330072284056,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_TwoCurves/1/0": {
+     "median": 198.98114252035538,
+     "unit": "us",
+     "n": 20,
+     "min": 197.43114750776874,
+     "p90": 200.10815949847856,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_TwoCurves/0/1": {
+     "median": 62.148776159745324,
+     "unit": "us",
+     "n": 20,
+     "min": 61.77339198248442,
+     "p90": 62.70924034874176,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_TwoCurves/1/1": {
+     "median": 119.3517699302661,
+     "unit": "us",
+     "n": 20,
+     "min": 118.07404648523732,
+     "p90": 120.0692578307518,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    },
+    "BM_Build": {
+     "median": 24.35707771413339,
+     "unit": "ms",
+     "n": 20,
+     "min": 23.66925508249551,
+     "p90": 24.683675515310217,
+     "commit": "75a8d6b",
+     "date": "2026-09-23T12:19:09+01:00"
+    }
+   },
+   "source": "solver_m1_implicit.json",
+   "binary": "build/release/bench/solver_m1_implicit_bench",
+   "preset": "release",
+   "commit": "75a8d6b",
+   "commit_full": "75a8d6bdf5f83c148428aaa47f12218ade861447",
+   "date": "2026-09-23T12:19:09+01:00",
+   "accepted": "2026-09-23T12:22:26+01:00",
+   "args": [
+    "--benchmark_repetitions=20",
+    "--benchmark_min_time=0.2s",
+    "--benchmark_report_aggregates_only=false",
+    "--benchmark_out_format=json",
+    "--benchmark_repetitions=20",
+    "--benchmark_min_time=0.2s"
+   ]
+  },
+  "stage_a_stage_a": {
+   "benchmarks": {
+    "BM_Record/iterations:1": {
+     "median": 7848.566969973035,
+     "unit": "ms",
+     "n": 20,
+     "min": 7758.564580930397,
+     "p90": 7908.69114222005,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Build/iterations:2": {
+     "median": 1021.2551502627321,
+     "unit": "ms",
+     "n": 20,
+     "min": 1005.6940384674817,
+     "p90": 1031.4039255026728,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Run/1": {
+     "median": 18.173198841395788,
+     "unit": "ms",
+     "n": 20,
+     "min": 17.77296511863824,
+     "p90": 18.651837381185032,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Run/8": {
+     "median": 130.60521375155076,
+     "unit": "ms",
+     "n": 20,
+     "min": 129.0757079841569,
+     "p90": 131.41339900903404,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Run/64": {
+     "median": 1038.7075114995241,
+     "unit": "ms",
+     "n": 20,
+     "min": 1033.8850121479481,
+     "p90": 1041.9560289010406,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Adjoint/1": {
+     "median": 32.63524718931876,
+     "unit": "ms",
+     "n": 20,
+     "min": 32.13875601068139,
+     "p90": 32.76496700709686,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Adjoint/8": {
+     "median": 48.34610759280622,
+     "unit": "ms",
+     "n": 20,
+     "min": 47.8630003441746,
+     "p90": 48.72489732224494,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Adjoint/64": {
+     "median": 280.6500220904127,
+     "unit": "ms",
+     "n": 20,
+     "min": 275.7478530984372,
+     "p90": 281.84918593615294,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Calibrate/0": {
+     "median": 54.96020740829408,
+     "unit": "ms",
+     "n": 20,
+     "min": 54.549905424937606,
+     "p90": 55.19669959321618,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Calibrate/1": {
+     "median": 15.036983715713417,
+     "unit": "ms",
+     "n": 20,
+     "min": 14.968268830623282,
+     "p90": 15.186362789551678,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Evaluate/1/8": {
+     "median": 1.5655296624445632,
+     "unit": "ms",
+     "n": 20,
+     "min": 1.5214198612342666,
+     "p90": 1.5947560327096357,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Evaluate/1/1": {
+     "median": 1.5218997038437765,
+     "unit": "ms",
+     "n": 20,
+     "min": 1.4989350881242292,
+     "p90": 1.5455643872817906,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Evaluate/8/8": {
+     "median": 6.552828337758953,
+     "unit": "ms",
+     "n": 20,
+     "min": 6.495349509858115,
+     "p90": 6.590795042643021,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Evaluate/64/8": {
+     "median": 52.86870668642223,
+     "unit": "ms",
+     "n": 20,
+     "min": 52.29010018520057,
+     "p90": 53.6009204108268,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Evaluate/64/32": {
+     "median": 52.07828730344772,
+     "unit": "ms",
+     "n": 20,
+     "min": 51.778549794107676,
+     "p90": 52.48449598439038,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_Evaluate/64/64": {
+     "median": 57.12895130272955,
+     "unit": "ms",
+     "n": 20,
+     "min": 56.797161186113954,
+     "p90": 57.54169779829681,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    },
+    "BM_ForwardLadder": {
+     "median": 1383.9547419920564,
+     "unit": "ms",
+     "n": 20,
+     "min": 1369.1904831212014,
+     "p90": 1397.2032081801444,
+     "commit": "ee021a3",
+     "date": "2026-09-23T17:19:37+01:00"
+    }
+   },
+   "source": "stage_a_stage_a.json",
+   "binary": "build/release/bench/stage_a_stage_a_bench",
+   "preset": "release",
+   "commit": "ee021a3",
+   "commit_full": "ee021a3f475d3e5ab69190f152d5b87ec38d0ca1",
+   "date": "2026-09-23T17:19:37+01:00",
+   "accepted": "2026-09-23T17:30:22+01:00",
+   "args": [
+    "--benchmark_repetitions=20",
+    "--benchmark_min_time=0.2s",
+    "--benchmark_report_aggregates_only=false",
+    "--benchmark_out_format=json"
+   ]
+  }
+ }
+}

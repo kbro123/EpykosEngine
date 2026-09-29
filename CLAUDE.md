@@ -41,15 +41,35 @@ Two defects found on the way and fixed: `exec::Interpreter` silently left duplic
 unwritten (pre-existing, exposed by the collapse — silent zeros for 19 of 300 trade PVs on a Stage
 A variant), and the generated catalogue registry was stale so coverage had dropped a quarter.
 
-The M4 search — the e-graph, the cost model and layout rules R1–R7 — is **quarantined behind
-`EPYKOS_LEGACY_SEARCH`, default OFF, and deliberately not deleted** (§7.1): the technique has a
-future at term level once §7's measurement says what the residual bidirectional space is worth. R1,
-R2 and R5 now find **zero sites** on both fixtures, because the algebra removed the near-duplicate
-structure they matched.
+**D85, 2026-09-29: the solve cache is built, measured at 0.99x, and reverted.** D82 put ~65 us of a
+74.9 us warm solve in one Jacobian build paid every call, so a seed cache was aimed at the small
+half — measured, it lands exactly on a fixed record-point seed. What replaces it is a **lazy final
+Jacobian**: build `J_z` at the solution when the adjoint or the IFT asks, not at the end of every
+`run`. A re-quote falls **69.0 us → 11.4 us** with the ladder untouched, and because it changes no
+iterate path it costs the contract nothing — D83's §5.2 amendment is withdrawn, and §4a's gate
+restates as a *bitwise* equality. Designed and measured, **not yet implemented** (§10 step 8).
+Dropping the final Jacobian outright is NOT the same thing and is wrong: the O3 ladder goes 6.5%
+wrong at +25bp and 24% at +100bp.
 
-`ctest`: **104/104** default, **129/129** with the legacy search on, on `d448afd70180`. No CI
-evidence yet — none of this has been pushed. `v1.0-m4` tags the pre-rebuild engine. Nothing merges
-to `main` without the owner.
+**D86, 2026-09-29: M4's exit gate is changed, not passed.** The owner took all three of D68 §5's
+recommendations. The cross-stage-optimisation clause is retired on Stage A and the cost model's
+<25% error target with it — a model with ZERO error is worth 0.166% of an O4 lane batch — and the
+optimisation gate is re-pointed at the block solves (~46% of the problem), the reverse ladder
+(24.66%, uncosted) and record-plus-build (26.97%). M4 is not retroactively passed: its gate is
+replaced because the gate was wrong, and D59's account stands unedited. The framework itself never
+failed — saturation fixpoints a 517,036-node tape in 3.9 s, every extracted program verifies — it
+was aimed at 2.513% of the problem.
+
+The M4 search — the e-graph, the cost model and layout rules R1–R7 — stays **quarantined behind
+`EPYKOS_LEGACY_SEARCH`, default OFF, and deliberately not deleted** (§7.1). §10 step 11's
+term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Program`s and it sits
+below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
+the near-duplicate structure they matched.
+
+`ctest`: **131/131** on the release preset at `d448afd70180`. **CI green on all four jobs** (ubuntu
+release / reference / mutation, macos release) at `37fbc68`, which is what `origin/integrate/rebuild`
+points at. That branch is 332 commits ahead of `main`; `v1.0-m4` tags the pre-rebuild engine.
+Nothing merges to `main` without the owner.
 
 ## Rules
 - **`docs/PRINCIPLES.md` is the contract** and outranks every other document, this one included. It is **rewritten in

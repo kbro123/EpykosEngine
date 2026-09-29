@@ -104,10 +104,25 @@ Quotes are synthetic from the seed (stated as synthetic); conventions and tenor 
 Rewrites R1–R7 and the interpreter's planner decisions are expressed as rules with exactness classes; a cost model
 is calibrated from the per-domain profiling timers per fingerprint; **equality saturation** over the domain IR
 enumerates the compositions of the rules and extracts the cheapest program at the requested exactness class;
-AD mode per Jacobian block is a rule; the catalogue is generated from the pipeline's hot groups. Gate: it
-rediscovers M1's three kill-path fusions unaided, finds at least one cross-stage optimisation the greedy pipeline
-cannot express, and every extracted program passes §6 at its declared class. Performance is gated against
-ourselves (D9); the M1 hand kernel and bump-and-recalibrate risk are informational rows.
+AD mode per Jacobian block is a rule; the catalogue is generated from the pipeline's hot groups. Performance is
+gated against ourselves (D9); the M1 hand kernel and bump-and-recalibrate risk are informational rows.
+
+**Gate, as changed on 2026-09-29 (D86, applying D68 §5's three recommendations; the original text and why it
+failed are kept below).** It rediscovers M1's three kill-path fusions unaided, and every extracted program
+passes §6 at its declared class. **The "at least one cross-stage optimisation" clause is RETIRED on Stage A**,
+and so is **the cost model's <25% mean-relative-error target** — both because D68 measured what they are worth
+on this tape and the answer is that a correct implementation cannot satisfy the first and need not satisfy the
+second (0.166% of an O4 lane batch for a cost model with ZERO error, and an estimated 0.080% of the whole
+problem). A clause a correct implementation cannot satisfy is not a gate. **The optimisation gate is re-pointed
+at where the time is**: the block solves (~95% of an O4 lane, ~46% of the problem), the reverse ladder (24.66%,
+today uncosted because `optimise::estimate_program` models `exec::Interpreter` and nothing else), and record
+plus build (26.97%). The next optimisation package is an execution model for `adjoint::Adjoint` so the search
+can see the quarter of the problem where a win has already been measured by other means (D55's 1.11x-1.16x).
+
+**Gate as originally written, for the record:** *"it rediscovers M1's three kill-path fusions unaided, finds at
+least one cross-stage optimisation the greedy pipeline cannot express, and every extracted program passes §6 at
+its declared class."* M4 is **not** retroactively passed by the change above: its gate is replaced because the
+gate was wrong, and D59's account of what held and what missed stands unedited.
 
 **As built (2026-09-24): fail.** All of the above shipped as rules with exactness classes, differential tests
 and mutation tests (D47–D55; 43/43 mutants caught). Two of the three gate clauses in this section's own text
@@ -144,8 +159,9 @@ clock**. Separately,
 the problem that is the reverse ladder — the one part where a real win (the catalogue's 1.11x-1.16x, D55) has
 already been measured. **The cross-stage-win clause above, as written, asks the search for something this tape
 does not contain at the plan level, and a clause a correct implementation cannot satisfy is not a gate.** D68 §5
-sets out three concrete replacements for the owner's decision; none of them is applied here, and the gate text
-above is unchanged pending it.
+sets out three concrete replacements for the owner's decision. **The owner took all three on 2026-09-29 and
+they ARE applied above (D86);** this paragraph is left as written because it records the state on the day D68
+was filed.
 
 ## 8. Milestones (D35; supersedes ROADMAP M3–M5 as first written)
 

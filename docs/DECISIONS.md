@@ -6259,3 +6259,164 @@ Both failures are pre-existing and neither involves the algebra phase: the probe
 `standard_passes`, never `compile`.
 
 `ctest` 131/131, mutation harness: every mutant caught.
+
+## D85 — The solve cache is built, measured, and reverted; the prize is a LAZY final Jacobian, and it costs the contract nothing (2026-09-29)
+
+D83 lifted §4's solver exclusion for "Jacobian reuse and warm-start state" and D82 said where the
+prize was. An explicit caller-held `SolveCache` was built against §4a's four-part gate. **It
+measured 0.99x — it collects nothing — and it is reverted.** It never reached a commit; the diff is
+archived outside the repository. What replaces it is smaller, faster, and needs no weakening of §5.2
+at all.
+
+### 1. Why a seed cache could not have worked, which D82 already implied
+
+D82 located **about 65 us of a 74.9 us warm solve in one Jacobian build paid on every call**,
+whatever else happens. A seed cache attacks the *iteration count*. The Jacobian build is paid
+regardless of where the iteration starts, so the cache was aimed at the small half of a quantity
+whose large half is fixed. That is visible in the measurement below: configuration E (cache) lands on
+configuration B (a fixed record-point seed), because both remove iterations and neither removes the
+Jacobian.
+
+A second reason, specific to how a desk re-quotes: with the bumped quote **rotating**, the cache's
+seed is the solution to a *different* perturbation, so it is no better than the fixed record point.
+A cache is only ahead when successive solves are the same problem ticking, and it cannot know
+whether they are — which is exactly why §4a required the caller to hold it.
+
+### 2. The measurement
+
+One updated quote, +1bp rotating through all 25 quotes, on the `compare_ois` 25-knot calibration-only
+program (log-DF piecewise linear, square block). All five configurations built up front and their
+timing rounds **interleaved in one process** (D68's protocol), 240 rounds, first 40 discarded.
+
+Fingerprint `d448afd70180`, Apple clang 21.0.0, `-O3 -march=x86-64-v3 -fno-math-errno`, load
+1.38-2.37 of 16 logical cores. **Informational under D9**: these are ad-hoc binaries linked against
+`build/release/libepykos.a`, not `bench/run.sh` products — there is no baseline entry, no
+`bench/targets.json` row, and `scripts/perf_gate.py` was not invoked.
+
+| configuration | min us | median | p90 | max iters | knots vs A |
+|---|---|---|---|---|---|
+| A default (cold start, final J) | 242.9 | 327.9 | 341.1 | 4 | — |
+| B `warm_start` (record-point seed) | 182.7 | 202.7 | 266.4 | 3 | 1.5e-12 |
+| C `warm_start`, no final Jacobian | 126.1 | 143.1 | 205.1 | 3 | 1.5e-12 |
+| D `warm_start` + chord (h2h's "hot") | 69.0 | 77.9 | 83.3 | 5 | 1.2e-14 |
+| E `SolveCache` (seed = last solve) | 183.3 | 231.8 | 270.9 | 3 | 1.1e-15 |
+| **F `warm_start` + chord, no final J** | **11.4** | **16.8** | 18.8 | 5 | 1.2e-14 |
+
+Every configuration converged; the block's `solve_tol` is 1e-13. D is the configuration `tools/h2h`
+times as `calibrate_hot` and reported at 88.3 us, so the two agree.
+
+One-time costs, for the denominator: record + pin + record-time solve **1,011 ms**; `ir::infer` plus
+interpreter, adjoint and block solvers **3.9 ms**. Neither is paid again for a new quote.
+
+Batched, 25 lanes with a different quote bumped in each: D is 1,734 us, **69.4 us per lane** —
+0.95x of 25 separate calls, because the chord shares one factorisation across lanes.
+
+### 3. The correction: dropping the final Jacobian is NOT free, and the first check that said it was, was degenerate
+
+Configuration F is 11.4 us, its knots agree with the default to 1.2e-14, and it is **wrong**, because
+the IFT builds the risk ladder from the Jacobian at the solution. Dropping the final build makes the
+O3 ladder use a stale one:
+
+| ladder `d(knot)/d(quote)` vs configuration A | at record | +25bp | +100bp |
+|---|---|---|---|
+| D chord, final J | 0 | 2.6e-12 | 5.4e-12 |
+| **F chord, no final J** | 0 | **6.5e-02** | **2.40e-01** |
+| G warm Newton, no final J | 0 | 2.2e-09 | 6.3e-07 |
+
+A ladder 24% wrong. **Recorded because of how nearly it passed:** the first run of this check
+evaluated the ladder at the record point, where the "stale" Jacobian is the Jacobian at the solution,
+and returned `0.00e+00` for every configuration. A check whose control case is the only case it
+exercises is not a check. §5's error contract says the same thing in general; this is a concrete
+instance of it, and the moving-market rows are the test that has to ship.
+
+### 4. What replaces the cache
+
+**Make the final Jacobian lazy.** Build it when `adjoint`/the IFT actually asks, not eagerly at the
+end of every `run`. A pure re-quote then costs configuration F's 11.4 us; a ladder pays the ~65 us
+exactly when it is wanted, and pays it on the Jacobian at the solution, so the ladder is unchanged.
+
+This is not an approximation and it is not a cache. It changes no iterate path, so:
+
+* **§5.2 needs no conditional exception.** D83's amendment is withdrawn — see §5 below.
+* **§4a's four-part gate mostly does not apply, and restates rather than relaxes.** Clause 1 (an
+  uncached default) and clause 3 (`refreshed` reported) are vacuous. Clause 2 becomes strictly
+  stronger: the lazily-built Jacobian must be **bitwise** equal to the eagerly-built one, not within
+  a tolerance of it. Clause 4's mutant becomes "never build it when asked", and §3's table is the
+  catcher that proves such a mutant cannot survive.
+
+### 5. What this supersedes
+
+**D83's amendment to §5.2 is withdrawn.** There is no solve cache, so nothing makes the landing point
+depend on the SEQUENCE of calls, and reproducibility stops reading "same build, same inputs, same
+call sequence".
+
+It does **not** return to "same build, same inputs" alone, and §5.2 is corrected rather than
+reverted. `ProgramOptions::warm_start` and `jacobian = chord` already existed before D83, already
+change the iterate path, and configuration D above differs from A by 1.2e-14 in the knots and 2.6e-12
+in the ladder. Both depend only on **options and inputs**, never on history, so the honest statement
+is *same build, same inputs, same options* — which is what reproducibility ordinarily means, and what
+a caller can actually reason about.
+
+`ctest` 131/131 on the release preset after the revert; CI green on all four jobs
+(ubuntu release / reference / mutation, macos release) at `37fbc68`.
+
+## D86 — M4's exit gate is changed, not passed: D68's three recommendations are applied (2026-09-29)
+
+D59 recorded M4 as failed on two of `PROBLEM.md` §7's clauses. D63 closed one of them and D68 measured
+the other to be **unreachable on this tape** rather than merely unmet. D68 §5 offered the owner three
+changes to §7 and made none of them. **The owner has taken all three**, and this entry applies them.
+
+### 1. What is being changed, and what is not
+
+Not in question, and restated so the change cannot be read as a retreat: the M4 framework works.
+Equality saturation reaches a real fixpoint on the 517,036-node Stage A tape in 3.9 s at 3.1 GB
+(D62); every extracted program verifies at its declared exactness class; the rules fire on real sites
+(D65, D67); the cost model reads the planner's real plan and prices step pairing to within the spread
+of the measurement (D63); 46/46 mutants caught. **All of it was pointed at 2.513% of the problem.**
+
+The three changes:
+
+1. **The "at least one cross-stage optimisation" clause is retired on Stage A**, with the measurement
+   recorded as the reason. It was evaluated as a ratio of `optimise::estimate_program` estimates. On a
+   tape where the estimated quantity is 2.513% of the work and the whole dynamic range of the three
+   plan decisions is 1.027x-1.042x, the clause asks the search for a plan-level win the tape does not
+   contain. A clause a correct implementation cannot satisfy is not a gate.
+2. **The cost model's <25% mean-relative-error target is retired.** Missed since D48 (84.4%, then
+   58.6% after D63's three fixes). D68's arithmetic is why: a model with **zero** error is worth
+   0.166% of an O4 lane batch — two measured quantities multiplied — and an estimated 0.080% of Stage
+   A's wall clock. If a prediction-error target returns, it belongs on a model that prices something
+   worth optimising.
+3. **The optimisation gate is re-pointed at where the time is.** `optimise::estimate_program` models
+   `exec::Interpreter` and nothing else, and `estimate_jacobian_ns` scales a forward pass by a
+   constant 8.0 rather than modelling the reverse pass — so the search is structurally blind to the
+   **24.66%** of Stage A that is the reverse ladder, the one part where a real win has already been
+   measured by other means (the catalogue's 1.11x-1.16x, D55). The next optimisation package is an
+   execution model for `adjoint::Adjoint`, not more fitting.
+
+### 2. M4's status after this change
+
+**M4 is not retroactively passed.** Its gate is replaced because the gate was wrong, and the two
+clauses that always held still hold: every e-graph-extracted program verifies at its declared
+exactness class, and the self-regression gate against the M3 baseline passes (17/17 benchmarks, 0
+regressions). The rediscovery clause passes on measured wall clock since D63 (1.0164x at B=1, 0.9985x
+at B=64) and **by identity** — the extracted candidate is the default plan's own execution — which
+D63 already records and this entry does not upgrade.
+
+### 3. What it means for the quarantined search
+
+§7.1's quarantine is unaffected: `EPYKOS_LEGACY_SEARCH`, default OFF, 12,219 lines, **not deleted**.
+The owner's own correction on 2026-09-27 stands — equality saturation as a technique has a future
+here. This entry sharpens which one. The quarantined e-graph's e-nodes are whole `ir::Program`s and
+it sits **below** the pin, so §10 step 11's term-level e-graph is a different object, built above the
+pin against §10 step 7's measurement (549 factorable `Mul` pairs under a `Sum` at 16 trades, 15,865
+at 256; 40 `div(exp,exp)` sites where the obvious rule loses at all 40 because the exps are shared).
+Reviving M4's search is not what step 11 means, and retiring the clause above is what makes that
+explicit rather than implied.
+
+### 4. A second line of evidence, from the same day
+
+D85 measured the largest win currently available anywhere in the engine — a lazy final Jacobian, 73
+us to 11.4 us on a re-quote, at no cost to the contract. It sits in the **block solves**, which D68
+measures at about 95% of an O4 lane and 46% of the whole problem, and it is completely invisible to
+the plan-level search. That is change 3 above arriving from an unrelated direction on the same day,
+and it is the reason to take these changes now rather than defer them again.

@@ -241,9 +241,28 @@ gate is stated here rather than left to whoever writes the code:
    indistinguishable from one that never goes stale until it silently fails to converge.
 4. **A mutant for "never refresh on stall"**, which must show as non-convergence on a large move.
 
-**The price, stated where it cannot be missed.** Reusing a stale factorisation changes the iteration
-path. Newton reaches the same root, so the answer is the same *to within the solve tolerance* — and
-not bit-identical. §5.2's reproducibility becomes conditional: see there.
+**Built, measured, declined (D85, 2026-09-29).** The cache above was written to this gate and
+measured **0.99x — it collects nothing**, and it is reverted. D82's own decomposition says why: ~65
+us of a 74.9 us warm solve is one Jacobian build paid on every call, and a seed cache attacks the
+iteration count, not the Jacobian. Measured, the cache lands exactly on a fixed record-point seed
+(183.3 us against 182.7 us), because both remove iterations and neither removes the build.
+
+**What is in scope instead: a LAZY final Jacobian.** Build `J_z` at the solution when `adjoint` or
+the IFT asks for it, not eagerly at the end of every `run`. Measured on the same block, a re-quote
+falls from 69.0 us to **11.4 us** and the ladder is untouched, because when the ladder is wanted the
+Jacobian is still built at the solution. This is laziness, not approximation: it changes no iterate
+path, needs no cache, and costs §5.2 nothing.
+
+**The gate, restated for that shape.** Clauses 1 and 3 above are vacuous — there is no cached path
+and nothing to refresh. Clause 2 becomes *stronger*: the lazily-built Jacobian must be **bitwise**
+equal to the eagerly-built one, not within a tolerance of it. Clause 4's mutant becomes "never build
+it when asked", and it cannot survive: dropping the final Jacobian outright leaves the O3 ladder
+6.5% wrong at +25bp and 24% wrong at +100bp (D85 §3).
+
+**One warning that survives the change of shape.** D85's first version of that ladder check was run
+at the record point, where a stale Jacobian *is* the Jacobian at the solution, and it returned
+`0.00e+00` for every configuration. Any gate on this must exercise a MOVED market; a check whose
+control case is the only case it runs is not a check.
 
 ## 5. The error contract
 
@@ -292,15 +311,24 @@ of the tape: same recording in, same collapsed tape out, on every machine. Below
 bit-identical. So the composed pipeline is **bit-reproducible** — same build, same inputs, same
 bits, every run.
 
-**One conditional exception, and it is the whole price of §4a.** When a caller passes a solve cache,
-the solve is seeded from, and reuses a factorisation from, whatever that cache last held — so the
-iterate path, and therefore the landing point within the solve tolerance, depends on the SEQUENCE of
-calls. Reproducibility there reads *same build, same inputs, **same call sequence***. It is bounded:
-it applies only when a cache is passed, only to the solved unknowns, and only at the solve
-tolerance. Passing nothing leaves every word of the paragraph above intact, which is why the cache
-is an explicit object the caller holds rather than state hidden in the program. What is given up is agreement with the *unoptimised* form, which pinned one
-arbitrary rounding sequence as though it were the answer. Reproducibility is what people mean when
-they ask for bit-identity, and it is kept.
+**Reproducible means: same build, same inputs, SAME OPTIONS.** The third clause is not a weakening;
+it is a statement of what was always true. `ProgramOptions::warm_start` and `jacobian = chord`
+predate this section, and both change a solve's iterate path: measured on the `compare_ois` 25-knot
+block, the chord policy lands 1.2e-14 from the cold Newton default in the knots and 2.6e-12 in the
+IFT ladder, each well inside the block's own 1e-13 solve tolerance (D85 §2, §3). What matters is
+that both depend only on options and inputs and **never on history**, so a caller can reason about
+the result from the call in front of them.
+
+**There is no exception for call sequence, and D83's amendment making one is withdrawn (D85).** A
+solve cache — seeded from, and reusing a factorisation from, whatever the previous call left — would
+have made the landing point depend on the SEQUENCE of calls. One was built against §4a's gate,
+measured at 0.99x, and reverted; nothing in the engine now carries solver state between calls. The
+replacement, a lazily-built final Jacobian, changes no iterate path at all and is required to be
+*bitwise* equal to the eager one.
+
+What is given up is agreement with the *unoptimised* form, which pinned one arbitrary rounding
+sequence as though it were the answer. Reproducibility is what people mean when they ask for
+bit-identity, and it is kept.
 
 **The bitwise gate does not disappear; it re-anchors.** `verify::Tolerance::e0()` today compares the
 compiled path against the templated `double` maths. It comes to compare the executed path against
@@ -586,12 +614,15 @@ arithmetic was never what that gap was made of, and what is left is solver algor
 
 What is next, in order:
 
-8. **The solver gap — IN PROGRESS.** §4a lifted the exclusion on 2026-09-28 (tier 1 being proven
-   was the condition §4 set for itself) for Jacobian reuse and warm-start state, and only those.
-   D82 decomposed it: ~65 us of a 74.9 us warm solve is one Jacobian build paid every call, against
-   a 9.3 us tick on the other side. The shape is an explicit caller-held cache, opt-in, with the
-   uncached path staying the default and the reference. §4a states the four-part gate that has to
-   come with it, and §5.2 states the price.
+8. **The solver gap — IN PROGRESS, and re-aimed 2026-09-29 (D85).** §4a lifted the exclusion on
+   2026-09-28 for Jacobian reuse and warm-start state, and only those. D82 decomposed the gap: ~65
+   us of a 74.9 us warm solve is one Jacobian build paid every call, against a 9.3 us tick on the
+   other side. The first shape tried — an explicit caller-held solve cache — was built to §4a's
+   gate, **measured 0.99x, and is reverted**. The shape now is a **lazy final Jacobian**: build it
+   when the adjoint or the IFT asks, not at the end of every `run`. Measured 69.0 us → **11.4 us**
+   on a re-quote with the ladder untouched, and it changes no iterate path, so §5.2 pays nothing
+   and §4a's gate restates as a *bitwise* equality. Not yet implemented — D85 is the measurement
+   and the design, not the landing.
 9. **Vector transcendentals**, under the §5.3 policy. 81 of the pinned tape's 1,183 nodes are
    `exp`, and it has never been tried.
 10. **The arithmetic-dominated workload** of §6 — and note it is now also the only workload that

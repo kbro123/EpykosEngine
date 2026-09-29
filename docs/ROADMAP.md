@@ -96,10 +96,18 @@ O3's forward mode as `Dual<70>` rather than a tangent interpreter, and the calib
   block as a rule; cross-stage sharing rules (DF domain, factored Jacobian across lanes).
 - Catalogue generated from the Stage A tape's hot groups; coverage report; regeneration no-op in CI.
 
-**Exit gate:** the search rediscovers M1's three kill-path fusions with the planner's hard-coded rules switched off;
-finds at least one cross-stage optimisation the greedy pipeline cannot express; every extracted program passes
-`PROBLEM.md` §6 at its declared class; self-regression gate (D9) against the M3 baseline. Informational rows: the
-M1 sub-book vs the hand kernel under every D27 pairing; adjoint risk vs bump-and-recalibrate.
+**Exit gate, as changed 2026-09-29 (D86; `PROBLEM.md` §7 is authoritative and carries the reasoning):** the search
+rediscovers M1's three kill-path fusions with the planner's hard-coded rules switched off; every extracted program
+passes `PROBLEM.md` §6 at its declared class; self-regression gate (D9) against the M3 baseline. The **cross-stage
+optimisation clause is retired on Stage A** and so is the cost model's <25% prediction-error target: D68 measured a
+cost model with ZERO error at 0.166% of an O4 lane batch, and a clause a correct implementation cannot satisfy is
+not a gate. The optimisation gate is re-pointed at the block solves, the reverse ladder and record-plus-build.
+M4 is **not** retroactively passed — the result below stands unedited. Informational rows: the M1 sub-book vs the
+hand kernel under every D27 pairing; adjoint risk vs bump-and-recalibrate.
+
+**Exit gate as originally written, for the record:** *"…rediscovers M1's three kill-path fusions with the planner's
+hard-coded rules switched off; finds at least one cross-stage optimisation the greedy pipeline cannot express; every
+extracted program passes `PROBLEM.md` §6 at its declared class; self-regression gate (D9) against the M3 baseline."*
 
 **Result (2026-09-24): fail.** On fingerprint `d448afd70180` (Xeon W-3223, 8 cores / 16 threads, Apple clang 21, `-O3
 -march=x86-64-v3 -fno-math-errno`) at `a49ad34` (M4-gate-2, the independent re-verification run; `d8700e8` on top is a

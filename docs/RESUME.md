@@ -1,6 +1,6 @@
 # RESUME — EpykosEngine handoff
 
-**State as of 2026-09-28.** §0 and §1 are STATE and are rewritten in place (PRINCIPLES.md §9).
+**State as of 2026-09-29.** §0 and §1 are STATE and are rewritten in place (PRINCIPLES.md §9).
 Everything from §2 down is the historical log of the M1–M5 run launched 2026-09-22: it is a record
 of what happened, not a description of where things are, and it is not maintained.
 
@@ -9,7 +9,7 @@ of what happened, not a description of where things are, and it is not maintaine
 1. **`docs/PRINCIPLES.md`** — the contract, and it outranks every other document including
    `CLAUDE.md`. §1 is the pin, which is the single idea the engine is now organised around.
 2. `CLAUDE.md` → `docs/DESIGN.md` → `docs/WORKLOADS.md` → `docs/ROADMAP.md`.
-3. `docs/DECISIONS.md` is an append-only **ledger**, D1–D81. **Cite it; do not read it end to
+3. `docs/DECISIONS.md` is an append-only **ledger**, D1–D86. **Cite it; do not read it end to
    end.** The current state is in PRINCIPLES.md and CLAUDE.md's Status, not in the ledger.
 4. `docs/PRIOR_ART.md` is informational.
 

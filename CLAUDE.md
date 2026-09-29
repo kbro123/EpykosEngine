@@ -60,6 +60,16 @@ replaced because the gate was wrong, and D59's account stands unedited. The fram
 failed — saturation fixpoints a 517,036-node tape in 3.9 s, every extracted program verifies — it
 was aimed at 2.513% of the problem.
 
+**D87, 2026-09-29: the thesis has only been applied to half the engine.** Asked why D85's win was
+found by a person rather than by the engine, the answer is structural: ‖JᵀF‖∞ is written in Eigen in
+`src/solver/residual.cpp` because **a derivative cannot be expressed as a tape node** — `Op::Linmap`
+is reserved with no producer, and `adjoint::Adjoint` is a compiled artifact, so differentiation is a
+pipeline STAGE, not an OPERATION. Every quantity defined by a derivative — the diagnostic, the IFT's
+own products, any Hessian — is forced out of the recorded world by construction. Pricing maths is
+recorded and collapses 2,565x; the engine's own numerics are hand-written and get none of it, and
+D68 measures that half at ~95% of an O4 lane. Third independent route to the same place. §1 states
+the limit; D87 §7 gives three options and **decides none** — the owner's call.
+
 The M4 search — the e-graph, the cost model and layout rules R1–R7 — stays **quarantined behind
 `EPYKOS_LEGACY_SEARCH`, default OFF, and deliberately not deleted** (§7.1). §10 step 11's
 term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Program`s and it sits

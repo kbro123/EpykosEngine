@@ -6420,3 +6420,122 @@ us to 11.4 us on a re-quote, at no cost to the contract. It sits in the **block 
 measures at about 95% of an O4 lane and 46% of the whole problem, and it is completely invisible to
 the plan-level search. That is change 3 above arriving from an unrelated direction on the same day,
 and it is the reason to take these changes now rather than defer them again.
+
+## D87 — The engine records its clients' maths and not its own: a derivative is not expressible, so everything defined by one is hand-written (2026-09-29)
+
+Asked why the lazy-Jacobian win of D85 was not found by the engine rather than by a person — "the
+whole thesis of this project is that these abstraction layers should be found rather than hand
+coded" — the answer turned out to be structural, and larger than the win that exposed it.
+
+### 1. The finding, in four lines of the repository
+
+`src/solver/residual.cpp`, at the end of every block solve:
+
+```
+  jtf.noalias() = J.transpose() * F;
+  rep.jtr_inf = inf_norm(jtf_);
+```
+
+That is ‖JᵀF‖∞, the O1 optimality diagnostic — a mathematical expression, written in Eigen. The
+contract says *maths is written once, templated on `Scalar`*, and compiled. This maths was written
+in C++. No pass, cost model or search found the optimisation in it because none of them was ever
+given the expression.
+
+### 2. It could not have been written any other way
+
+**A derivative cannot be expressed as a tape node.** `Op::Linmap` is reserved and has no producer
+anywhere in the tree — it appears only in `src/tape/op.cpp`'s `to_string` table. There is no VJP op
+and no Jacobian op. `adjoint::Adjoint` is a *compiled artifact of the pipeline*, so the engine can
+**differentiate a tape** but cannot **represent a derivative as a tape**. Differentiation is a
+pipeline STAGE, not an OPERATION.
+
+So every quantity whose definition mentions a derivative is forced out of the recorded world by
+construction: this diagnostic, the IFT's own λ = J_z⁻ᵀ z̄ and p̄ −= J_pᵀ λ, and any Hessian,
+cross-gamma or second-order risk that is ever wanted. Whoever wrote those two lines had no
+alternative available to them.
+
+### 3. What was actually missed, stated precisely
+
+Not an unsimplified expression. `ResidualProgram::jacobian` and `ResidualProgram::jt_product` are
+the SAME primitive — `adj_->run` — differing only in the seed:
+
+| | seed | lanes | measured, 25-unknown block |
+|---|---|---|---|
+| `evaluate()` | — | — | 1.94 us min / 2.15 median |
+| `jt_product()` | `v` | **1** | **4.91 / 5.37** |
+| `jacobian()` | identity | `n_r` | **52.07 / 57.06** |
+
+Cost is linear in seed rank, and that linearity is the whole 10.6x. ‖JᵀF‖∞ needs rank 1 seeded with
+F; the solver asks for rank 25 and uses a twenty-fifth of it for that purpose. (It keeps the rest
+for the IFT, which does need a factorisation — which is why D85's fix is *lazy*, not *never*.)
+
+"Do not materialise J when only Jᵀv is wanted" is the most standard optimisation in automatic
+differentiation. The engine owns both paths and chooses between them by hand, because the *request*
+is a C++ function call and the choice of what to ask for is expressed nowhere any analysis reads.
+
+Fingerprint `d448afd70180`, Apple clang 21.0.0, `-O3 -march=x86-64-v3 -fno-math-errno`, load 1.82 of
+16 logical cores, 600 rounds with the first 100 discarded. **Informational under D9.**
+
+### 4. The general statement, and why it is the thesis and not a detail
+
+**The thesis has only ever been applied to the product's maths, never to the engine's own.**
+
+Pricing maths is recorded: it collapses 2,565x on one SOFR calibration (D85 §2), it gets a
+mechanical adjoint, a cost model and a search. Solver maths — the Newton step, the diagnostic, the
+IFT — is hand-written and gets none of it. And D68 measured that hand-written half at about **95% of
+an O4 lane and 46% of the whole Stage A problem**.
+
+The boundary is NOT the solver call. `compile()` runs inside the residual slice
+(`src/solver/residual.cpp:47`) and collapses it to 402 values; optimisation crosses that boundary
+perfectly well. The boundary is that one body of maths could not be written down.
+
+This is now the **third independent route to the same place**: D68 measured that
+`optimise::estimate_program` models `exec::Interpreter` and nothing else and is blind to the block
+solves; D85 found the largest available win living in those solves; this entry finds that the solves'
+maths is not recorded, so nothing could have reasoned about it.
+
+### 5. What "applying the thesis to itself" would and would not mean
+
+**Not** recording the Newton loop. A fixpoint is not an expression, and the implicit-function rule
+exists precisely so that nothing differentiates through the iteration. The loop stays imperative.
+
+But every QUANTITY the loop computes could be a recorded expression over the residual program:
+
+| | today | self-hosted |
+|---|---|---|
+| residual `F` | recorded | recorded |
+| Jacobian / VJP | `adj_->run`, seed chosen by hand at the call site | a derivative node; the seed is data |
+| ‖JᵀF‖∞ | Eigen, in C++ | recorded — and its rank-1 nature is then visible |
+| IFT products | Eigen, in C++ | recorded |
+
+Then `simplify` can see that the diagnostic is a rank-1 VJP, a cost model can price seed rank, and
+D85's fix is FOUND instead of remembered. It generalises: every later caller wanting a directional
+derivative, a Hessian-vector product or one row of a ladder gets the right cost by construction.
+
+`Op::Linmap` was reserved for approximately this and never built.
+
+### 6. What this entry does NOT claim
+
+It is a finding, not a plan, and nothing here is scheduled.
+
+* **No measurement says it pays.** D85's 52 us is what EXPOSED the gap, not a justification for
+  closing it this way — that one is fixed by hand in an afternoon. The case for self-hosting rests
+  on there being a FAMILY of such findings, which is a belief, not a measurement. The evidence for
+  the belief is that this one was invisible to every reader of the code for four milestones.
+* **It is a large build** and it touches the one subsystem §4 excluded and §4a only partly lifted.
+* **It does not supersede D85 or D86.** The lazy Jacobian should be built regardless; it needs none
+  of this.
+
+### 7. The decision, for the owner
+
+`PRINCIPLES.md` §1 defines the pin as the line between WHICH expression to evaluate and HOW to
+evaluate it. It has never said that a second body of maths sits outside both. §1 is amended in this
+commit to state the limit; **what to do about it is not decided here.** Three options:
+
+1. **Leave it.** Hand-write the engine's own numerics, instrument them, and find this class of win
+   by measuring. Cheapest, honest, and it means a person finds every one of them.
+2. **A derivative operator** (`Op::Linmap` or its successor), so derivative-defined quantities become
+   recorded expressions. This is the self-hosting answer and the one that makes the thesis true of
+   the whole engine.
+3. **A cost model that covers the solver** — D68's own recommendation 3. Narrower than (2): it would
+   let a SEARCH see this class of choice without making the maths recordable.

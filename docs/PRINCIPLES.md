@@ -63,6 +63,21 @@ operations, transcendental calls — not modelled.
 **Below the pin the engine chooses HOW to evaluate THAT expression.** It is judged bit-identical to
 the pinned tape, under the declared policy of §5.3. Its objective is wall clock.
 
+**Both of those sentences say EXPRESSION, and that is a limit, not a figure of speech (D87).** The
+pin governs recorded maths. It says nothing about maths that was never recorded — and there is a
+second body of it: the engine's OWN numerics. The Newton step, the optimality diagnostic ‖JᵀF‖∞ and
+the implicit-function rule's own products are written in C++ and Eigen in `src/solver/`, so no pass,
+cost model or search above or below the pin can see them. That is not a slip. **A derivative cannot
+be expressed as a tape node** — `Op::Linmap` is reserved with no producer anywhere, `adjoint::Adjoint`
+is a compiled artifact of the pipeline, and so differentiation is a pipeline STAGE, not an
+OPERATION. Every quantity whose definition mentions a derivative is therefore forced out of the
+recorded world by construction.
+
+The consequence is measured, not feared: D68 puts the hand-written half at about 95% of an O4 lane
+and 46% of the whole Stage A problem, and D85's largest available win sat unseen inside it for four
+milestones. **The thesis — maths is written once and compiled — has so far been applied to the
+product's maths and never to the engine's own.** D87 §7 states the options and decides none of them.
+
 The pin is a stage boundary, not a per-rule judgement. A rewrite is licensed by **which side of the
 pin it is on** — a structural fact, not an argument to be had case by case. This replaces "every
 rewrite declares an exactness class E0/E1", which made each rule a separate negotiation and returned
@@ -630,6 +645,13 @@ What is next, in order:
 11. **The term-level e-graph**, built against §7's measurement rather than a guess.
 12. **Tier 2 opens**, with `ExpMode::poly` as its first citizen — blocked on its own entry
     criterion, that it become lane-width independent (D80).
+
+**Not in this list, because it is not scheduled and the owner has not decided it (D87).** The
+engine's own numerics are not recorded, and cannot be, because a derivative is not expressible as a
+tape node. That is where D68 measures ~95% of an O4 lane to be and where D85's win was hiding. D87
+§7 sets out three options — leave it and instrument by hand; build a derivative operator and
+self-host the thesis; or give the cost model a solver (D68's recommendation 3). It is listed here
+rather than numbered because its priority against steps 8–12 is a decision, not an ordering.
 
 Nothing in this list rewrites anything below the pin, because nothing below the pin is implicated —
 with one exception already taken: D81 §6(a), a pre-existing interpreter defect the collapse exposed.

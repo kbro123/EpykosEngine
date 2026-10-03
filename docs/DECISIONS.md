@@ -6539,3 +6539,148 @@ commit to state the limit; **what to do about it is not decided here.** Three op
    the whole engine.
 3. **A cost model that covers the solver** — D68's own recommendation 3. Narrower than (2): it would
    let a SEARCH see this class of choice without making the maths recordable.
+
+## D88 — What earns the name "operator": the promotion test, the two classes, and the category the contract does not have (2026-10-03)
+
+Following D87, the owner: *"do we need to brainstorm what in the realm of financial modelling are the
+key operators and/or define a search method and metric for determining what is an operator. I want
+this engine to find these things automatically — that's the essence of the magic we're trying to
+create."* This entry states the question properly and **decides none of it**.
+
+### 1. One quarter of this is already built, and it works
+
+`catalogue::Signature` fingerprints a fused group's op sequence, deliberately blind to everything
+data-dependent — row counts, literal/column/gather VALUES, which table entry a slot names — and
+sensitive only to the SHAPE the maths takes. A build-time tool runs the reference workloads,
+collects the shapes that occur, emits C++ and compiles it in. It is keyed on IR structure, never on
+an instance count (HARD RULE 9), and its gate is that a SECOND SEED of Stage A hits the same
+kernels. It measured a real win: **1.11x-1.16x on the reverse risk ladder** (D55).
+
+So automatic discovery of recurring computational structure is not hypothetical here. It exists and
+it paid.
+
+### 2. But it discovers KERNELS, not OPERATORS
+
+A **kernel** is a fast implementation of a shape. An **operator** is a shape that additionally
+carries an algebra, a derivative rule, and a structural property a planner or cost model can
+exploit. `Sum` is an operator: it reassociates, fuses with `Gather`, decomposes into a scan. A
+catalogue entry is a macro with a good implementation.
+
+**The promotion test, proposed:** a recurring subgraph earns operator status when abstracting it
+unlocks something the expanded form cannot express. Four unlocks:
+
+1. a cheaper evaluation — *the catalogue already scores this one*;
+2. a cheaper derivative;
+3. an algebraic identity invisible below the abstraction;
+4. a structural property the planner or cost model can exploit (linearity, monotonicity, rank).
+
+§6 below shows why the test must also carry a NEGATIVE term, which no existing machinery has.
+
+### 3. Two classes, and only one is discoverable
+
+**Domain operators** — `Erf`/N(d), `Pow`, an expectation, a barrier payoff. **Not discoverable.**
+The engine finds structure in maths that was written down; it cannot invent the normal CDF if no
+swaption was ever recorded. Which of these exist is a PRODUCT COVERAGE decision, not a search.
+
+**Structural operators** — VJP, scan, segment-sum, linmap, telescope. **Discoverable**, and §1 is the
+existence proof at one level.
+
+Stated because the distinction bounds what "automatic" can mean. No search produces maths it has
+never been shown.
+
+### 4. D87 is a prerequisite, not a parallel track
+
+The corpus today is pricing maths only. The highest-value structural-operator candidate is **the
+derivative itself**, and it cannot appear in a corpus that excludes the engine's own numerics (D87).
+Mine the tapes today and the VJP does not show up — for exactly the reason D85's win did not.
+
+One consequence is worth having. Build the derivative operator by hand first; then, if a later
+search independently rediscovers it as a top candidate, **that is evidence the metric works**. A
+known-answer test for a discovery search is cheap and rare, and this one comes free.
+
+### 5. The worked example: an error-bounded Taylor replacement
+
+The owner asked whether replacing a non-linear function by a Taylor expansion within an error band
+is an operator. It is the sharpest case available, because it breaks instructively.
+
+First, it is two things. The REPLACEMENT is a rewrite (A → B within ε); what could be an OPERATOR is
+the node carrying the approximation. Both halves are already designed and unbuilt:
+`maths/exp_poly.hpp` with `ExpMode::poly` is the implementation side (§5.3, tier 2, blocked on
+lane-width independence, D80), and `include/epykos/algebra/error.hpp` is the admission criterion —
+*"a rewrite is never admissible BECAUSE it preserves bits. It is admissible when its composed error
+fits the output class's budget."*
+
+Second, ALTITUDE decides everything. `Poly(c, x)` gains polynomial algebra and **loses exp's
+identities**. `Exp_ε(x)` keeps the identities and changes only evaluation.
+
+**Taylor-expanding the discount factors would destroy the 2,565x collapse.** The telescope rule
+cancels RATIOS OF EXPONENTIALS; ratios of degree-5 polynomials do not cancel. 97,184 observation
+days collapse to one divide per coupon precisely BECAUSE the DFs are exps. The repository already
+holds the miniature version of this lesson: `tests/tape/residual_space_test.cpp` measures
+`div(exp,exp) -> exp(sub)` — obviously good in isolation — **losing at all 40 sites**, because
+consecutive telescoped coupons share endpoint DFs so the exps stay live and the rewrite only adds
+nodes.
+
+**So an approximation node earns operator status only when the algebra it ENABLES outweighs the
+algebra it DESTROYS** — a whole-program question. That is the negative term §2's test lacks, and
+nothing in the engine prices it.
+
+**An untested hypothesis, recorded as a hypothesis.** D82 found a closed-form Jacobian inapplicable
+because *"0 of 1 residual output domains satisfy `is_linmap_domain` — the residual is a par rate
+minus a quote and every discount factor is `exp` of an affine function."* A polynomial DF changes
+that premise: the residual could become polynomial in the knots, possibly linmap-eligible, and
+D82's closed form might return — attacking the calibration gap from a direction nothing else has.
+NOT MEASURED, and it trades directly against the collapse above, which is the point: it cannot be
+settled by argument, only by a cost model that sees both effects at once.
+
+### 6. The finding: the contract licenses this nowhere
+
+Checked against the text, not recalled.
+
+* **Above the pin** (§1): judged against the recorded expression *in exact real arithmetic*.
+  Telescoping passes — a product of ratios IS the ratio of the endpoints in exact arithmetic.
+  Truncation **fails**: it is not a different rounding of the same function, it is a different
+  function.
+* **Below the pin** (§5.3): the transcendental is a declared build policy, and *"Changing the policy
+  changes the answer. It is a versioned, recorded decision — **never an optimisation the search may
+  make.**"*
+
+| | licensed by | status |
+|---|---|---|
+| exact-real identities above the pin (telescoping) | the pin | **built**, 2,565x |
+| implementation choice below the pin (libm vs poly `exp`) | §5.3 policy, tier 2 | designed, unbuilt, explicitly NOT searchable |
+| **approximate rewrites above the pin (Taylor)** | **nothing** | designed only in `algebra/error.hpp` |
+
+The third row is empty by design, not by oversight: §5.3's rule is what keeps the pipeline
+bit-reproducible. Opening it is a deliberate loosening and a bigger one than D79 made — today
+reproducibility rests on the POLICY being fixed; if a search may choose the approximation, the
+BUDGET has to become the guarantee instead.
+
+This is also the second reason not to prune `include/epykos/algebra/error.hpp`, which D85's sweep
+flagged as having one consumer: it is the only design in the tree for admitting that third category.
+
+### 7. The ceiling, measured before fitting rather than after (D68's lesson, used prospectively)
+
+What §5 and §6 describe is **three stacked research steps**: a term-level e-graph, error-carrying
+equivalence, and an operator-promotion metric. M4 was ONE research step and it consumed a milestone.
+
+Before any of it, the cheap test: **mine the existing tapes for frequent connected subgraphs and
+read the top fifty by hand. One day.** That says empirically whether D87 exposed a FAMILY or a
+one-off. If no workload can be named where a missing operator costs more than ~10%, do not build
+the search — that is M4 again, a sophisticated search aimed at a small share.
+
+And note where the ceiling is small *today*: the collapse is already 2,565x and D85 established the
+remaining calibration gap as solver algorithm, not arithmetic. An approximation search pays on an
+`exp`-dominated Monte Carlo workload, which does not exist in this engine. **The search gets more
+valuable as the corpus gets broader**, which argues breadth before cleverness.
+
+### 8. What is decided here
+
+Nothing. The promotion test of §2, the two classes of §3 and the three-tier table of §6 are offered
+as the vocabulary for the decision, not as the decision. Sequencing, for the owner:
+
+1. Build D85's lazy Jacobian — known, measured, an afternoon, and independent of all of this.
+2. Decide D87 §7 — a derivative operator is what makes the corpus complete.
+3. Run §7's one-day mining probe — a ceiling measurement, not a build.
+4. Only if (3) shows a family: the discovery search, reusing the quarantined e-graph at term level
+   (§7.1), which is the use it was kept for.

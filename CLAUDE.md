@@ -68,7 +68,12 @@ pipeline STAGE, not an OPERATION. Every quantity defined by a derivative — the
 own products, any Hessian — is forced out of the recorded world by construction. Pricing maths is
 recorded and collapses 2,565x; the engine's own numerics are hand-written and get none of it, and
 D68 measures that half at ~95% of an O4 lane. Third independent route to the same place. §1 states
-the limit; D87 §7 gives three options and **decides none** — the owner's call.
+the limit; D87 §7 gives three options and **decides none** — the owner's call. **D88** follows it
+with the vocabulary for the next question — what earns the name *operator* (the catalogue already
+discovers kernels and measured 1.11–1.16x; an operator is a kernel that also carries an algebra, a
+derivative rule and a structural property), which operators are discoverable at all, and the finding
+that a rewrite which is inexact-but-within-budget is licensed **nowhere** in this contract: it fails
+the pin's exact-real test above and §5.3 forbids the search from choosing it below. Also undecided.
 
 The M4 search — the e-graph, the cost model and layout rules R1–R7 — stays **quarantined behind
 `EPYKOS_LEGACY_SEARCH`, default OFF, and deliberately not deleted** (§7.1). §10 step 11's

@@ -420,6 +420,18 @@ above the pin and constant below it, exactly as compilers treat `-ffp-contract`:
 Below the pin therefore reads, in full: **bit-identical to the pinned tape under the declared
 contraction and transcendental policy.**
 
+**What this rule closes off, stated so it is a choice and not an accident (D88).** Between the two
+sides there is a third kind of rewrite with no home: one that is *not* an identity in exact real
+arithmetic but is within a stated error budget — replacing a non-linear function by a truncated
+series, say. Above the pin it fails the test, because it is a different function and not a
+different rounding of the same one. Below the pin the paragraphs above forbid the search from
+choosing it. So it is licensed **nowhere**, and deliberately: this rule is what keeps the pipeline
+bit-reproducible. Admitting that category would mean the composed error BUDGET becomes the
+guarantee in place of a fixed POLICY — a larger loosening than D79 made.
+`include/epykos/algebra/error.hpp` is the only design in the tree for it. D88 §5 works the example
+through, including the reason it is not obviously a win: expanding the discount factors would
+destroy the telescope that collapses the tape 2,565x. **Not decided.**
+
 ### 5.4 What this retires
 
 The `-ffp-contract=off` pinning and the `*_e0.cpp` / `*_e0_test.cpp` convention exist to make results

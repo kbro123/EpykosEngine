@@ -200,7 +200,23 @@ int Factors::n_unknowns() const noexcept { return impl_->n_z; }
 int Factors::n_params() const noexcept { return impl_->n_p; }
 bool Factors::square() const noexcept { return impl_->square; }
 
+namespace {
+// Every consumer below reads a decomposition that `compute` builds. Since D85, a forward-only
+// `ImplicitProgram::run` deliberately leaves a lane's Factors UNBUILT — the IFT is the only thing
+// that needs one, and it is `adjoint` that asks. So "nobody built this" is now a reachable state
+// and has to fail loudly: an unguarded Eigen decomposition of size zero quietly returns zeros,
+// and a silently all-zero risk ladder is the worst possible way to learn about it.
+void require_valid(bool ok, const char* what) {
+  if (!ok) {
+    throw std::logic_error(std::string("solver::Factors::") + what +
+                           ": the Jacobian was never factorised. ImplicitProgram::run defers it "
+                           "(D85); only adjoint() builds one. A consumer reaching it here is a bug.");
+  }
+}
+}  // namespace
+
 void Factors::solve(const double* rhs, double* dz) const {
+  require_valid(impl_->valid, "solve");
   const Impl& im = *impl_;
   VecMap b(rhs, im.n_r);
   VecMapMut x(dz, im.n_z);
@@ -212,6 +228,7 @@ void Factors::solve(const double* rhs, double* dz) const {
 }
 
 void Factors::solve_transposed(const double* z_bar, double* lambda) const {
+  require_valid(impl_->valid, "solve_transposed");
   const Impl& im = *impl_;
   VecMap zb(z_bar, im.n_z);
   VecMapMut l(lambda, im.n_r);
@@ -228,6 +245,7 @@ void Factors::solve_transposed(const double* z_bar, double* lambda) const {
 }
 
 void Factors::jp_transposed(const double* lambda, double* out) const {
+  require_valid(impl_->valid, "jp_transposed");
   const Impl& im = *impl_;
   if (im.n_p == 0) return;
   VecMap l(lambda, im.n_r);
@@ -236,6 +254,7 @@ void Factors::jp_transposed(const double* lambda, double* out) const {
 }
 
 void Factors::jp_times(const double* dp, double* out) const {
+  require_valid(impl_->valid, "jp_times");
   const Impl& im = *impl_;
   VecMapMut o(out, im.n_r);
   if (im.n_p == 0) {
@@ -257,6 +276,7 @@ void Factors::ift_adjoint(const double* z_bar, double* lambda, double* p_bar) co
 }
 
 void Factors::ift_tangent(const double* dp, double* scratch, double* dz) const {
+  require_valid(impl_->valid, "ift_tangent");
   const Impl& im = *impl_;
   jp_times(dp, scratch);
   for (int i = 0; i < im.n_r; ++i) scratch[idx(i)] = -scratch[idx(i)];
@@ -304,7 +324,8 @@ double inf_norm(const std::vector<double>& v) noexcept {
 }
 }  // namespace
 
-SolveReport BlockSolver::solve(const double* p, double* z, Factors& factors, const Factors* shared) {
+SolveReport BlockSolver::solve(const double* p, double* z, Factors& factors, const Factors* shared,
+                               bool want_factors) {
   const int n_z = rp_.n_unknowns();
   const int n_r = rp_.n_residuals();
   const int n_p = rp_.n_params();
@@ -388,10 +409,36 @@ SolveReport BlockSolver::solve(const double* p, double* z, Factors& factors, con
   rep.iterations = it;
   rep.converged = r_inf < options_.tol;
   rep.residual_inf = r_inf;
+  // ---- the exit Jacobian, and the diagnostic that does NOT need it (D85, D87) -----------------
+  //
+  // ‖JᵀF‖∞ is a VECTOR, JᵀF, not the matrix J. One reverse lane seeded with F computes it
+  // directly; materialising all n_z columns to contract them back down costs 10.6x more
+  // (52.07 us against 4.91 us on the 25-unknown compare_ois block, D87 §3). So the diagnostic
+  // always takes the matrix-free path, whether or not anything wants the factorisation.
+  //
+  // It is the SAME quantity by a different summation order, so it is not bitwise what the
+  // materialised path produced: measured 1.2e-16 to 4.6e-16 relative over a 0-100bp market
+  // (D85). That is a few ulps on a convergence diagnostic and is declared, not hidden.
+  //
+  // The FACTORISATION is built only when a caller is going to use it — `want_factors`, which
+  // ImplicitProgram::adjoint passes and ImplicitProgram::run does not. A pure re-quote never
+  // pays for it; the risk ladder pays once, on the Jacobian at the solution, so the ladder is
+  // bitwise what it always was. This is laziness, not approximation: the build, when it happens,
+  // is the same call at the same point.
+  //
   // Mutant implicit.stale_jacobian: the last iterate's Jacobian stands in for the solution's
   // (a 1e-9 relative error in the IFT: below the bump gate, above the forward-mode gate).
   const bool final_jacobian = options_.final_jacobian && !mutant("implicit.stale_jacobian");
-  if (final_jacobian || !have_own) {
+  // F_try_ absorbs jt_product's forward output: F_ is the converged residual every caller reads
+  // through residual(), and the adjoint's forward pass is not required to round like the
+  // interpreter's, so it must not land there.
+  rp_.jt_product(z, p, F_.data(), F_try_.data(), jtf_.data(), nullptr);
+  rep.jtr_inf = inf_norm(jtf_);
+  // Mutant solver.lazy_jacobian_never_builds: honour the deferral even when the caller says it
+  // needs the factorisation. The forward answer is untouched; the IFT then runs on a stale or
+  // absent Jacobian, which a MOVED market shows and the record point does not (D85 §3).
+  const bool build = want_factors && !mutant("solver.lazy_jacobian_never_builds");
+  if (build && (final_jacobian || !have_own)) {
     if (final_jacobian || shared == nullptr) {
       rp_.jacobian(z, p, F_.data(), Jz_.data(), n_p > 0 ? Jp_.data() : nullptr);
       ++rep.jacobians;
@@ -399,17 +446,14 @@ SolveReport BlockSolver::solve(const double* p, double* z, Factors& factors, con
       have_own = true;
     }
   }
-  if (have_own) {
+  if (!build) {
+    // Nothing asked for it. Leave `factors` invalid rather than stale: a consumer that reaches
+    // for it has a bug, and an invalid Factors says so immediately.
+    factors = Factors();
+  } else if (have_own) {
     factors = own_;
-    // ‖Jᵀ F‖∞ with the Jacobian held in own_ (at the solution when final_jacobian).
-    MapRow J(Jz_.data(), n_r, n_z);
-    VecMap F(F_.data(), n_r);
-    VecMapMut jtf(jtf_.data(), n_z);
-    jtf.noalias() = J.transpose() * F;
-    rep.jtr_inf = inf_norm(jtf_);
   } else {
     factors = *shared;
-    rep.jtr_inf = std::nan("");
   }
   return rep;
 }

@@ -144,11 +144,22 @@ class BlockSolver {
   BlockSolver(const BlockSolver&) = delete;
   BlockSolver& operator=(const BlockSolver&) = delete;
 
-  // Solves F(z, p) = 0 from z in place. `factors` receives J at the exit point (the solution
-  // when it converged and options.final_jacobian; else the last iterate's, or, under the chord
-  // policy without a refresh and without final_jacobian, a copy of `shared`). `shared`, when
-  // given under JacobianPolicy::chord, drives the steps. residual() holds F at exit.
-  SolveReport solve(const double* p, double* z, Factors& factors, const Factors* shared = nullptr);
+  // Solves F(z, p) = 0 from z in place. `shared`, when given under JacobianPolicy::chord, drives
+  // the steps. residual() holds F at exit.
+  //
+  // `want_factors` (D85): whether anything is going to USE `factors`. True gives today's
+  // behaviour exactly — `factors` receives J at the exit point (the solution when it converged
+  // and options.final_jacobian; else the last iterate's, or, under the chord policy without a
+  // refresh and without final_jacobian, a copy of `shared`). False skips the whole build and
+  // leaves `factors` INVALID, because a pure forward solve never looks at it: measured 69.0 us
+  // to 11.4 us on one re-quote of the 25-knot compare_ois block. The report's ‖JᵀF‖∞ is
+  // unaffected either way — it is a vector, and takes one reverse lane rather than the matrix.
+  //
+  // This is laziness, not approximation. When the build happens it is the same call at the same
+  // point, so a ladder taken through the deferred path is BITWISE what the eager path produced;
+  // `tests/solver/lazy_jacobian_verify_test.cpp` is that gate.
+  SolveReport solve(const double* p, double* z, Factors& factors, const Factors* shared = nullptr,
+                    bool want_factors = true);
   const std::vector<double>& residual() const noexcept { return F_; }
   const SolveOptions& options() const noexcept { return options_; }
 

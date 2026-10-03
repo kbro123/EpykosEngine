@@ -262,8 +262,8 @@ us of a 74.9 us warm solve is one Jacobian build paid on every call, and a seed 
 iteration count, not the Jacobian. Measured, the cache lands exactly on a fixed record-point seed
 (183.3 us against 182.7 us), because both remove iterations and neither removes the build.
 
-**What is in scope instead: a LAZY final Jacobian.** Build `J_z` at the solution when `adjoint` or
-the IFT asks for it, not eagerly at the end of every `run`. Measured on the same block, a re-quote
+**What is in scope instead: a LAZY final Jacobian — BUILT 2026-10-03, D89.** Build `J_z` at the
+solution when `adjoint` or the IFT asks for it, not eagerly at the end of every `run`. Measured on the same block, a re-quote
 falls from 69.0 us to **11.4 us** and the ladder is untouched, because when the ladder is wanted the
 Jacobian is still built at the solution. This is laziness, not approximation: it changes no iterate
 path, needs no cache, and costs §5.2 nothing.
@@ -650,6 +650,13 @@ What is next, in order:
    on a re-quote with the ladder untouched, and it changes no iterate path, so §5.2 pays nothing
    and §4a's gate restates as a *bitwise* equality. Not yet implemented — D85 is the measurement
    and the design, not the landing.
+
+   **LANDED 2026-10-03 (D89), and the measurement beat the design's own projection.** Paired
+   before/after, same box, three alternating rounds at load 1.95–1.97: the h2h "hot"
+   configuration goes **69.0–70.7 us → 15.1–15.5 us, 4.6x**, and the cold default 241 → 188
+   (1.28x), which was not predicted. The ladder is unchanged and asserted *bitwise* through
+   history independence. `final_jacobian = false` is 3.7 us SLOWER and correctly so: it was fast
+   and wrong.
 9. **Vector transcendentals**, under the §5.3 policy. 81 of the pinned tape's 1,183 nodes are
    `exp`, and it has never been tried.
 10. **The arithmetic-dominated workload** of §6 — and note it is now also the only workload that

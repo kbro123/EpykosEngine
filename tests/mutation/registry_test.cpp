@@ -56,6 +56,7 @@ const std::vector<std::string> documented = {
     "implicit.ift_not_transposed",
     "implicit.ift_drop_fp",
     "implicit.stale_jacobian",
+    "solver.lazy_jacobian_never_builds",
     "expander.scan_carry_from_init",
     "interpreter.scan_drop_last_wave",
     "adjoint.scan_forward_order",

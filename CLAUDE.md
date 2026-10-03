@@ -47,7 +47,10 @@ half — measured, it lands exactly on a fixed record-point seed. What replaces 
 Jacobian**: build `J_z` at the solution when the adjoint or the IFT asks, not at the end of every
 `run`. A re-quote falls **69.0 us → 11.4 us** with the ladder untouched, and because it changes no
 iterate path it costs the contract nothing — D83's §5.2 amendment is withdrawn, and §4a's gate
-restates as a *bitwise* equality. Designed and measured, **not yet implemented** (§10 step 8).
+restates as a *bitwise* equality. **Built 2026-10-03 (D89)**: paired before/after at load 1.95–1.97,
+**69.0–70.7 us → 15.1–15.5 us (4.6x)** on the h2h hot configuration and 241 → 188 on the cold
+default. It also exposed a latent hazard — `Factors` had no `valid()` guard, so an unbuilt Eigen
+decomposition returned a silently all-zero risk ladder; it throws now.
 Dropping the final Jacobian outright is NOT the same thing and is wrong: the O3 ladder goes 6.5%
 wrong at +25bp and 24% at +100bp.
 

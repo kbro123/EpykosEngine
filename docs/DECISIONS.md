@@ -6684,3 +6684,90 @@ as the vocabulary for the decision, not as the decision. Sequencing, for the own
 3. Run §7's one-day mining probe — a ceiling measurement, not a build.
 4. Only if (3) shows a family: the discovery search, reusing the quarantined e-graph at term level
    (§7.1), which is the use it was kept for.
+
+## D89 — D85's lazy Jacobian, landed: 4.6x measured, and a latent hazard it made reachable (2026-10-03)
+
+D85 ended with *"D85 is the measurement and the design, not the landing."* This is the landing. It
+also records two things D85 could not have known: the measurement beat its own projection, and
+deferring the build exposed a silent-zeros defect that had been latent in `Factors` all along.
+
+### 1. The change
+
+`BlockSolver::solve` took the full n_z-column Jacobian at the solution on every call, serving two
+purposes of very different cost — the ‖JᵀF‖∞ diagnostic and the factorisation the IFT consumes.
+Now:
+
+* the **diagnostic always takes the matrix-free path**, one reverse lane seeded with F, because
+  ‖JᵀF‖∞ needs the vector JᵀF and not the matrix (D87 §3: 4.91 us against 52.07 us, 10.6x);
+* the **factorisation is built only when `want_factors`** says a caller will use it.
+  `ImplicitProgram::adjoint` passes true; `run` passes false. The parameter is defaulted, so
+  `implicit.cpp`'s record-time solve and `bench/stage_a` keep today's behaviour untouched.
+
+### 2. Measured, paired, same box
+
+Three alternating before/after rounds, 1-minute load 1.95 at start and 1.97 at end. Fingerprint
+`d448afd70180`, Apple clang 21.0.0, `-O3 -march=x86-64-v3 -fno-math-errno`. One quote +1bp rotating
+through all 25, 240 rounds with the first 40 discarded, minimum of each. **Informational under D9.**
+
+| configuration | before (us) | after (us) | |
+|---|---|---|---|
+| A cold Newton, final J | 240.8 / 241.7 / 241.9 | 186.7 / 188.3 / 189.0 | 1.28x |
+| **D warm + chord (h2h's `calibrate_hot`)** | **69.0 / 70.7 / 70.7** | **15.1 / 15.2 / 15.5** | **4.6x** |
+| F `final_jacobian = false` | 11.6 / 11.0 / 11.8 | 15.2 / 15.1 / 15.3 | 0.76x |
+
+D85 projected ~16 us by arithmetic on two measurements; the measured 15.1 is slightly better.
+
+**A improved and that was not predicted** — the cold-start path was also materialising a Jacobian
+only to take a norm of it.
+
+**F is 3.7 us SLOWER, and that is the correct trade.** Before this change F skipped the exit
+Jacobian outright, so the IFT ran on a stale one: the O3 ladder was 6.5% wrong at +25bp and 24% at
++100bp (D85 §3), and under chord-without-refresh the diagnostic was NaN. F now pays `jt_product` so
+‖JᵀF‖∞ is honest on every path. Read the three rows together: **the fast-but-wrong path cost
+11.6 us, the correct path cost 69.0, and the correct path now costs 15.2.**
+
+The diagnostic moves by a few ulps and is declared — same quantity, different summation order,
+1.2e-16 to 4.6e-16 relative over a 0-100bp market (D85 §3).
+
+### 3. The hazard this made reachable, and why it matters more than the speed
+
+`run` now leaves a lane's `Factors` unbuilt, so "nobody built this" became a reachable state for the
+first time. **`Factors` had no `valid()` guard.** An unbuilt Eigen decomposition of size zero
+quietly returns zeros, so the first run of the new mutant produced a **silently all-zero risk
+ladder** rather than an error.
+
+That is this repository's recurring failure mode in its purest form — plausible numbers instead of a
+complaint, the same shape as D81 §6(a)'s silent zeros for 19 of 300 trade PVs. `require_valid` now
+guards the five consumers (`solve`, `solve_transposed`, `jp_transposed`, `jp_times`, `ift_tangent`)
+and throws naming the cause. The guard is worth more than the 4.6x.
+
+### 4. The gate
+
+`PRINCIPLES.md` §4a as D85 restated it. Clauses 1 and 3 are vacuous — no cache, nothing to refresh.
+`tests/solver/lazy_jacobian_verify_test.cpp` carries the other two:
+
+1. **Clause 2, stronger than the original.** Laziness is not approximation: when the build happens
+   it is the same call at the same point, so the ladder must be **bitwise** what the eager path
+   produced, not within a tolerance of it. Asserted as **history independence** — a ladder from a
+   fresh program must `memcmp`-equal one taken after `run` calls on other markets. That is exactly
+   the property D85 measured a solve cache destroying.
+2. **Clause 4**, the mutant `solver.lazy_jacobian_never_builds`, caught by two of the three tests.
+
+**Every check runs on a MOVED market.** D85 §3 records the first version of this check being run at
+the record point — where a stale Jacobian *is* the Jacobian at the solution — returning `0.00e+00`
+for every configuration and nearly shipping the wrong conclusion. A check whose control case is the
+only case it runs is not a check, and this file is shaped around that.
+
+`ctest` 132/132 release, 107/107 reference; mutation harness 56/56, every mutant caught.
+`scripts/mutation_catchers.tsv` also gains the row for `adjoint.div_aliased_targets`, which had none
+and was costing the harness a full-set fallback on every run since D84.
+
+### 5. What this does not change
+
+The calibration gap is narrowed, not closed: against the specialist's 9.3 us warm tick this is 15.2
+against 69.0, so roughly 7.4x behind becomes roughly 1.6x behind on that one configuration — a
+ratio of two numbers measured in different harnesses, so it is an indication and not a head-to-head.
+A fresh `tools/h2h` run is what would settle it, and has not been done.
+
+Nothing here touches D87 or D88. The engine still cannot express a derivative, and this fix was
+found by a person for exactly that reason.

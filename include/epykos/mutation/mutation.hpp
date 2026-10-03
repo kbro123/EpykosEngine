@@ -47,6 +47,7 @@ inline constexpr std::string_view registry[] = {
     "implicit.ift_not_transposed",   // Factors::solve_transposed: the IFT multiplier solves F_z lambda = z_bar instead of F_z^T lambda = z_bar
     "implicit.ift_drop_fp",          // Factors::ift_adjoint: the parameter pull p_bar -= F_p^T lambda is skipped (the quotes receive no adjoint)
     "implicit.stale_jacobian",       // BlockSolver::solve: the IFT uses the Jacobian of the last iterate before convergence, not the solution's
+    "solver.lazy_jacobian_never_builds", // BlockSolver::solve: the deferred exit Jacobian is never built even when the caller asked for it, so the IFT runs on a stale or absent one (visible on a MOVED market, not at the record point: D85)
     "expander.scan_carry_from_init", // expand: every step of a scan chain reads the chain's initial value instead of the previous step (no scan on the M1 book: the scan fixtures' round-trip gates)
     "interpreter.scan_drop_last_wave", // Interpreter::run: the last wave of every scan (the last step of its longest chains) is not evaluated (the scan fixtures' E0 gates)
     "adjoint.scan_forward_order",    // Adjoint::run: the reverse scan visits the rows forwards, so the carried adjoint arrives after it was pulled (the scan fixtures' adjoint gates)

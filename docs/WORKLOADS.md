@@ -114,6 +114,7 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   | `implicit.ift_not_transposed` | the IFT multiplier solves `F_z λ = z̄` instead of `F_zᵀ λ = z̄` | the calibrated M1 book (F_z is not symmetric) |
   | `implicit.ift_drop_fp` | the parameter pull `p̄ −= F_pᵀ λ` is skipped: the quotes receive no adjoint | the calibrated M1 book (every quote adjoint arrives through it) |
   | `implicit.stale_jacobian` | the IFT uses the last iterate's Jacobian, not the solution's | the forward-mode gate at 1e-12 (which sees it whatever the start); from the fixture's flat 3 % start the last iterate is far enough from the solution for the 1e-6 bump gates to see it too (measured: caught by all three, and by the lanes E0 gate through a NaN diagnostic under the chord policy) |
+  | `solver.lazy_jacobian_never_builds` | the deferred exit Jacobian is never built even when the caller asked for it, so the IFT runs on a stale or absent one | `tests/solver/lazy_jacobian_verify_test.cpp`'s bump gate on a MOVED market (+25bp, +100bp). It is NOT visible at the record point, where a stale Jacobian is the Jacobian at the solution — D85 §3 records walking into exactly that |
 
   then the scan mutants (M3/G3, D41), caught by the scan fixtures' gates below — `tests/ir/scan_roundtrip_test.cpp`,
   `tests/exec/scan_interp_e0_test.cpp`, `tests/adjoint/scan_adjoint_vs_dual_test.cpp` — **not exercisable on the M1

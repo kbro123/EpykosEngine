@@ -50,7 +50,9 @@ struct ImplicitProgram::Impl {
   RunStats stats;
   int last_B = 0;
 
-  void solve_lanes(const double* state, int B);
+  // `want_factors` (D85): run() does not need each lane's factorised Jacobian and does not pay
+  // for it; adjoint() does, because the IFT rule is what consumes it.
+  void solve_lanes(const double* state, int B, bool want_factors);
   void to_soa(int B);
 };
 
@@ -125,7 +127,7 @@ ImplicitProgram::ImplicitProgram(const Tape& tape, const ImplicitRegistry& regis
 
 ImplicitProgram::~ImplicitProgram() = default;
 
-void ImplicitProgram::Impl::solve_lanes(const double* state, int B) {
+void ImplicitProgram::Impl::solve_lanes(const double* state, int B, bool want_factors) {
   if (B < 1 || B > max_batch) throw std::invalid_argument("ImplicitProgram: B out of range");
   const std::size_t Bs = idx(B);
   const std::size_t N = idx(n_in);
@@ -170,7 +172,7 @@ void ImplicitProgram::Impl::solve_lanes(const double* state, int B) {
       for (int j = 0; j < n_z; ++j) rt.z[idx(j)] = options.warm_start ? rt.record_z[idx(j)] : blk.start[idx(j)];
       const std::size_t ev0 = rt.rp->evaluations();
       const std::size_t jac0 = rt.rp->jacobians();
-      SolveReport rep = rt.solver->solve(params, rt.z.data(), rt.lane_factors[b], shared);
+      SolveReport rep = rt.solver->solve(params, rt.z.data(), rt.lane_factors[b], shared, want_factors);
       stats.residual_evaluations += rt.rp->evaluations() - ev0;
       stats.jacobians += rt.rp->jacobians() - jac0;
       ++stats.solves;
@@ -201,14 +203,14 @@ void ImplicitProgram::Impl::to_soa(int B) {
 
 void ImplicitProgram::run(const double* state, int B, double* out) {
   Impl& im = *impl_;
-  im.solve_lanes(state, B);
+  im.solve_lanes(state, B, /*want_factors=*/false);
   im.to_soa(B);
   im.interp->run(im.full_soa.data(), B, out);
 }
 
 void ImplicitProgram::adjoint(const double* state, int B, const double* out_bar, double* out, double* state_bar) {
   Impl& im = *impl_;
-  im.solve_lanes(state, B);
+  im.solve_lanes(state, B, /*want_factors=*/true);
   im.to_soa(B);
   im.adj->run(im.full_soa.data(), B, out_bar, out, im.full_bar.data());
   const std::size_t Bs = idx(B);

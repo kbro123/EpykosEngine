@@ -82,6 +82,43 @@ scripts/compare_swapengine.py --exchange /tmp/x.json --results /tmp/r.json \
 bench/run.sh build/release/bench/compare_ois_ladder_bench
 ```
 
+### `tools/h2h` — both engines in one process (D78, D90)
+
+A separate recipe, because **h2h does NOT take the exchange file.** Its `--bundle` and `--book`
+want the shapes `scripts/compare_swapengine.py`'s `bundle_from_exchange` / `book_from_exchange`
+convert the exchange file into — hand it the raw exchange form and the other engine's codec throws
+`value is not an object` out of `boost::json`. That cost a failed run on 2026-10-04 and is written
+down here so it costs nobody another one.
+
+```
+cmake --preset release -DEPYKOS_H2H=ON -DSWAPENGINE_ROOT=<path to that checkout>
+cmake --build --preset release --target compare_ois h2h
+
+T=1Y,2Y,3Y,4Y,5Y,6Y,7Y,8Y,9Y,10Y,11Y,12Y,13Y,14Y,15Y,16Y,17Y,18Y,19Y,20Y,25Y,30Y,35Y,40Y,50Y
+./build/release/tools/compare/compare_ois --exchange /tmp/x.json --results /tmp/r.json     --trades 1000 --tenors "$T"
+
+# convert to the other engine's bundle/book shapes, with OUR script's own converters
+python3 - <<'EOF'
+import json, importlib.util
+spec = importlib.util.spec_from_file_location("cse", "scripts/compare_swapengine.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+x = json.load(open("/tmp/x.json"))
+json.dump(m.bundle_from_exchange(x, False), open("/tmp/bundle.json", "w"))
+json.dump(m.book_from_exchange(x),          open("/tmp/book.json",   "w"))
+EOF
+
+./build/release/tools/h2h/h2h --bundle /tmp/bundle.json --book /tmp/book.json     --trades 1000 --tenors "$T" --reps 20
+```
+
+`--tenors` must match on both commands: the exchange file fixes the other engine's problem, and
+h2h rebuilds OUR side from `CompareOisOptions` with whatever `--tenors` it is given. They are not
+cross-checked. `--cal-bundle` defaults to `--bundle` and is redundant for this fixture, because
+`bundle_from_exchange` reads only the curve and the calibration instruments — the book never
+enters it, so the 0-trade and 1,000-trade bundles are byte-identical.
+
+Nothing else may run during the measurement (D9, and the h2h prints the 1-minute load before and
+after so a contaminated run is visible afterwards).
+
 ## 3. The exchange form
 
 Purely time-based: year fractions from the valuation date on ACT/365F curve time, and nothing

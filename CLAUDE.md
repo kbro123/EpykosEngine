@@ -50,7 +50,12 @@ iterate path it costs the contract nothing — D83's §5.2 amendment is withdraw
 restates as a *bitwise* equality. **Built 2026-10-03 (D89)**: paired before/after at load 1.95–1.97,
 **69.0–70.7 us → 15.1–15.5 us (4.6x)** on the h2h hot configuration and 241 → 188 on the cold
 default. It also exposed a latent hazard — `Factors` had no `valid()` guard, so an unbuilt Eigen
-decomposition returned a silently all-zero risk ladder; it throws now.
+decomposition returned a silently all-zero risk ladder; it throws now. **D90, the head-to-head that
+settles it:** both engines one process one clock, 25 knots / 1,000 trades, the warm calibration gap
+goes **7.36x → 2.24x slower** (ours 31.1 us against 13.9) and cold 1.73x → 1.33x; the ladder stays
+~6x in our favour and pricing ~48x. D89's "~1.6x" was optimistic — it divided a minimum by a
+self-reported figure across two harnesses. Agreement with the independent engine survives at
+5.533e-15 on book NPV.
 Dropping the final Jacobian outright is NOT the same thing and is wrong: the O3 ladder goes 6.5%
 wrong at +25bp and 24% at +100bp.
 

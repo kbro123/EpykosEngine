@@ -6771,3 +6771,76 @@ A fresh `tools/h2h` run is what would settle it, and has not been done.
 
 Nothing here touches D87 or D88. The engine still cannot express a derivative, and this fix was
 found by a person for exactly that reason.
+
+## D90 — The head-to-head after the lazy Jacobian: the warm calibration gap is 7.4x → 2.24x, and D89's estimate was optimistic (2026-10-04)
+
+D89 closed by saying the gap "roughly 7.4x behind becomes roughly 1.6x behind … a ratio of two
+numbers measured in different harnesses, so it is an indication and not a head-to-head", and that a
+fresh `tools/h2h` run was what would settle it. Done. **The measured answer is 2.24x, not 1.6x.**
+
+### 1. The run
+
+`tools/h2h`, both engines in one process on one `steady_clock`, interleaved round-robin, 20
+repetitions. 25 calibration instruments on 25 knots, 1,000 book trades — the same shape as D81 §7.
+Fingerprint `d448afd70180`, `-O3 -march=x86-64-v3 -fno-math-errno` on both sides. 1-minute load
+1.68 before, 2.03 after; nothing else running. **Informational under D9.**
+
+| phase, median us | ours (telescoped) | theirs | ratio |
+|---|---|---|---|
+| calibrate_cold | 298.0 | 224.5 | 1.33x slower |
+| **calibrate_hot** | **31.1** | **13.9** | **2.24x slower** |
+| price, 1,000 trades | 80.5 | 3,857.1 | 47.9x ours |
+| risk ladder | 531.5 | 3,251.2 | 6.12x ours |
+
+Correctness against an independent engine survives the change: book NPV **5.533e-15**, ladder
+**3.818e-15**, and this engine's two coupon forms agree to **0.000e+00**.
+
+### 2. What moved, and what the comparison with D81 §7 can and cannot say
+
+D81 §7, same harness and shape: cold 367.6 against 213.1 (1.73x), hot **88.3 against 12.0 (7.36x)**,
+price 59.1 against 2,625.1, ladder 395.5 against 2,254.8 (5.70x).
+
+**The within-run ratios are the comparable quantity; the absolutes across sessions are not.** The
+OTHER engine is 5%-45% slower today than in D81's session, and so are we on phases this change does
+not touch — the risk ladder went 395.5 to 531.5 us with nothing in its path altered, and the
+interpreter and adjoint it runs are untouched. Today's box is simply slower than that session's. So:
+
+* **calibrate_hot: 7.36x → 2.24x.** The headline, and it is a within-run ratio on both ends.
+* **calibrate_cold: 1.73x → 1.33x**, consistent with D89's unpredicted 1.28x on the cold path.
+* **The risk ladder's 5.70x → 6.12x is NOT a claim.** Both sides degraded by roughly a third; the
+  ratio moved less than the session drift. Nothing in this change touches the ladder's path, and
+  `adjoint` still builds the full Jacobian exactly as before — it should, if anything, be a few
+  microseconds SLOWER per solve for the added `jt_product`. It is noise and is recorded as noise.
+
+### 3. Why D89's estimate missed, which is the methodological point
+
+D89 divided 15.2 us (an isolated `requote` binary, minimum of 200 rounds) by 9.3 us (the other
+engine's self-reported warm tick, from a different run) and got ~1.6x. Three errors compounded:
+
+1. **minimum against median.** The h2h reports medians; 15.1 was a minimum, and the same binary's
+   median was 20.3.
+2. **two harnesses.** The isolated binary measures `ImplicitProgram::run` and nothing else; h2h's
+   `calibrate_hot` carries the per-call setup around it.
+3. **self-reported against outer clock.** 9.3 us was the other engine's own number; on the outer
+   clock today it is 13.9.
+
+Each pushed the same way. D89's §5 labelled the figure an indication rather than a result, which is
+why it is corrected here rather than retracted — but the gap between 1.6x and 2.24x is a reminder
+that arithmetic across harnesses is not a measurement, however carefully it is captioned.
+
+### 4. A documentation gap this run found
+
+`bench/compare/README.md` §2 documents the BLACK-BOX route — `tools/compare/compare_ois` writing
+the neutral exchange file, then `scripts/compare_swapengine.py` driving the other engine's CLI. It
+documents **no recipe for `tools/h2h`**, and h2h does not take the exchange file: its `--bundle` and
+`--book` want the shapes `compare_swapengine.py`'s `bundle_from_exchange` / `book_from_exchange`
+convert to. Rediscovering that cost one failed run, which terminated on an uncaught
+`boost::json` exception out of the other engine's codec. The recipe is added to that README in this
+commit.
+
+### 5. Where the remaining gap is
+
+2.24x on one phase, and nothing in this entry says where it now lives. D82's decomposition is stale:
+it attributed ~65 us of a 74.9 us warm solve to the exit Jacobian, and that term is gone. What is
+left — 31.1 us against their 13.9 — has not been decomposed, and should be before anyone optimises
+it further. The same discipline D68 imposed applies: measure the ceiling first.

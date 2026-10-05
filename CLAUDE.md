@@ -55,7 +55,15 @@ settles it:** both engines one process one clock, 25 knots / 1,000 trades, the w
 goes **7.36x → 2.24x slower** (ours 31.1 us against 13.9) and cold 1.73x → 1.33x; the ladder stays
 ~6x in our favour and pricing ~48x. D89's "~1.6x" was optimistic — it divided a minimum by a
 self-reported figure across two harnesses. Agreement with the independent engine survives at
-5.533e-15 on book NPV.
+5.533e-15 on book NPV. **D91 decomposes what is left**: the warm solve fits
+`2.22·evals + 0.34·iters + 8.39 us` (worst error 8.45%), so it is **53% residual evaluation, 43%
+fixed, 6% linear algebra** — and the ‖JᵀF‖∞ diagnostic is now the largest single fixed item at
+~5.5 us. Bigger finding: the probe measures 19.4 us for the call h2h reports at 31.1 on an
+identical workload, and forced eviction reproduces the difference, so **~40% of the head-to-head
+number is cache refill, not arithmetic**. `max_batch` was tested as the cause and largely refuted.
+The levers, measured: residual evaluation (§10 step 9's vector transcendentals now have a
+denominator — d3 is `exp` over 101 of 402 values), the diagnostic, and residency, which nothing on
+the roadmap attacks.
 Dropping the final Jacobian outright is NOT the same thing and is wrong: the O3 ladder goes 6.5%
 wrong at +25bp and 24% at +100bp.
 

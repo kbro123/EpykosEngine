@@ -6844,3 +6844,101 @@ commit.
 it attributed ~65 us of a 74.9 us warm solve to the exit Jacobian, and that term is gone. What is
 left — 31.1 us against their 13.9 — has not been decomposed, and should be before anyone optimises
 it further. The same discipline D68 imposed applies: measure the ceiling first.
+
+## D91 — The rest of the warm calibration, decomposed: 53% residual evaluation, 43% fixed, and 40% of the head-to-head number is cache refill (2026-10-05)
+
+D90 §5 said the remaining 31.1 us against the other engine's 13.9 had not been decomposed and
+should be before anyone optimised it further. This is that decomposition. Fingerprint
+`d448afd70180`, release preset, `-O3 -march=x86-64-v3 -fno-math-errno`, 1-minute load 1.91-1.98
+throughout, nothing else running. **Informational under D9.**
+
+### 1. Method, and why the obvious one was wrong
+
+The first attempt measured each primitive in isolation and multiplied by the counts in
+`SolveReport`. **It attributed 111.5% of the total** — an isolated call runs colder than the same
+call inside the solve loop, so isolated unit costs overstate. That version is discarded.
+
+What stands is a **regression**. The market move is swept to vary the iteration count, and
+`total = a·residual_evals + b·iterations + c` is least-squares fitted over the six chord-only
+points (rows where no Jacobian refresh fires — a refresh is a different model):
+
+| move | iters | evals | jacs | median us |
+|---|---|---|---|---|
+| +0.0bp | 0.00 | 1.00 | 0.00 | 9.79 |
+| +0.2bp | 2.88 | 3.88 | 0.00 | 17.82 |
+| +1.0bp | 3.60 | 4.60 | 0.00 | 19.36 |
+| +4.0bp | 4.72 | 5.72 | 0.00 | 21.83 |
+| +10bp | 6.00 | 7.00 | 0.00 | 24.36 |
+| +25bp | 8.16 | 9.16 | 0.00 | 29.41 |
+| +50bp | 10.40 | 11.40 | 0.12 | 36.57 |
+| +100bp | 13.40 | 16.68 | 1.36 | 45.61 |
+
+    total = 2.22·evals + 0.34·iters + 8.39 us        worst relative fit error 8.45%
+
+### 2. Where a warm re-quote goes
+
+At h2h's shape (+1bp, 3.6 iterations, 4.6 evaluations, 19.4 us measured):
+
+| | us | share |
+|---|---|---|
+| residual evaluations | 10.2 | **53%** |
+| fixed per call | 8.4 | **43%** |
+| chord steps | 1.2 | 6% |
+
+**The ‖JᵀF‖∞ diagnostic is now the largest single fixed item** — 5.46 us measured in isolation, so
+roughly 65% of the fixed cost and 28% of the whole call. Having removed a 52 us Jacobian (D89), the
+5.5 us that replaced it is what the floor is now made of: at the record point, where the warm start
+lands on the solution and nothing iterates, the call is 9.79 us and the diagnostic is more than half
+of it. The remaining ~2.9 us of fixed cost is the interpreter pass over all 53 outputs plus lane
+setup and marshalling.
+
+The linear algebra is **6%**. The chord step is 0.34 us. Nothing in this problem is bound by the
+solve's matrix work.
+
+### 3. The finding that matters most: 40% of the head-to-head number is cache refill
+
+The probe above measures **19.4 us** for the call h2h reports at **31.1 us**. The workload is
+identical — `moved_quotes` in `tools/h2h/h2h_main.cpp` perturbs one rotating quote by ±1bp, exactly
+as the probe does. The difference is residency: h2h runs a 1,000-trade interpreter pass and a 531 us
+risk ladder between consecutive `cal_hot` calls, and those evict the calibration program's working
+set. Forcing eviction reproduces it:
+
+| eviction between calls | median us |
+|---|---|
+| none | 19.08 |
+| 1 MB | 21.96 |
+| 4 MB | 24.30 |
+| 16 MB | 36.83 |
+| 64 MB | 48.16 |
+
+h2h's 31.1 falls between the 4 MB and 16 MB rows, which is what that interleaving would produce.
+**So roughly 12 of the 31 us is refilling cache, not arithmetic**, and the remaining gap to the
+other engine — which `tools/h2h`'s own header calls a streaming engine — is substantially a
+residency gap rather than a compute one.
+
+**One hypothesis for it was tested and largely refuted.** `ImplicitProgram` sizes interpreter and
+adjoint scratch, and one `Factors` per lane, for `max_batch` lanes even when every call is B=1.
+Shrinking it from 64 to 1 changes nothing when warm (19.23 → 19.26) and nothing at 4 MB of pressure
+(24.18 → 23.69); only under 16 MB does it show, 39.56 → 33.30. A minor lever under heavy pressure,
+not the cause.
+
+### 4. What this says about the measurements in D85 and D89
+
+**A tight re-quote loop understates by about 40% against realistic interleaved use.** D89's 4.6x for
+the lazy Jacobian was measured that way and is a warm-cache figure; the same change inside h2h moved
+ours from D81's 88.3 to today's 31.1, which is 2.84x — and that number crosses sessions on a box
+D90 §2 showed to be slower today, so it is not clean either. Both are true of different things. No
+correction is owed to D89 — its protocol was stated — but a tight loop is the best case and should
+be labelled as one from here.
+
+### 5. The levers, in measured order
+
+1. **Residual evaluation, 53% of the warm core.** 2.22 us for a 402-value, 527 step×row slice.
+   `PRINCIPLES.md` §10 step 9's vector transcendentals bear directly on it: domain d3 is `exp(@0)`
+   over 101 of those 402 values. That step has never been tried and now has a measured denominator.
+2. **The diagnostic, 28% of the warm core.** Same pattern as D85 and D87: the caller pays for an
+   output it may not read. Making it lazy is the obvious move and is a design question, not a
+   refactor, because ‖JᵀF‖∞ is a registered tape output — D88 §2's promotion test is the frame.
+3. **Cache residency, ~40% of the realistic number** — and nothing on the roadmap attacks it.
+
+What is NOT a lever: the chord's linear algebra (6%), and `max_batch` (§3).

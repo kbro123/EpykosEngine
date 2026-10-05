@@ -658,7 +658,9 @@ What is next, in order:
    history independence. `final_jacobian = false` is 3.7 us SLOWER and correctly so: it was fast
    and wrong.
 9. **Vector transcendentals**, under the §5.3 policy. 81 of the pinned tape's 1,183 nodes are
-   `exp`, and it has never been tried.
+   `exp`, and it has never been tried. **It now has a measured denominator (D91):** residual
+   evaluation is 53% of a warm calibration, and inside that slice domain d3 is `exp(@0)` over 101
+   of 402 values. This is the best-evidenced item on the list.
 10. **The arithmetic-dominated workload** of §6 — and note it is now also the only workload that
     would feed the quarantined layout rules, which find zero sites on both current fixtures.
 11. **The term-level e-graph**, built against §7's measurement rather than a guess.

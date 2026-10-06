@@ -7120,6 +7120,37 @@ is not the same as "linear in the knots", and this entry should not be read as t
 engine's own `scheme_is_linear` returns false for `MonotoneCubic` and for nothing else — it IS its
 non-linear-in-the-knots scheme, and its W-cache exists to route around it. What is measured below is
 branch stability over a bump range, which is a narrower claim.)*
+
+**The operative test is not "is it curvy" but "is W CONSTANT" (owner).** Measured on the residual
+slice, which settles it structurally:
+
+| | linmap domains | what they reach | domains downstream of a `Select` |
+|---|---|---|---|
+| `USD-SOFR-LOGDF` | d1, 55 rows, reads **d0 (the inputs)** | the whole knots→logDF map | **0 of 18** |
+| `USD-SOFR-MONOTONE` | d1→d2→d3, 19/19/18 rows, chained from d0 | only the **pre-limiter slopes** | **31 of 39** |
+
+On log-DF the single affine domain IS W: one constant matrix straight off the inputs. On monotone
+cubic the three affine domains reach only the raw secants and slope estimates; the Hyman filter's
+seven `select`s then intervene, and **31 of 39 domains sit downstream of them** — every discount
+factor and every residual. **No constant knots→DF matrix exists.** There is a W per branch and the
+branch is chosen by the values, so `dDF/dx = −diag(DF)·W_b` is valid only while that branch holds.
+
+Three consequences, and the first is in Epykos's favour:
+
+1. **We never rebuild a W, because we never cache one.** The limiter is ordinary recorded
+   arithmetic — 7 `select`s, 14 `mul`s, 6 comparisons — so the adjoint differentiates through it and
+   the Jacobian is exactly right everywhere, including at a branch boundary, with no special case.
+   The price is paid on every evaluation instead (284 → 708 values, +33% per solve). The other
+   engine must fall off its W-cache for this scheme onto its hybrid AAD tier; we have no fast path
+   to fall off. Whether that nets out in our favour is unmeasured.
+2. **The ±100bp "no flips" result is DATA-dependent, not scheme-dependent.** Whether a bump crosses
+   a limiter threshold depends on how near this fixture's knots sit to a monotonicity boundary. A
+   curve sitting on one could flip at 1bp. The measurement below is of this fixture, and should not
+   be read as a property of monotone cubic.
+3. **When a branch does flip, the frozen Jacobian is wrong DISCONTINUOUSLY**, not by a small
+   perturbation — a different W_b, not a perturbed one. `chord_max_stalls = 2` means the solver
+   tolerates two unproductive steps before refreshing, which is a robustness question nothing here
+   has tested.
 A 1-100bp bump almost never flips a limiter branch, so the frozen Jacobian stays LOCALLY EXACT.
 §7 measured branch stability, not non-linearity. Two statements in it are withdrawn: that it tests
 "an interpolator that is not linear in the knots", and that `is_linmap_domain` finds nothing on

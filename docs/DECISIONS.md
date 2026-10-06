@@ -7749,3 +7749,77 @@ bare tool name**, and it belongs beside the standing reservation rule for benchm
 `ctest --preset release` on the merge of both, **this box's configuration**
 (`EPYKOS_LEGACY_SEARCH=ON`, `EPYKOS_H2H=ON`): **137/137**, 0 build errors. On the preset defaults
 that is 112.
+
+---
+
+## D98 — `adjoint(P)` yields an `ir::Program`, bitwise, for everything but scans: 1,389,222 comparisons, 0 mismatches, no new op (2026-10-06)
+
+D96 established that I1 fails for want of an emitter rather than for want of representation, and
+demonstrated it with a throwaway. This is the production emitter: stages C2 (elementwise + gather)
+and C3a (segments) of D95's staging.
+
+`include/epykos/adjoint/adjoint_to_program.hpp`, `src/adjoint/adjoint_to_program_e0.cpp`,
+`tests/adjoint/adjoint_to_program_e0_test.cpp`. **`include/epykos/tape/op.hpp` and `src/tape/op.cpp`
+are absent from the diff** — no op added, no dispatch site touched, `src/adjoint/adjoint_e0.cpp`
+unchanged. The §5.2a question D96 reserved to the owner was not triggered.
+
+### 1. The gate, re-run by the orchestrator
+
+| fixture | emitted | bitwise vs `Adjoint::run` |
+|---|---|---|
+| `nearmiss` | 2,271 values / 819 domains / 1,038 gathers / 37 segments | **0 / 787,710** |
+| `m1_book` | 199,909 / 58 / 49 / 18 | **0 / 556,137** |
+| `compare_ois` (short tenors) | 488 / 53 / 49 / 18 | **0 / 41,745** |
+| `div_xx`, `div_xx_mix`, `neg` (hand-built) | — | **0 / 3,630** |
+
+**1,389,222 comparisons, 0 mismatches.** Thirteen evaluator configurations — all eight combinations
+of `fuse_pairs`/`fuse_reductions`/`inline_producers`, `use_catalogue=false`, tilings (1,1), (7,3),
+(4096,64), plus `ir::Evaluator` — and batch widths 1, 4 and 5, where 5 forces the runtime lane path
+on both sides and each lane carries a different state and seed so a cross-lane leak shows. Scans are
+refused by a named `std::logic_error` citing C3b. `ctest --preset release`: **138/138** on this
+box's configuration (109 on the preset defaults). Both mutants die; registry pin passes.
+
+### 2. Three errors in the orchestrator's brief, all found by the implementer
+
+Recorded because the pattern is now consistent — each agent this programme has found real errors in
+the instructions it was given, and the instructions were written from verified reconnaissance.
+
+**(a) Two of the three fixtures named as C3a gates are scan fixtures.** `instrument_sample` has 2
+scan domains and `rfr_book` 1, so both are refusal cases, not positive gates. Replaced with a
+short-tenor `compare_ois` (2 trades, 1Y/2Y/5Y/10Y): 3 Sum + 1 Affine segment, zero scans.
+
+**(b) "`compare_ois` contains two scan domains" is tenor-dependent.** With the default tenors, yes
+— 1 at `trades=2`, 2 at the 64-trade default. **With any tenor set ending at 10Y, D81's collapse
+telescopes the recurrence away entirely and there is no scan at all**, measured at 4 and 6 tenors.
+Both facts are now pinned in the test.
+
+**(c) The obvious aliased-Div case CANNOT catch its own mutant, and following the brief would have
+shipped a dead gate.** For `x/x` the forward value is exactly `1.0`, so the engine's `(ȳ/b)·(1−y)`
+is `t·0.0 = ±0.0` and the split form is `(0.0+t) − t·1.0 = +0.0`; the chain's leading
+`Add(Lit 0.0, ·)` then washes the sign and **both forms agree bitwise**. The difference appears only
+once the target accumulator already holds a value, so a second program was needed — `div_xx_mix`,
+where `G/G` and `G·C` accumulate into one gather edge slot with `G = 2^53` and `C = 1+2^-52`, the
+engine answering `1+2^-52` and the split form `1+2^-51`. This is exactly the trap
+`tests/adjoint/div_aliased_verify_test.cpp`'s own header records, re-encountered from the other
+side: **a mutant whose only catcher cannot observe it is indistinguishable from a mutant that is
+caught**, and nothing in the harness would have said so.
+
+The same applies to `a2p.drop_zero_start`: eliding only the *chain's* leading `Add(Lit 0.0, ·)` is
+unobservable, because every quantity reaching an output passes through a pull whose first term is
+`+0.0`. The mutant also drops the **pull's** `Affine` konst — emitting `Op::Sum` over the same
+segment when every coefficient is 1.0 — which is where a signed zero actually reaches `state_bar`.
+
+### 3. What C3b inherits
+
+Two measurements decide the next stage, and they disagree with each other in the way that matters.
+On **`compare_ois` with default tenors the scan carry sits at position 0 — FIRST — in all 8
+carry-bearing rows of both scan domains.** On **`affine_scan` it is LAST in all 396 rows.** So the
+natural encoding (`Affine` over the non-carry readers, then `Add(·, carry_gather)`) passes the toy
+fixture and fails the production one. A green `affine_scan` proves nothing here.
+
+The resolution needs no contract decision: `ir::validate` already accepts a recurrent non-scan
+domain with a segment self-read and `ir::Evaluator` already runs it correctly; only
+`exec::Interpreter:833` refuses. The emitter lays the reverse rows backwards so the self-read is of
+an earlier row, and the carry rides the pull's segment at its true CSR position. **The owner-
+reserved alternative — reordering the pull so the carry comes last — remains not needed and not
+taken.**

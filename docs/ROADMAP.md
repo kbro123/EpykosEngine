@@ -182,12 +182,23 @@ kernel serialisation; GPU backend for the batch axis.
 `curve::SchemeKind` has six: `flat, linear, hermite, natural_cubic, monotone_cubic, bspline`. Two items, and they are
 NOT the same job — the first is coverage, the second is the one that answers an open question.
 
-1. **`tension` — scheme parity.** The only scheme the other engine has that we do not (its `Scheme` enum is
-   `Flat, Linear, NaturalCubic, Hermite, MonotoneCubic, BSpline, Tension`; read under the D11 grant of D92 §5). A
-   coverage item only: with a FIXED tension parameter the basis is fixed, so the interpolant stays a linear map of the
-   knot values — that engine's own `scheme_is_linear` excludes only `MonotoneCubic`. So adding it does **not** stress
-   anything the existing schemes do not already stress. Wanted for breadth, not for the solver.
-2. **`monotone_convex` (Hagan–West) — and this is the open item.** **Neither engine has it.** Every scheme either
+1. **`tension` — and it is worth more than parity.** The only scheme the other engine has that we do not (its
+   `Scheme` enum is `Flat, Linear, NaturalCubic, Hermite, MonotoneCubic, BSpline, Tension`, seven to our six; read
+   under the D11 grant of D92 §5). A spline under tension puts `f ∈ span{1, t, sinh(σt), cosh(σt)}` on each interval
+   instead of a cubic: σ→0 recovers the natural cubic, σ→∞ approaches piecewise linear. With **σ fixed** the knot
+   curvatures solve a tridiagonal system whose matrices depend only on the knot SPACINGS and σ, never on the values,
+   so the interpolant is a constant matrix times the knot vector — **linear in the knot forwards**. (That is an
+   elementary property of tension splines, not borrowed design; their `scheme_is_linear` excludes only
+   `MonotoneCubic`, consistent with it.)
+
+   The reason to want it is what our own measurement says `monotone_cubic` costs: its Hyman limiter is recorded as
+   seven `select`s, and the Stage A residual slice goes **284 values → 708** against log-DF with **+33% per solve**
+   (D92 §7a). Tension controls cubic overshoot **without** value-dependent branches, so it would buy similar shape
+   control at linear cost and stay eligible for every structure-keyed decision `is_linmap_domain` gates. It does not
+   stress the solver — it is a cheaper way to avoid needing to.
+2. **`monotone_convex` (Hagan–West) — the open item, and nobody has it.** Absent here AND absent there: that
+   engine's only Hagan–West reference is a comment citing the overshoot problem its `Tension` scheme solves a
+   different way, so **this cannot be obtained by porting.** Every scheme either
    engine ships is linear or piecewise-linear in the knot values, which is exactly why D92 §7a could not answer the
    question it set out to: *does genuine level-dependence stall the chord, so the warm path's zero Jacobian builds
    becomes positive?* Monotone cubic only looked like that case — its Hyman limiter is recorded as a `select`, so it

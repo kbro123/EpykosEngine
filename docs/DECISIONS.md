@@ -7618,3 +7618,134 @@ D87 §7 framed the problem as needing an architecture decision rather than an em
 **Correction discipline applied:** §1b's I1 status is rewritten with the true cause, D93 carries a
 one-line superseded pointer per the ledger rule, and D95 §2(b) is vindicated in having recorded the
 lead as a lead rather than as a finding.
+
+---
+
+## D97 — I2 holds at the maths level; I3's gate is built and finds three roles, not two; and the gate is structurally blind to half the invariant (2026-10-06)
+
+Wave 1 of the programme D95 commissioned. Two agents, independent worktrees, their claims re-run by
+the orchestrator rather than accepted on report. Both came back having found the same class of
+defect: **§1b's own statements of I2 and I3 were wrong in ways that only showed up once someone
+tried to satisfy them.**
+
+### 1. I2 — met at the maths level, and cheaper than anyone costed
+
+`Dual` is now `template <int N = 1, class S = double>`. `Dual<N>` still means `Dual<N, double>`,
+**all 150 call sites compile untouched**, and the nesting spells `Dual<N, Dual<M>>`.
+
+**The pricing maths needed no edit at all.** `Dual<1, Dual<1>>` instantiates over all six schemes,
+all three variables, the composite at both anchors, `curve::linear`, `ois::` compounding, the whole
+`instrument::` surface and all ten fixture pricers. Exactly four sites assumed `double`, all of them
+copy-initialising a `Scalar` from a literal (`scheme.hpp:547`, `compounding.hpp:44`,
+`coupon.hpp:41,52`), and all four were served by the scalar rather than by editing the maths. That
+is the recording discipline paying off: *maths written once on `Scalar`* turns out to have meant it.
+
+Four things in the scalar machinery had to learn the value channel may not be a `double`. One is
+worth recording because it is a correctness trap rather than a mechanical edit: **`depends()`
+beside `has_tangent()`**. A nested value carries a tangent in its *value* channel, where the inner
+seed rides, and a depth-1 tangent check cannot see it. Comparisons' `active` flag and
+`structural_if` now use `depends()`, so the recording discipline is not silently weaker at depth 2.
+
+**Measured, at h = 1e-6 over 22 cases** (M1 book of 1,000 OIS swaps, four single swaps including
+seasoned, six schemes × three variables, a composite at interior and anchored boundary, the
+instrument sample's book and three trades). The step was swept over ten decades first and shows the
+textbook central-difference curve — falling 100× per decade from 1e-3, bottoming near 1e-6, rising
+below — so **the floor is the finite difference's, not the dual's**:
+
+| | measured worst | gate stated |
+|---|---|---|
+| `max‖H_dual − H_fd‖ / max‖H_dual‖` | **2.290e-9** | 2e-8 |
+| entry-wise over `\|H_ij\| ≥ 0.1·max\|H\|` | **3.562e-9** | 5e-8 |
+| Hessian symmetry, nested pass alone | **1.596e-15** | 2e-14 |
+
+Gates are ~10× the measurement per §5.2a case 2, stated *after* measuring. Two further gates need
+no tolerance at all: the nested pass's value channel is **bitwise** `price_book<double>` and both
+first-derivative channels are **bitwise** the existing `Dual<12>` pass (0 ulp over 1,001 outputs and
+2×12,012 slots); and a trade not reading the varied curve gives **exactly** zero rather than a small
+plausible number — the failure shape this repository keeps meeting. Third order needs no new code,
+which is the honest test that depth 2 is not special-cased. Verified independently: nested `exp`
+returns the second and third derivatives **bitwise** exact.
+
+### 2. The I2 gap §1b never mentioned, and it is the one a desk cares about
+
+`include/epykos/solver/tangent.hpp` pins `implicit_dual<N>`, `jacobian_dual` and its local LU to
+`Dual<N, double>` and `std::vector<double>`. So the **calibrated** path has no scalar axis: **there
+is still no gamma of a book with respect to par quotes.** §1b listed three causes for I2's failure
+and this was not among them — it named `Adjoint`'s `double*` interface and I1 instead, and *both of
+those belong to a different capability* (second order on the COMPILED path), which the template
+parameter alone was never going to reach. The gate as written was therefore satisfiable while the
+capability a desk wants stayed absent. §1b is corrected to split them.
+
+The fix is not pure re-templating: carrying `F_z`, the LU and the solve on the inner scalar makes
+the second-order IFT term fall out mechanically, because `F_z` then carries `dF_z/dw`. It needs
+partial pivoting on a `Dual`, for which `select`/`DualBool` already has the vocabulary. ~100 lines
+in one header its own comment calls "oracle code; not a hot path".
+
+### 3. I3's gate is built — and the count was three, not two
+
+`tests/invariants/i3_host_inputs_test.cpp`: 18 call sites, six roles, a pinned list, a source scan
+that must agree with it, and a failure message handing the reader the paste-ready initialiser plus
+the decision they must make. **Both ratchets were verified to BITE, not merely to pass** — adding a
+`set_input_value` line produced the expected failure, and narrowing the registered ordinals produced
+*"tape input 24 changed when the market moved, and it is neither a caller input nor a registered
+host-computed one"*.
+
+§1b said "two known entries". **It is three**: `src/solver/implicit.cpp:100` writes the solved
+unknowns through `Tape::set_input_value` one line above the two diagnostics, in the identical idiom.
+No unknown violation was found — the omission was in the specification, not the engine — but the
+omitted entry needed the most argument, and lumping it with the iteration count is what hid it.
+`unknowns` is legitimate for a *different* reason: §1b's own fixpoint carve-out, the residuals being
+recorded tape outputs, and `Factors::ift_adjoint` supplying `dz/dp` exactly.
+
+### 4. The finding that matters most: the gate cannot see half its own invariant
+
+I3's gate is about values flowing **in** through a leaf. `ImplicitProgram::adjoint` contracts the
+IFT in Eigen and returns it as `state_bar` — **that is the risk ladder.** It is hand-written engine
+maths, a caller observes it directly, and it never passes through a tape input, so **no registry
+entry can ever cover it.** I3's *statement* covers it; I3's *gate* cannot.
+
+This is the D93 failure mode recurring one level down. D93's thesis was that goals do not bind and
+gates do. True — but a gate binds only what it can observe, and a gate written against one
+direction of flow silently licenses the other. §1b now says so explicitly: **a green I3 gate must
+not be read as "I3 has one violation"**, and that class is I1's to fix.
+
+Two smaller wording corrections also landed: the gate named only `Tape::set_input_value` when three
+other doors reach the same leaf (including the run-time lane write at `implicit_program.cpp:187`,
+which is the path every `run()` actually takes), and *"computed outside the tape"* is the wrong test
+— ‖JᵀF‖∞ is computed by the engine's own compiled adjoint over the recorded residual slice. The
+real test is narrower: **the result is not a node of the recorded program.**
+
+### 5. Three process findings, one of them mine
+
+**(a) The "133/133" in the Status block is a non-default build.** Both agents independently reported
+~109–111 tests where this repository has been claiming 133. The cause: this machine's
+`build/release` carries `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, neither of which is the
+preset default. A fresh `cmake --preset release` registers **109** (the quarantine drops
+`tests/optimise/` and most of `tests/rewrite/`, §7.1). The 133 figure is real but is *this box's*
+configuration, and tonight's D94 entry restated it without saying so. Test counts now carry their
+options, the same discipline §4 already requires of performance numbers.
+
+**(b) No mutation test is possible for a scalar rule.** `registry_test.cpp` requires every mutant to
+have exactly one use site under `src/`, and `Dual` is header-only under `include/`. Pre-existing —
+first-order `Dual` has never carried a mutant — but it means `CLAUDE.md`'s *"every rewrite ships
+with its mutation test"* cannot be honoured for any scalar rule, and the second-order rules are
+gated by differential tests alone. **Owner decision needed**; not papered over.
+
+**(c) A shared-box hazard, self-reported.** One agent ran `pkill -f "ctest"` while cleaning up a
+cancelled run. That pattern matches every process on the machine, not just its own — and this box
+had six peer sessions live at the time, several working in the other checkout. The agent checked,
+believed the other run survived, and flagged it rather than staying quiet, which is the behaviour
+wanted. The rule it implies: **process cleanup targets a PID or a worktree-scoped pattern, never a
+bare tool name**, and it belongs beside the standing reservation rule for benchmarking.
+
+### 6. Status after wave 1
+
+| | before tonight | now |
+|---|---|---|
+| I1 | fails — believed representational | fails for want of an emitter (D96); C2/C3a in flight |
+| I2 | fails | **holds at the maths level**; calibrated path and compiled path remain, newly separated |
+| I3 | fails, no gate | fails, **gate built**; three roles, one violation, and the gate's blind side now stated |
+
+`ctest --preset release` on the merge of both, **this box's configuration**
+(`EPYKOS_LEGACY_SEARCH=ON`, `EPYKOS_H2H=ON`): **137/137**, 0 build errors. On the preset defaults
+that is 112.

@@ -177,11 +177,33 @@ not `<S, N>`, because all 150 existing call sites pass a single argument (`Dual<
 The `<S, N>` order would cost 150 mechanical edits and buy no capability. The invariant is
 unaffected: what is gated is that the scalar NESTS, not how the nesting is spelled.
 
-*Status: **DOES NOT HOLD.*** `Dual` is `template <int N>` over a hardcoded `double`, not
-`Dual<Scalar, N>`, so it cannot nest; `adjoint::Adjoint`'s whole interface is `double*`; and the
-adjoint cannot differentiate itself because of I1. There is **no gamma, cross-gamma, vanna or volga
-anywhere** in `include/` or `src/` — the engine cannot compute any second derivative by any route.
-This is a capability wall, not a performance question, and it is reached by the first option added.
+*Status: **HOLDS at the maths level as of 2026-10-06 (D97); the compiled path is a separate
+capability and does not.*** This paragraph previously gave three causes in one breath — `Dual` not
+nesting, `Adjoint`'s `double*` interface, and I1 — and that conflation is corrected here, because
+two of the three were never what I2's gate measures.
+
+**Met.** `Dual` is now `template <int N = 1, class S = double>`; `Dual<N>` still means
+`Dual<N, double>` and all 150 call sites compile untouched. `Dual<1, Dual<1>>` instantiates over
+**every** templated pricing path — all six schemes, all three variables, the composite at both
+anchors, `curve::linear`, `ois::` compounding, the whole `instrument::` surface and all ten fixture
+pricers — and the pricing maths needed **no edit at all**; four `double`-to-`Scalar`
+copy-initialisations were served by the scalar instead. Third order (`Dual<1, Dual<1, Dual<1>>>`)
+needs no further code, which is the honest test that depth 2 is not special-cased.
+
+**NOT met, and this is the gap that matters to a desk.** `include/epykos/solver/tangent.hpp` pins
+`implicit_dual<N>`, `jacobian_dual` and its local LU to `Dual<N, double>` and `std::vector<double>`,
+so the **calibrated** path has no scalar axis: there is still **no gamma of a book with respect to
+par quotes**. The fix is not pure re-templating — carrying `F_z`, the LU and the solve on the inner
+scalar makes the second-order IFT term fall out mechanically, and needs partial pivoting on a
+`Dual`, for which `select`/`DualBool` already has the vocabulary.
+
+**A different capability, tracked separately: second order on the COMPILED path.** `Adjoint` is not
+a `Scalar`-templated component, so I2's gate never reached it. Blocking it, in order: `ir::Program`
+is double-valued throughout (`Column::values`, `literals`, `Segment::coefs`, `input_values`, and
+`serialize` writing hex bit patterns), so there is nowhere to put a dual-valued constant; the
+execution ABI is a `double` ABI, widest at `catalogue::Kernel`; `Adjoint`'s 24 `__restrict` kernels
+are written for lane-innermost SoA, where a lane IS a vector element and a `Dual<N>` element is not;
+and both routes that would avoid a Scalar-parametric IR need I1 first.
 
 ---
 
@@ -192,16 +214,47 @@ produces that a caller can observe is a recorded expression.
 rule exists precisely so nothing differentiates through the iteration. The invariant is about
 QUANTITIES.
 
-*Gate:* a pinned registry of host-computed tape inputs — inputs whose values are written in by
-`Tape::set_input_value` from a quantity computed outside the tape — each with a stated
-justification, and a test that fails when the list grows silently. The same idiom as
-`tests/mutation/registry_test.cpp` pinning the mutant list.
+*Gate:* a pinned registry of host-computed tape inputs, each with a stated justification, and a test
+that fails when the list grows silently — the same idiom as `tests/mutation/registry_test.cpp`.
+**Built 2026-10-06: `tests/invariants/i3_host_inputs_test.cpp`** (18 call sites, six roles, both
+ratchets verified to bite rather than merely to pass).
 
-*Status: **DOES NOT HOLD, with two known entries.*** `diag_iterations_input` is legitimate — an
-iteration count has no derivative and is declared stop-gradient. `diag_jtr_input` is the violation
-D87 found: ‖JᵀF‖∞ is a mathematical expression written in Eigen in `src/solver/residual.cpp` and
-pushed onto the tape as a leaf, so no pass can see it and nothing could have optimised it. D85's
-own fix had to be found by hand for exactly that reason.
+Three corrections to how this gate was first specified (D97):
+
+1. It named only `Tape::set_input_value`. **Three other doors reach the same leaf** —
+   `make_input`/`Tape::input` creating an input *with* a value, and the run-time lane write at
+   `src/solver/implicit_program.cpp:187-189`, which writes the same quantities with no `Tape` in
+   sight and is the path every `run()` actually takes. The gate is phrased by what a leaf IS, not
+   by which API set it.
+2. *"A quantity computed outside the tape"* is the wrong test. ‖JᵀF‖∞ is computed by
+   `ResidualProgram::jt_product`, which runs the engine's own compiled adjoint over the recorded
+   residual slice — not "outside the tape" in any ordinary sense. **The test is narrower: the
+   result is not a node of the recorded program.**
+3. **The gate is blind to engine-computed values flowing OUT around the tape, and a green gate must
+   not be read as "I3 has one violation".** `ImplicitProgram::adjoint` contracts the IFT in Eigen
+   and returns it as `state_bar` — that is the risk ladder, it is hand-written engine maths, a
+   caller observes it directly, and it never passes through a tape input, so no registry entry can
+   ever cover it. I3's *statement* covers it; I3's *gate* cannot. That class is I1's to fix.
+
+A registry entry is a record, **not a licence**.
+
+*Status: **DOES NOT HOLD. Three engine-written roles, not the two this section first claimed**
+(corrected 2026-10-06, D97) — and one violation among them.*
+
+- `unknowns` (`src/solver/implicit.cpp:100`, and the lane write) — **legitimate**, and for a
+  different reason than the iteration count, which is why lumping them together hid it. This
+  section's own carve-out applies: a Newton loop is a fixpoint, not an expression, so there is no
+  recorded expression for `z`. The maths that *defines* `z` is recorded — the residuals are tape
+  outputs — and the derivative is not lost, because `Factors::ift_adjoint` supplies `dz/dp` exactly.
+- `diag_iterations_input` — **legitimate**: an iteration count has no derivative, stop-gradient.
+- `diag_jtr_input` — **THE VIOLATION**, the one D87 found and D94 made concrete: ‖JᵀF‖∞ is pushed
+  onto the tape as a leaf, so no pass can see it, nothing could optimise it, and D85's own fix had
+  to be found by hand for exactly that reason.
+
+Plus three boundary roles the registry records so it is a complete map rather than a selective one:
+`caller_state` (market quotes — the engine did not compute them), `rebuild` (copying an input's
+existing `konst` onto a rebuilt table, introducing no quantity) and `analysis_scratch`
+(`CurveSet::instrument_reads`, where no value is ever evaluated or returned).
 
 ---
 

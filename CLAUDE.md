@@ -122,9 +122,10 @@ below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because t
 the near-duplicate structure they matched.
 
 `ctest`: **133/133** on the release preset at `d448afd70180`. **CI green on all four jobs** (ubuntu
-release / reference / mutation, macos release) at `37fbc68`, which is what `origin/integrate/rebuild`
-points at. That branch is 332 commits ahead of `main`; `v1.0-m4` tags the pre-rebuild engine.
-Nothing merges to `main` without the owner.
+release / reference / mutation, macos release) at `b294efc`, which is what `main` points at: the
+rebuild was merged with the owner on 2026-09-29 (`e85734f`) and **`main` is now the line of
+development**. `origin/integrate/rebuild` is retained at `fb5f0ed`, 20 commits behind `main` and
+ahead by none — history, not a branch to push to. `v1.0-m4` tags the pre-rebuild engine.
 
 **D93, 2026-10-06: the architecture is now specified as INVARIANTS WITH GATES (§1b), because goals
 do not bind.** Asked whether these capabilities should have driven the design from day one: partly —

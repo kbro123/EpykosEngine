@@ -7172,3 +7172,99 @@ a 2.5x slice for a limiter — which lands once more on D91's residual-evaluatio
 **The open item this creates:** §1's warm-path result is established only for schemes that are
 affine or piecewise-affine in the knots. Adding monotone convex would be the way to close it, and
 that is a maths-layer feature, not an optimisation.
+
+## D93 — Goals were stated where invariants were needed: three closure properties, with gates (2026-10-06)
+
+The owner, after D87, D88 and D92: *"It feels very much like we're building off a bad foundation
+here — shouldn't all these capabilities be design decisions made at the beginning of this project
+driving the architecture from day 1."*
+
+**Partly. Two representation decisions were load-bearing and were never examined. The foundation
+itself is sound.** The distinction matters because the two readings imply very different actions,
+and this entry records the diagnosis and the fix rather than a rebuild.
+
+### 1. The two decisions
+
+**`SlotKind::Gather` as an operand addressing mode, not `Op::Gather` as an operation.** This is the
+single choice that makes the IR not closed under differentiation: the reverse of an addressing mode
+is a scatter-accumulate, and nothing in the IR can express one. `AdjointPlan`'s four reverse-adjacency
+CSR lists are not a design over the IR — they are what you build when the IR cannot say the thing.
+Nobody asked "what is the reverse of this?", and gather-as-slot looked free.
+
+**`Dual<N>` over a hardcoded `double`, not `Dual<Scalar, N>`.** One template parameter, and it
+forecloses nesting and therefore every second derivative. Verified: no gamma, cross-gamma, vanna or
+volga anywhere in `include/` or `src/`, `Dual` cannot nest, and `adjoint::Adjoint`'s interface is
+`double*` throughout. **The engine cannot compute a second derivative by any route.**
+
+Both were cheap on day one and are not cheap now. The owner is right about that.
+
+### 2. Why the foundation is nonetheless sound, with evidence
+
+The choices that are genuinely expensive to retrofit were all made correctly: maths written once
+templated on `Scalar`, no hand-written derivatives, the recording discipline (constants are leaves,
+value branches use `select`), **the tape as DATA rather than code**, verification before features,
+measured-not-assumed performance, the append-only ledger.
+
+The evidence is D81. A 1,380,087 → 538 node collapse was possible *only* because the maths was
+recorded as data. The contrast is instructive and was available to read this week: the mature engine
+this one is compared against is hand-telescoped and hand-optimised, and its W-cache exists precisely
+BECAUSE its curve layer is not a recorded program (D92 §4). Epykos got that win from the foundation
+being right.
+
+The test of a bad foundation is whether fixing a mistake requires demolishing what sits above it.
+**Here it does not.** I1 is an IR extension; I2 is a template parameter. Neither touches the
+recording discipline, the pin, the passes, the interpreter, the catalogue, or any gate.
+
+And M1 being a kill test first was correct. "Can a generic program match a hand-fused kernel" had to
+be answered before anything else, because a no would have made every other decision moot.
+Front-loading derivative closure would have delayed it by months to protect capabilities that only
+matter if the kill test passes.
+
+### 3. The diagnosis: goals do not bind, invariants do
+
+The design documents stated **goals** — "mechanically derived adjoints" — where they needed
+**closure properties** — "the adjoint of a Program is a Program". A goal is a sentence; an invariant
+is a test that fails.
+
+**This project has hard evidence that a goal does not bind.** `DESIGN.md` §6 named the closed-form
+Jacobian optimisation explicitly — *"F_z is an Affine-derived block on linear schemes: expose it as
+a closed form the AD-mode rule can pick"* — and it was still not built. R7's own header records
+why: `AdMode::ClosedFormAffine` had no consumer, so no gate could check a rule proposing it, so it
+was scoped out. A named intention with no invariant and no gate did not survive a milestone.
+
+So the architecture WAS driven from day one — by a goal list. Goals do not constrain
+representations.
+
+### 4. The fix, landed in this commit
+
+`PRINCIPLES.md` gains **§1b, three invariants each with a gate**, and each with its current status
+stated honestly (all three currently FAIL):
+
+* **I1 — the IR is closed under differentiation.** Gate: `adjoint(P)` validates, round-trips, and
+  the interpreter run on it reproduces `Adjoint::run` bitwise (§5.2a case 1, so a failure is a
+  defect). Blocked by the gather decision above.
+* **I2 — second order is reachable.** Gate: `Dual<Dual<1>, N>` compiles over the pricing maths and
+  its second derivatives agree with central differences of the first, to a measured tolerance.
+* **I3 — maths the ENGINE computes is recorded, not hand-written.** About quantities, not control
+  flow: a Newton loop is a fixpoint and the IFT exists so nothing differentiates through it. Gate: a
+  pinned registry of host-computed tape inputs with stated justifications, failing when the list
+  grows silently — the same idiom as `tests/mutation/registry_test.cpp`. Two known entries:
+  `diag_iterations_input` is legitimate (an iteration count has no derivative, declared
+  stop-gradient); `diag_jtr_input` is D87's violation.
+
+**The backlog now derives from the invariants** rather than from whatever is noticed next, which is
+how D87, D88 and this entry came to be written in the first place.
+
+### 5. What this is NOT
+
+**Not a rewrite**, and not for sunk-cost reasons. One landed two weeks ago (D79-D81) and produced
+the largest result in the project; the marginal value of another meta-pass is low. The owner's own
+standing worry — *"accreting rather than doing the necessary culling"* — cuts both ways: repeated
+foundation-reassessment is itself a way of not building.
+
+**Not a reordering of the work on performance grounds.** D92 priced the optimisation case for I1 at
+roughly nothing on today's workload. I1 and I2 are justified by **capability** — second-order risk
+is table stakes for vol and XVA, which `docs/ROADMAP.md` already has as the breadth that matters —
+and they should be argued for as *"the engine cannot compute a gamma"*, not as *"the optimiser
+cannot see derivatives"*. The second is true and nearly worthless; the first is a wall met by the
+first option added.

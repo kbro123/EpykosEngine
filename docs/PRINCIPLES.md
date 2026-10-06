@@ -115,6 +115,83 @@ Everything from loop transformation down exists and works — M1 put the interpr
 hand-fused kernel. Everything above it is missing. M4 then searched the half that was already good,
 and measured its remaining headroom at 1.03x.
 
+### 1b. The invariants, and their gates (owner, 2026-10-06; D93)
+
+**Why this section exists.** Every architectural capability this project has discovered it wants —
+derivatives it can optimise (D87), operator-level rules (D88), second-order risk — was blocked by a
+representation decision taken years before anyone asked the question. The decisions were cheap to
+get right on day one and are not cheap now. The cause is not that the architecture was undirected:
+it is that the design documents stated **goals** where they needed **closure properties**, and this
+project has hard evidence that a goal does not bind. `DESIGN.md` §6 named the closed-form Jacobian
+optimisation explicitly and it still was not built, because no gate could check it — R7's own header
+records that as the reason it was scoped out.
+
+So the architecture is specified here as invariants with gates. A goal is a sentence; an invariant
+is a test that fails. **The backlog derives from these**, not from whatever is noticed next.
+
+---
+
+**I1. The IR is closed under differentiation.** `adjoint(P)` yields an `ir::Program`.
+
+*Gate:* it passes `ir::validate`, round-trips through `ir::serialize`/`deserialize`, and
+`exec::Interpreter` run on it reproduces `adjoint::Adjoint::run` **bitwise** — the same program and
+the same inputs, so §5.2a case 1, and a failure is a defect.
+
+*Status: **DOES NOT HOLD.*** `Adjoint` is constructed from the FORWARD program and `program()`
+returns that same forward program; `AdjointPlan` is buffer layout plus four reverse-adjacency CSR
+lists with no ops in it; the derivative arithmetic is a `switch` over `Op` in
+`src/adjoint/adjoint_e0.cpp`. The root cause is one decision: **`SlotKind::Gather` is an operand
+ADDRESSING MODE, and the reverse of an addressing mode is a scatter-accumulate, which the IR cannot
+express.** `Op::Gather` and `Op::SegmentSum` are reserved with no recorder support. The twelve
+`acc_*` kernels are not the obstacle — they exist and are correct; they write doubles where they
+would need to emit nodes.
+
+---
+
+**I2. Second order is reachable.** Every `Scalar`-templated component instantiates at a NESTING
+scalar.
+
+*Gate:* `Dual<Dual<1>, N>` compiles over the pricing maths, and its second derivatives agree with
+central differences of the first derivatives within a measured tolerance (§5's error contract, case
+2 — a tolerance, stated once measured, never guessed).
+
+*Status: **DOES NOT HOLD.*** `Dual` is `template <int N>` over a hardcoded `double`, not
+`Dual<Scalar, N>`, so it cannot nest; `adjoint::Adjoint`'s whole interface is `double*`; and the
+adjoint cannot differentiate itself because of I1. There is **no gamma, cross-gamma, vanna or volga
+anywhere** in `include/` or `src/` — the engine cannot compute any second derivative by any route.
+This is a capability wall, not a performance question, and it is reached by the first option added.
+
+---
+
+**I3. Maths the ENGINE computes is recorded, not hand-written.** Any numeric quantity the engine
+produces that a caller can observe is a recorded expression.
+
+*Not* the control flow: a Newton loop is a fixpoint, not an expression, and the implicit-function
+rule exists precisely so nothing differentiates through the iteration. The invariant is about
+QUANTITIES.
+
+*Gate:* a pinned registry of host-computed tape inputs — inputs whose values are written in by
+`Tape::set_input_value` from a quantity computed outside the tape — each with a stated
+justification, and a test that fails when the list grows silently. The same idiom as
+`tests/mutation/registry_test.cpp` pinning the mutant list.
+
+*Status: **DOES NOT HOLD, with two known entries.*** `diag_iterations_input` is legitimate — an
+iteration count has no derivative and is declared stop-gradient. `diag_jtr_input` is the violation
+D87 found: ‖JᵀF‖∞ is a mathematical expression written in Eigen in `src/solver/residual.cpp` and
+pushed onto the tape as a leaf, so no pass can see it and nothing could have optimised it. D85's
+own fix had to be found by hand for exactly that reason.
+
+---
+
+**What these invariants do NOT license.** None of them is a reason to rebuild. The expensive
+foundations — maths written once on `Scalar`, no hand-written derivatives, the recording discipline,
+**the tape as data rather than code**, verification before features, measured-not-assumed
+performance — are all in place and are why D81's 2,565x collapse was possible at all. Fixing I1
+is an IR extension; fixing I2 is a template parameter. Neither touches the recording discipline, the
+pin, the passes, the interpreter, the catalogue or any gate, which is the test of whether a
+foundation is bad rather than incompletely specified. And M1 being a kill test first was correct:
+a "no" there would have made every other decision moot.
+
 ---
 
 ## 2. Algebra first, estimation second
@@ -639,7 +716,10 @@ spike. The risk ladder is **5.70x in our favour** where the engine as it wrote i
 0.16x. Calibration is still **1.7x slower cold and 7.1x warm**, unchanged by the collapse — so the
 arithmetic was never what that gap was made of, and what is left is solver algorithm.
 
-What is next, in order:
+What is next, in order. **Since D93 this list derives from §1b's invariants**, not from whatever is
+noticed next; items 1-3 below are measured and independent of them, and the architecture items are
+justified by the invariants' capability gates rather than by an optimisation case D92 priced at
+roughly nothing:
 
 8. **The solver gap — IN PROGRESS, and re-aimed 2026-09-29 (D85).** §4a lifted the exclusion on
    2026-09-28 for Jacobian reuse and warm-start state, and only those. D82 decomposed the gap: ~65

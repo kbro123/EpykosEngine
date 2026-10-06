@@ -116,6 +116,19 @@ release / reference / mutation, macos release) at `37fbc68`, which is what `orig
 points at. That branch is 332 commits ahead of `main`; `v1.0-m4` tags the pre-rebuild engine.
 Nothing merges to `main` without the owner.
 
+**D93, 2026-10-06: the architecture is now specified as INVARIANTS WITH GATES (§1b), because goals
+do not bind.** Asked whether these capabilities should have driven the design from day one: partly —
+two representation decisions were load-bearing and unexamined (`SlotKind::Gather` as an addressing
+mode, whose reverse is a scatter-accumulate the IR cannot express; `Dual<N>` over hardcoded `double`
+rather than `Dual<Scalar,N>`, which forecloses every second derivative — **the engine cannot compute
+a gamma by any route**). But the expensive foundations are right, which is why D81's collapse was
+possible at all, and fixing either is an extension rather than a demolition. The cause was stating
+goals where closure properties were needed, and `DESIGN.md` §6's named-but-ungated W-cache is the
+proof that a goal does not survive a milestone. **§1b's three invariants (I1 closed under
+differentiation, I2 second order reachable, I3 the engine's own maths recorded) all currently FAIL,
+each with a stated gate**, and §10 now derives from them. Not a rewrite; and argued as capability,
+not performance, since D92 priced the optimisation case at roughly nothing.
+
 ## Rules
 - **`docs/PRINCIPLES.md` is the contract** and outranks every other document, this one included. It is **rewritten in
   place**, never appended to; so is the Status block above (PRINCIPLES.md §9).

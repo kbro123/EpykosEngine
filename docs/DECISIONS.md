@@ -7219,6 +7219,11 @@ that is a maths-layer feature, not an optimisation.
 
 ## D93 — Goals were stated where invariants were needed: three closure properties, with gates (2026-10-06)
 
+> **Superseded in part by D96 (2026-10-06):** this entry's root cause for I1 — that the IR cannot
+> express the reverse of a gather — is **wrong**. `Op::Affine` over a `Segment` is a
+> scatter-accumulate and `plan.cpp` already has the transpose. I1 fails for want of an emitter, not
+> for want of representation. The rest of the entry stands.
+
 The owner, after D87, D88 and D92: *"It feels very much like we're building off a bad foundation
 here — shouldn't all these capabilities be design decisions made at the beginning of this project
 driving the architecture from day 1."*
@@ -7524,3 +7529,92 @@ capability rather than deliver it.
 
 D11 is unchanged and applies to every agent: nothing is read from, copied from or derived from the
 other checkout.
+
+---
+
+## D96 — I1's root cause was wrong: the IR can already express the reverse of a gather, and bitwise is demonstrated (2026-10-06)
+
+D93 diagnosed I1's failure as a representation gap and §1b stated it as fact: *"`SlotKind::Gather`
+is an operand ADDRESSING MODE, and the reverse of an addressing mode is a scatter-accumulate, which
+the IR cannot express."* D95 §2(b) flagged one line of `src/adjoint/plan.cpp` as a lead that might
+undercut it and commissioned a design stage to confirm or refute. **It refutes it.**
+
+### 1. What was demonstrated
+
+A throwaway `adjoint_to_program` (~300 lines, built outside the repo, repo left clean) emits an
+`ir::Program` for the reverse. Results, **re-run and verified independently by the orchestrator**
+rather than taken from the agent's report:
+
+| fixture | emitted | `ir::validate` | round-trip | **bitwise vs `Adjoint::run`** | Interpreter vs Evaluator |
+|---|---|---|---|---|---|
+| `record_nearmiss()` | 2,271 values / 819 domains / 1,038 gathers / 37 segments | OK | `==` | **0 / 3,906 comparisons** | 0 of 217, all 5 configs |
+| `m1_book` | 199,909 values / 58 domains / 49 gathers / 18 segments | OK | `==` | **0 / 12,156 comparisons** | 0 of 1,013, all 5 configs |
+
+Configurations: default, `fuse_reductions=false`, `inline_producers=false`, `fuse_pairs=false`, all
+three off; `use_catalogue=false`, `max_batch=lane_tile=1`.
+
+**No new op. No `Op` enum change. No change to `Adjoint::run`.** `Op::Affine` over a `Segment` *is*
+a scatter-accumulate, and `plan.cpp` already transposes every index array into CSR, so the reverse
+adjacency is computed today and was simply never emitted as nodes. `Op::SegmentSum` needs no
+producer. `Op::Linmap` is a **dead name** — it appears only in `src/tape/op.cpp`'s name table and
+one string assertion in `tests/tape/op_test.cpp`; the concept it names already has a
+representation, which `include/epykos/rewrite/r7_block_linmap.hpp` states outright as *"a domain
+whose group is exactly one `Affine` step over a Segment"*.
+
+### 2. Why bitwise holds
+
+`adjoint_e0.cpp:518-543` pulls `dst = 0.0`, `+= out_bar`, `+= gbar`, `+= segbar`, `+= coef*segbar`,
+left to right in CSR order — which is exactly `Op::Affine`'s fold, written identically in
+`evaluate.hpp:99-110`, `adjoint_e0.cpp:314-333`, `kernels_impl.hpp:969-1005` and `replay.hpp:77-87`.
+Five things must hold: `konst` is a Literal `+0.0` never elided (because `0.0 + (-0.0)` is `+0.0`);
+coefficient `1.0` for output/gather/sum readers (exact for every non-NaN double); the four CSR lists
+concatenate in plan order; each accumulator chain starts `Add(Lit 0.0, ·)`; and the aliased-Div
+dispatch is reproduced structurally. The last is the sharp edge — **no fixture in the tree contains
+an aliased Div**, so only `tests/adjoint/div_aliased_verify_test.cpp`'s hand-built program covers it.
+
+### 3. What actually remains, and it is in the executor
+
+**Scans.** Measured on `compare_ois`, two scan domains survive D81's collapse, and in all 8
+carry-bearing rows of each the carry sits at **position 0** of a 2-entry pull — first, not last. On
+`affine_scan` it is last in all 396 rows, so the easy encoding passes the toy fixture and **fails
+the production one**. That asymmetry is exactly the kind of thing a fixture-shaped test would have
+missed.
+
+The resolution needs no contract decision, verified by construction:
+
+```
+ir::validate: ACCEPTS a recurrent non-scan domain with a segment self-read
+ir::Evaluator: 2.000000 3.000000 3.500000 3.750000 3.875000   (correct)
+exec::Interpreter REFUSES: domain 1 (rec) is recurrent but not a scan
+```
+
+So the IR already expresses it, the evaluator already runs it, and **only `exec::Interpreter:833`
+refuses**. C3b's work is an executor path, not an IR extension.
+
+> **Owner flag, recorded and NOT taken.** The alternative — reordering the pull so the carry comes
+> last — *would* change `Adjoint::run`'s bits and is a §5.2a case-1 question reserved to the owner.
+> It is not needed. If C3b's interpreter path proves harder than estimated, the correct outcome is
+> a blocked task reported honestly, not an order change. No agent may take it.
+
+### 4. What this costs and saves
+
+The counterfactual was priced before being discarded: `op_is_supported(op) = op <= Op::Affine`
+(`op.hpp:105`) is consulted at **8 sites**, and because ops are appended and never renumbered, a new
+producer turns that range test into a set test and changes all 8 at once — then needs the recorder,
+`replay`, every peephole in `passes.cpp`, `slice`, `select_export`, `signature.cpp`'s 1,404 lines of
+boundary classification, `program.cpp`, `expand`, `evaluate`, the interpreter plus a kernel per lane
+width, `adjoint/plan.cpp`, `adjoint_e0.cpp`, the catalogue and the quarantined search. **Avoiding
+that is the largest single saving in the programme**, and it was avoided by reading the code rather
+than by building what the specification assumed.
+
+### 5. The lesson worth keeping
+
+D93's root cause was not a careless claim — it was a reasonable inference from `Op::Gather` and
+`Op::SegmentSum` being reserved with no producer. But *reserved* and *inexpressible* are different
+things, and nobody had checked which one applied before writing it into the contract as a cause.
+The check cost one design stage; the belief had been load-bearing since D87, and it is the reason
+D87 §7 framed the problem as needing an architecture decision rather than an emitter.
+
+**Correction discipline applied:** §1b's I1 status is rewritten with the true cause, D93 carries a
+one-line superseded pointer per the ledger rule, and D95 §2(b) is vindicated in having recorded the
+lead as a lead rather than as a finding.

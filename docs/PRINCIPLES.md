@@ -137,14 +137,29 @@ is a test that fails. **The backlog derives from these**, not from whatever is n
 `exec::Interpreter` run on it reproduces `adjoint::Adjoint::run` **bitwise** — the same program and
 the same inputs, so §5.2a case 1, and a failure is a defect.
 
-*Status: **DOES NOT HOLD.*** `Adjoint` is constructed from the FORWARD program and `program()`
+*Status: **DOES NOT HOLD** — but for a much smaller reason than this section first claimed
+(corrected 2026-10-06, D96).* `Adjoint` is constructed from the FORWARD program and `program()`
 returns that same forward program; `AdjointPlan` is buffer layout plus four reverse-adjacency CSR
 lists with no ops in it; the derivative arithmetic is a `switch` over `Op` in
-`src/adjoint/adjoint_e0.cpp`. The root cause is one decision: **`SlotKind::Gather` is an operand
-ADDRESSING MODE, and the reverse of an addressing mode is a scatter-accumulate, which the IR cannot
-express.** `Op::Gather` and `Op::SegmentSum` are reserved with no recorder support. The twelve
-`acc_*` kernels are not the obstacle — they exist and are correct; they write doubles where they
-would need to emit nodes.
+`src/adjoint/adjoint_e0.cpp`. The twelve `acc_*` kernels are not the obstacle — they exist and are
+correct; they write doubles where they would need to emit nodes.
+
+**The root cause stated here until 2026-10-06 was wrong.** It read: *"`SlotKind::Gather` is an
+operand ADDRESSING MODE, and the reverse of an addressing mode is a scatter-accumulate, which the
+IR cannot express."* The IR **can** express it. `Op::Affine` over a `Segment` **is** a
+scatter-accumulate, and `src/adjoint/plan.cpp` already transposes every index array into CSR, so
+the reverse adjacency is computed today and merely never emitted as nodes. A throwaway emitter
+demonstrated the gate — `ir::validate`, `serialize`/`deserialize` round-trip, and **bitwise
+agreement with `Adjoint::run` over 3,906 comparisons on `nearmiss` and 12,156 on `m1_book`**, under
+every interpreter configuration — with **no new op, no `Op` enum change and no change to
+`Adjoint::run`**. `Op::SegmentSum` needs no producer; `Op::Linmap` is a dead name, appearing only
+in `src/tape/op.cpp`'s name table and one string assertion.
+
+So I1 does not fail on representation. **It fails because nobody wrote the emitter**, with one
+genuine and much narrower exception: **`exec::Interpreter` refuses a recurrent non-scan domain**
+(`src/exec/interpreter.cpp:833`), which is what the reverse of a scan needs. `ir::validate` already
+accepts such a domain and `ir::Evaluator` already runs it correctly, so that gap too is in the
+executor, not the IR.
 
 ---
 

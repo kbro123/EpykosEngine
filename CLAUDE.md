@@ -73,7 +73,8 @@ batched over a collapsed 402-value slice. **We already hold that benefit by cons
 ceiling for a closed-form residual Jacobian: 87% of cold calibration, **0% of the warm path** (chord
 builds none), and **0.5% of a 256-row risk ladder** — the earlier 63.7% was a one-row artefact,
 since `Factors` is built once per solve and reused across every seed. A *free* Jacobian would save
-229 us once per session, i.e. 0.2% of one ladder. **Not built; `AdMode::ClosedFormAffine` stays
+229 us once per session — 2.0% of one 256-row ladder, 1.4% at the achievable 2x-4x, and decaying as
+1/N in the ladders a session runs. **Not built; `AdMode::ClosedFormAffine` stays
 unconsumed.** D68's method in a new subsystem: measure the share before fitting. The guard that
 matters now: having read their list, no search that "rediscovers" an item on it is evidence of
 anything (D88).

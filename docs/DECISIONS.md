@@ -6987,9 +6987,20 @@ outputs. The honest figure for a realistic ladder is **under one percent**.
 
 ### 3. The arithmetic that settles it
 
+"Costs nothing" below is a CEILING device, not a proposal: the deliberately impossible best case,
+used to bound the prize before building. If even a free Jacobian is not worth it, no real
+implementation is. D68 used the same move ("a cost model with ZERO error is worth 0.166% of an O4
+batch").
+
 A Jacobian that cost **nothing** would take cold calibration from 262.7 us to about 34 us: a 229 us
-saving, **once per session**. Against one 256-row ladder at 11,250 us that is **0.2%**, and against
-a warm re-quote it is zero. Even the achievable factor is bounded well below "free": the structured
+saving, **once per session**. Against one 256-row ladder at 11,250 us that is **2.0%**
+(*corrected 2026-10-06: this read 0.2%, an arithmetic slip of a factor of ten — 229/11250 = 2.04%.
+The conclusion is unchanged and the reasons are below*), and against a warm re-quote it is zero.
+
+At the ACHIEVABLE 2x-4x rather than free, cold goes 262.7 us to about 110 us, saving ~152 us, which
+is **1.4%** of that one ladder. And cold is paid ONCE while ladders and re-quotes repeat, so the
+share falls as 1/N in the number of ladders a session runs. Two percent of a single ladder, once,
+decaying with use, for a sparse forward-mode AD over the IR including a scan. Even the achievable factor is bounded well below "free": the structured
 chain is roughly 4x fewer operations than 25 batched reverse lanes (W is 76x25 with exactly 2
 nonzeros per row — `segments[0]`, 152 members — but the tangents densify at the scan d6 and the
 level sums d7-d11), so 2x-4x on the Jacobian, not 10x.

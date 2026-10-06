@@ -68,6 +68,19 @@ struct SolveOptions {
   double chord_min_contraction = 0.5;  // chord: a step that shrinks ‖F‖∞ by less than this is a stall
   int chord_max_stalls = 2;            // chord: this many stalls and the lane refreshes its own J_z
   bool final_jacobian = true;       // J_z at the solution (exact IFT and ‖Jᵀr‖∞); false: the last iterate's
+  // ‖JᵀF‖∞, the O1 optimality diagnostic. Since D89 it is the LARGEST single fixed cost of a warm
+  // solve — 5.5 us of a 19.9 us re-quote, 28% of it, and more than half the 9.79 us floor at the
+  // record point (D91 §2). It is one matrix-free reverse lane, already the cheap way to get it
+  // (D87 §3: 4.91 us against 52.07 us for the matrix), so what is left is not computing it at all.
+  //
+  // A caller re-quoting a curve thousands of times and never reading the diagnostic should not pay
+  // for it. Setting this false does NOT leave a stale or zero value behind: `SolveReport::jtr_inf`
+  // and the block's diagnostic OUTPUT both become NaN, so a consumer that reads it gets an
+  // unmistakable answer rather than a plausible one. Default true is today's behaviour bit-for-bit.
+  //
+  // `PROBLEM.md` §6's O1 gate reads this output, so the gates keep it on; this is a knob for the
+  // hot path, not a weakening of what the engine reports by default.
+  bool optimality_diagnostic = true;
   bool throw_on_failure = false;    // std::runtime_error when a lane does not converge
 };
 

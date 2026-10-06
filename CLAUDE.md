@@ -63,7 +63,17 @@ identical workload, and forced eviction reproduces the difference, so **~40% of 
 number is cache refill, not arithmetic**. `max_batch` was tested as the cause and largely refuted.
 The levers, measured: residual evaluation (§10 step 9's vector transcendentals now have a
 denominator — d3 is `exp` over 101 of 402 values), the diagnostic, and residency, which nothing on
-the roadmap attacks.
+the roadmap attacks. **D94 takes the second of those**: `SolveOptions::optimality_diagnostic`,
+default true and bit-for-bit today's behaviour, and when false the `jt_product` lane is skipped and
+both `SolveReport::jtr_inf` and the block's diagnostic output are **NaN**, never zero — zero is the
+signature of a converged solve, so it would announce success, and this repository has twice shipped
+a plausible number where there should have been an unmistakable one (D81 §6(a), D89 §3). Paired
+interleaved arms, **load 4.22, not a reserved box, so read the delta and not the levels**: the
+record point **9.94 → 4.51 us** and a +1bp re-quote **20.33 → 15.19 us**, i.e. ~5.4/5.1 us saved
+against the 5.46 us D91 attributed to it by an independent method; a clean re-run is pending. The engine
+could not find this itself — a derivative is not a tape node (D87 §1), so the one optimisation every
+compiler does to an unused value, deleting it, is unavailable here. That is **invariant I3 failing
+in its smallest instance**, and the switch is a mitigation, not a discharge of its gate.
 
 **D92, 2026-10-06: the owner widened D11 to read the other engine's `OPTIMIZATION.md`; its "single
 biggest win" turns out to be our smallest.** Their W-cache (`DF = exp(−W·x)`, precomputed W,
@@ -111,7 +121,7 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
-`ctest`: **131/131** on the release preset at `d448afd70180`. **CI green on all four jobs** (ubuntu
+`ctest`: **133/133** on the release preset at `d448afd70180`. **CI green on all four jobs** (ubuntu
 release / reference / mutation, macos release) at `37fbc68`, which is what `origin/integrate/rebuild`
 points at. That branch is 332 commits ahead of `main`; `v1.0-m4` tags the pre-rebuild engine.
 Nothing merges to `main` without the owner.

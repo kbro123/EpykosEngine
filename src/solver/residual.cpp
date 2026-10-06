@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <sstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -432,8 +433,20 @@ SolveReport BlockSolver::solve(const double* p, double* z, Factors& factors, con
   // F_try_ absorbs jt_product's forward output: F_ is the converged residual every caller reads
   // through residual(), and the adjoint's forward pass is not required to round like the
   // interpreter's, so it must not land there.
-  rp_.jt_product(z, p, F_.data(), F_try_.data(), jtf_.data(), nullptr);
-  rep.jtr_inf = inf_norm(jtf_);
+  //
+  // Mutant solver.diagnostic_returns_zero: with the diagnostic switched OFF, report 0.0 instead of
+  // NaN. Zero is the WORST of the plausible numbers available here -- it is the signature of a
+  // perfectly converged solve, so a switched-off diagnostic would announce success. That is the
+  // failure this repository keeps finding (D81 §6(a)'s unwritten outputs reading back as 0.0,
+  // D89 §3's all-zero ladder), so it gets its own catcher.
+  if (options_.optimality_diagnostic) {
+    rp_.jt_product(z, p, F_.data(), F_try_.data(), jtf_.data(), nullptr);
+    rep.jtr_inf = inf_norm(jtf_);
+  } else if (mutant("solver.diagnostic_returns_zero")) {
+    rep.jtr_inf = 0.0;
+  } else {
+    rep.jtr_inf = std::numeric_limits<double>::quiet_NaN();
+  }
   // Mutant solver.lazy_jacobian_never_builds: honour the deferral even when the caller says it
   // needs the factorisation. The forward answer is untouched; the IFT then runs on a stale or
   // absent Jacobian, which a MOVED market shows and the record point does not (D85 §3).

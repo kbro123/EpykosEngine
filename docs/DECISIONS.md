@@ -7312,3 +7312,96 @@ is table stakes for vol and XVA, which `docs/ROADMAP.md` already has as the brea
 and they should be argued for as *"the engine cannot compute a gamma"*, not as *"the optimiser
 cannot see derivatives"*. The second is true and nearly worthless; the first is a wall met by the
 first option added.
+
+---
+
+## D94 — ‖JᵀF‖∞ becomes optional, and switching it off leaves NaN: the largest fixed cost of a warm solve, removed for callers who never read it (2026-10-06)
+
+D91 §2 decomposed the warm re-quote and found that, having removed a 52 us Jacobian in D89, **the
+optimality diagnostic is what the floor is now made of**: 5.46 us of a 19.4 us call (28%), and more
+than half the 9.79 us at the record point where the warm start lands on the solution and nothing
+iterates. It is already computed the cheap way — one matrix-free reverse lane, 4.91 us against
+52.07 us for the materialised Jacobian (D87 §3) — so the only remaining saving is **not computing
+it at all**. This is that switch, and the gate that stops it becoming a silent zero.
+
+### 1. What landed
+
+`SolveOptions::optimality_diagnostic`, default `true`. On, the behaviour is today's bit-for-bit.
+Off, `BlockSolver::solve` skips the `jt_product` lane entirely and sets both `SolveReport::jtr_inf`
+and the block's diagnostic output to **NaN**.
+
+NaN is the whole design, not a detail. The obvious implementation — leave zero — hands the caller a
+number that reads as fine, and **zero is the worst value available here**: ‖JᵀF‖∞ = 0 is the
+signature of a perfectly converged solve, so a switched-off diagnostic would announce success. This
+repository has now been bitten twice by exactly that shape — D81 §6(a)
+(the interpreter left duplicated outputs unwritten and 19 of 300 trade PVs read back as a plausible
+0.0) and D89 §3 (an unbuilt `Factors` returned a silently all-zero risk ladder). Both were caught by
+a differential test, neither by a consumer. NaN cannot be mistaken for an answer.
+
+### 2. Which side of the pin
+
+Neither. **This is not a rewrite.** The pin (§1) governs the engine choosing which expression to
+evaluate or how to evaluate it; here the *caller* declines to request a quantity. No recorded
+expression is altered, nothing is re-rounded, and the diagnostic is computed after convergence and
+feeds nothing, so the solved knots are **bitwise identical** with it on and off — gated, for two
+Jacobian policies at +0, +1 and +100bp, by `memcmp`. D89's deferral was the same kind of change and
+D85's §4a gate restated as a bitwise equality for the same reason.
+
+### 3. Measured
+
+Fingerprint `d448afd70180`, release preset, `-O3 -march=x86-64-v3 -fno-math-errno`. Paired
+before/after in one process, same program, diagnostic the only difference.
+
+**Read the last column, not the first two.** These were taken at **1-minute load 4.22** — another
+session on the same machine was running a perf baseline sweep and the box could not be reserved, so
+this is *not* a D29-conforming measurement and the absolute levels are inflated. The two arms are
+interleaved in one process under that same load, so the **difference** is the part that survives;
+a clean re-run at load < 2 is parked and will be appended when the box frees.
+
+| market | diagnostic on | off | saved |
+|---|---|---|---|
+| at the record point | 9.94 us | 4.51 us | **5.43 us (54.6%)** |
+| +1bp re-quote | 20.33 us | 15.19 us | **5.14 us (25.3%)** |
+
+That the deltas land where they do is the reason this is reportable at all under a dirty load: they
+corroborate D91 independently: it attributed **5.46 us** to the diagnostic by timing
+`jt_product` in isolation, and switching it off in situ removes 5.43 and 5.14. Two different
+methods, one number — which is the check the first decomposition attempt failed (D91 §1 attributed
+111.5% from isolated unit costs).
+
+The record-point figure is the one worth stating plainly: **when nothing iterates, over half the
+call was the diagnostic.** That share is a ratio of two arms measured under one load, so it is the
+robust kind of number here; the 2.2x it implies for a caller that re-quotes thousands of times and
+reads only the knots should be re-confirmed on a quiet box before it is quoted anywhere else.
+
+### 4. What this does NOT fix, and why it is a switch rather than a discovery
+
+The engine could not find this. ‖JᵀF‖∞ is defined by a derivative, and D87 §1 is the standing
+finding that **a derivative cannot be expressed as a tape node** — `Op::Linmap` is reserved with no
+producer, `adjoint::Adjoint` is a compiled artifact, differentiation is a pipeline STAGE and not an
+operation. So the diagnostic is not in the recorded world, nothing downstream of it is either, and
+**the one optimisation every compiler performs on an unused value — deleting it — is unavailable
+here by construction.** Dead-code elimination over the tape cannot see it; it took a person reading
+a decomposition table.
+
+That is invariant **I3** (§1b: the engine's own maths is recorded) failing in the smallest possible
+instance, and it is worth logging as such: the cost of I3's absence here is not an exotic missed
+rewrite, it is *we could not delete something nobody was using*. The switch is the mitigation
+available without I3; it is not a substitute for it, and D94 does not discharge I3's gate.
+
+### 5. Gates
+
+`PROBLEM.md` §6's O1 gate reads this output, so every gated build keeps the default. This is a knob
+for the hot path, not a weakening of what the engine reports.
+
+Mutant `solver.diagnostic_returns_zero` — with the diagnostic off, report 0.0 instead of NaN — is
+registered and caught by `solver_optional_diagnostic_verify_test` at all three of +0, +1 and +25bp.
+
+It was first written as `..._returns_stale`, returning the previous call's value, and that was
+wrong in a way worth recording: `last_jtr_` is written only when the diagnostic is ON and the flag
+is fixed at block construction, so **no sequence of public API calls can ever make a non-zero stale
+value observable**. The mutant was modelling an unreachable defect and carrying a member to do it.
+Renamed to what it actually tests, and the member deleted. The caught value is the more dangerous
+one anyway.
+
+`ctest --preset release`: **133/133**.

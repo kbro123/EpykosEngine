@@ -6454,6 +6454,33 @@ construction: this diagnostic, the IFT's own λ = J_z⁻ᵀ z̄ and p̄ −= J_p
 cross-gamma or second-order risk that is ever wanted. Whoever wrote those two lines had no
 alternative available to them.
 
+### 2a. The partition, which bounds I1 (owner, 2026-10-06)
+
+The op set IS closed under differentiation at the arithmetic level, and deliberately: the linear ops
+are their own derivative (`Sum` → `Sum`; `Affine` → `Affine` with the SAME constant coefficients),
+and the transcendentals differentiate to functions of their own FORWARD VALUE — `acc_exp` is
+`yb * y`, not `yb * exp(x)`; `acc_sqrt` is `0.5*yb/y`. That second property is why the derivative
+rule never sees how `exp` was implemented, and therefore why a polynomial `exp` below the pin costs
+derivative accuracy nothing (D88 §5).
+
+So the adjoint splits cleanly, and the split is the finding:
+
+| | what it is | closed under differentiation? |
+|---|---|---|
+| the 12 `acc_*` kernels | **elementwise arithmetic** | **yes** — every rule is expressible in the op set |
+| `AdjointPlan`'s four CSR lists | **data movement** (`output_`/`gather_`/`sum_`/`affine_readers`, `affine_coefs`) | **no** — scatter-accumulate has no op |
+
+**The arithmetic is closed; the data movement is not.** The reverse of a `Gather` is a scatter-add,
+of a `Sum` over a segment a broadcast, of an `Affine` a scatter weighted by the same coefficients —
+all pure addressing, no arithmetic worth naming, and none expressible because `SlotKind::Gather` is
+an addressing mode and `Op::Gather`/`Op::SegmentSum` are reserved. `AdjointPlan` precomputes the
+reverse adjacency because the IR cannot say it.
+
+**This bounds I1 (§1b) much more tightly than the rest of this entry implies.** No derivative IR is
+needed. Roughly **two ops** are — a scatter-accumulate and a direction on the scan — and then the
+twelve existing, already-verified rules emit nodes instead of doubles. Real work, and the scan needs
+care, but a different order of magnitude from "an architectural project".
+
 ### 3. What was actually missed, stated precisely
 
 Not an unsimplified expression. `ResidualProgram::jacobian` and `ResidualProgram::jt_product` are

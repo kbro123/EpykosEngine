@@ -96,6 +96,8 @@ const std::vector<std::string> documented = {
     "simplify.cancel_mismatched_operand",
     "simplify.telescope_wrong_endpoint",
     "adjoint.div_aliased_targets",
+    "a2p.drop_zero_start",
+    "a2p.div_not_aliased",
 };
 
 std::vector<std::string> registry_names() {

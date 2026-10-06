@@ -12,6 +12,8 @@
 # or deleted, the mutant is not covered by anything else.
 # pass. It is harness metadata, not a fixture and not an input to the engine.
 # scripts/mutation_catchers.tsv — the recorded catching gate per mutant (D70).
+a2p.div_not_aliased	adjoint_adjoint_to_program_e0_test	1
+a2p.drop_zero_start	adjoint_adjoint_to_program_e0_test	1
 adjoint.affine_not_transposed	curve_composite_vs_dual_test	14
 adjoint.div_aliased_targets	adjoint_div_aliased_verify_test	2
 adjoint.drop_broadcast	curve_composite_vs_dual_test	16

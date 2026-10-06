@@ -2,10 +2,7 @@
 // `ir::validate`, round-trips through `ir::serialize` / `ir::deserialize`, and that
 // `exec::Interpreter` run on it reproduces `adjoint::Adjoint::run` **BITWISE**.
 //
-// Stages C2 (elementwise + gather) and C3a (segments) of that invariant. C3b (scans) is not
-// implemented and `adjoint::adjoint_to_program` refuses a scan program outright; the refusal is
-// gated here too, because an emitter that silently produced a nearly-right reverse scan would be
-// worse than one that does not try.
+// Stages C2 (elementwise + gather), C3a (segments) and C3b (scans) of that invariant.
 //
 // Bitwise, and why every clause of that word is load-bearing
 // ----------------------------------------------------------
@@ -41,7 +38,25 @@
 //   by hand   an aliased Div (no fixture in the tree contains one, because `simplify` turns
 //             div(x, x) into 1 — but `ir::validate` accepts one, so the engine must be right for
 //             what its own contract allows), and a program whose state adjoint is a SIGNED ZERO.
-//   scans     instrument_sample, rfr_book and compare_ois must all hit the C3b refusal cleanly.
+//
+//   affine_scan   C3b, both recordings. 400 rows in 4 chains; with `output_path` every scan row
+//             is also an output, so the carry's edge slot is the LAST of 2 members in the pull of
+//             all 396 carry-bearing rows, and without it the FIRST of 1.
+//   compare_ois (DEFAULT tenors)
+//             C3b, and the one that matters. Measured: the carry sits at position 0 of a 2-entry
+//             pull in every carry-bearing row, so an encoding that appended the carry to the pull
+//             — `Affine` over the non-carry readers, then `Add(·, carry)` — passes `affine_scan`
+//             and fails here. It also has to be the DEFAULT tenor set: with any set ending at 10Y
+//             D81's collapse telescopes the recurrence away and there is no scan left at all,
+//             which is the C3a case `CollapsedOisIsBitwiseTheAdjoint` below pins.
+//
+// What C3b changed about this file's refusal case. Until 2026-10-07 `RefusesAScanNamingC3b`
+// asserted that `instrument_sample`, `rfr_book` and default-tenor `compare_ois` were all refused
+// with a message naming C3b. They are now emitted, so that assertion is false about a better
+// emitter (§5.2a case 3). What is still refused is narrower and is gated by
+// `RefusesASecondCarriedQuantity`: a recurrent domain that is not a scan, and a scan whose rows
+// read themselves through anything but the carry — either needs TWO carried quantities per row,
+// and a domain row produces exactly one value.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -59,6 +74,7 @@
 #include "epykos/adjoint/adjoint.hpp"
 #include "epykos/adjoint/adjoint_to_program.hpp"
 #include "epykos/exec/interpreter.hpp"
+#include "epykos/fixtures/affine_scan.hpp"
 #include "epykos/fixtures/compare_ois.hpp"
 #include "epykos/fixtures/instrument_sample.hpp"
 #include "epykos/fixtures/m1_book.hpp"
@@ -81,6 +97,8 @@ using ir::Program;
 struct Counts {
   long long comparisons = 0;
   long long mismatches = 0;
+  long long out_mismatches = 0;        // in the forward half of Q's outputs
+  long long state_bar_mismatches = 0;  // in the state-adjoint half
 };
 
 bool same_bits(double a, double b) { return std::memcmp(&a, &b, sizeof(double)) == 0; }
@@ -118,18 +136,29 @@ std::vector<double> q_inputs(const std::vector<double>& state, const std::vector
   return in;
 }
 
-// memcmp of `got` against `ref`, reporting at most a few differences.
+// memcmp of `got` against `ref`, reporting at most a few differences. `n_out_elems` is where the
+// forward outputs end and the state adjoints begin, so a failure says WHICH HALF it is in — the
+// question a mutant has to answer (a mutant that only perturbs an intermediate, or that is
+// washed out by a signed zero, is a dead gate; see the file header of
+// tests/adjoint/div_aliased_verify_test.cpp for the one that nearly was).
 void expect_same_bits(const std::vector<double>& got, const std::vector<double>& ref, const std::string& what,
-                      Counts* c) {
+                      std::size_t n_out_elems, Counts* c) {
   ASSERT_EQ(got.size(), ref.size()) << what;
   int shown = 0;
   for (std::size_t i = 0; i < ref.size(); ++i) {
     ++c->comparisons;
     if (same_bits(got[i], ref[i])) continue;
     ++c->mismatches;
+    const bool in_state_bar = i >= n_out_elems;
+    if (in_state_bar) {
+      ++c->state_bar_mismatches;
+    } else {
+      ++c->out_mismatches;
+    }
     if (shown++ < 4) {
-      ADD_FAILURE() << what << ": element " << i << " is " << bits_of(got[i]) << ", Adjoint::run says "
-                    << bits_of(ref[i]) << ". The gate is BITWISE (PRINCIPLES.md §1b, I1): this is a defect in "
+      ADD_FAILURE() << what << ": element " << i << " (" << (in_state_bar ? "state_bar" : "out") << ") is "
+                    << bits_of(got[i]) << ", Adjoint::run says " << bits_of(ref[i])
+                    << ". The gate is BITWISE (PRINCIPLES.md §1b, I1): this is a defect in "
                     << "src/adjoint/adjoint_to_program_e0.cpp, never a tolerance to widen.";
     }
   }
@@ -186,10 +215,19 @@ Counts gate(const Program& p, const std::vector<std::vector<double>>& states, co
     const Program round = ir::deserialize(ir::serialize(q));
     EXPECT_TRUE(round == q) << name << ": serialize/deserialize round trip (I1's second clause)";
   }
-  std::cout << "[  " << name << "  ] emitted: " << q.num_values() << " values, " << q.domains.size() << " domains, "
-            << q.gathers.size() << " gathers, " << q.segments.size() << " segments, " << q.columns.size()
-            << " columns, " << q.literals.size() << " literals, " << q.inputs.size() << " inputs, "
-            << q.outputs.size() << " outputs\n";
+  std::size_t q_scans = 0, q_recurrent = 0;
+  for (const ir::Domain& d : q.domains) {
+    if (d.scan >= 0) ++q_scans;
+    if (d.recurrent && d.scan < 0) ++q_recurrent;
+  }
+  // One reverse-scan domain per forward scan domain, and not one more: the forward half re-emits
+  // the scan as a scan, the reverse half as a recurrent non-scan domain (C3b).
+  EXPECT_EQ(q_scans, ir::scan_domains(p).size()) << name;
+  EXPECT_EQ(q_recurrent, ir::scan_domains(p).size()) << name;
+  std::cout << "[  " << name << "  ] emitted: " << q.num_values() << " values, " << q.domains.size() << " domains ("
+            << q_scans << " scan, " << q_recurrent << " recurrent non-scan), " << q.gathers.size() << " gathers, "
+            << q.segments.size() << " segments, " << q.columns.size() << " columns, " << q.literals.size()
+            << " literals, " << q.inputs.size() << " inputs, " << q.outputs.size() << " outputs\n";
 
   int max_batch = 1;
   for (const int B : batches) max_batch = std::max(max_batch, B);
@@ -221,22 +259,24 @@ Counts gate(const Program& p, const std::vector<std::vector<double>>& states, co
         const std::vector<double> in = q_inputs(state, out_bar);
         const std::string where = name + " state " + std::to_string(si) + " seed " + std::to_string(se) + " B " +
                                   std::to_string(B);
+        const std::size_t n_out_elems = static_cast<std::size_t>(n_out) * Bs;
         if (B == 1) {
           std::vector<double> got(q.outputs.size(), 0.0);
           ir::Evaluator(q).run(in.data(), got.data());
-          expect_same_bits(got, ref, where + " [ir::Evaluator]", &c);
+          expect_same_bits(got, ref, where + " [ir::Evaluator]", n_out_elems, &c);
         }
         for (std::size_t ci = 0; ci < cfgs.size(); ++ci) {
           std::vector<double> got(q.outputs.size() * Bs, 0.0);
           interps[ci]->run(in.data(), B, got.data());
-          expect_same_bits(got, ref, where + " [exec::Interpreter " + cfgs[ci].name + "]", &c);
+          expect_same_bits(got, ref, where + " [exec::Interpreter " + cfgs[ci].name + "]", n_out_elems, &c);
         }
       }
     }
   }
-  std::cout << "[  " << name << "  ] bitwise: " << c.mismatches << " mismatches / " << c.comparisons
-            << " comparisons over " << states.size() << " states x " << seeds.size() << " seeds x "
-            << (cfgs.size() + 1) << " evaluator configurations x " << batches.size() << " batch widths\n";
+  std::cout << "[  " << name << "  ] bitwise: " << c.mismatches << " mismatches (" << c.out_mismatches << " out, "
+            << c.state_bar_mismatches << " state_bar) / " << c.comparisons << " comparisons over " << states.size()
+            << " states x " << seeds.size() << " seeds x " << (cfgs.size() + 1) << " evaluator configurations x "
+            << batches.size() << " batch widths\n";
   return c;
 }
 
@@ -450,42 +490,251 @@ TEST(AdjointToProgram, SignedZeroSurvivesTheEmission) {
                                        << ": the accumulation starts at the +0.0 the runtime memsets";
 }
 
-// ---- C3b: scans are refused, not approximated ------------------------------------------------------
+// ---- C3b: the reverse of a scan ----------------------------------------------------------------
+//
+// `affine_scan` FIRST, because it is the small one and its failures are readable; then
+// `compare_ois` with the default tenors, which is the gate that matters. A green `affine_scan`
+// alone proves nothing: its carry sits LAST in the pull of all 396 carry-bearing rows, and
+// `compare_ois`'s sits FIRST in all of its, so the one encoding that cannot work — append the
+// carry to the pull — passes the first and fails the second.
 
-TEST(AdjointToProgram, RefusesAScanNamingC3b) {
-  struct Named {
-    const char* name;
-    Program p;
-  };
-  std::vector<Named> scanned;
+TEST(AdjointToProgram, AffineScanIsBitwiseTheAdjoint) {
+  const fixtures::AffineScanFixture f = fixtures::make_affine_scan();
+  for (const bool output_path : {false, true}) {
+    const Program p = ir::infer(fixtures::record_affine_scan(f, output_path));
+    ASSERT_EQ(ir::scan_domains(p).size(), 1u) << "the affine scan fixture is a C3b gate: one scan domain";
+    const std::string name = std::string("affine_scan(") + (output_path ? "path" : "final") + ")";
+    const std::vector<std::vector<double>> states = fixtures::affine_scan_states(f, 3);
+    std::vector<std::vector<double>> seeds = out_bar_seeds(static_cast<int>(p.outputs.size()));
+    // 401 outputs in the `path` recording: three seeds and two batch widths keep the gate inside
+    // a second without narrowing what it covers (every configuration still runs).
+    if (output_path) seeds.resize(3);
+    const Counts c = gate(p, states, seeds, name, output_path ? std::vector<int>{1, 4} : std::vector<int>{1, 4, 5});
+    EXPECT_EQ(c.mismatches, 0);
+    EXPECT_GT(c.comparisons, 0);
+  }
+}
+
+TEST(AdjointToProgram, DefaultTenorOisIsBitwiseTheAdjoint) {
+  // The DEFAULT tenor set, and it has to be. With any set ending at 10Y (measured: 2 trades over
+  // 1Y/2Y/5Y/10Y, and over six tenors to 10Y) D81's collapse telescopes every compounded coupon
+  // away and `ir::infer` finds NO scan at all -- that program is CollapsedOisIsBitwiseTheAdjoint
+  // above. The long end is what still carries one.
+  fixtures::CompareOisOptions o;
+  o.trades = 2;
+  const fixtures::CompareOis s = fixtures::make_compare_ois(o);
+  const Program p = ir::infer(fixtures::record_compare_ois(s).tape);
+  ASSERT_EQ(ir::scan_domains(p).size(), 1u) << "default-tenor compare_ois is THE C3b gate: it must carry a scan";
+
+  std::vector<std::vector<double>> states;
+  for (int r = 0; r < 3; ++r) {
+    std::vector<double> z(p.input_values);
+    for (std::size_t k = 0; k < z.size(); ++k) {
+      z[k] += 1e-5 * static_cast<double>((r + 1) * (static_cast<int>(k) % 5 - 2));
+    }
+    states.push_back(z);
+  }
+  const Counts c = gate(p, states, out_bar_seeds(static_cast<int>(p.outputs.size())), "compare_ois (default tenors)");
+  EXPECT_EQ(c.mismatches, 0);
+  EXPECT_GT(c.comparisons, 0);
+}
+
+TEST(AdjointToProgram, OtherScanFixturesAreBitwiseTheAdjoint) {
+  // The two fixtures D41 built the scan machinery against. Until C3b they were this file's
+  // refusal cases.
   {
     const fixtures::InstrumentSample s = fixtures::make_instrument_sample();
-    scanned.push_back({"instrument_sample", ir::infer(fixtures::record_sample(s))});
+    const Program p = ir::infer(fixtures::record_sample(s));
+    ASSERT_GT(ir::scan_domains(p).size(), 0u);
+    std::vector<std::vector<double>> states;
+    for (int r = 0; r < 2; ++r) {
+      std::vector<double> z(p.input_values);
+      for (std::size_t k = 0; k < z.size(); ++k) z[k] *= 1.0 + 1e-3 * static_cast<double>(r + 1);
+      states.push_back(z);
+    }
+    const Counts c = gate(p, states, out_bar_seeds(static_cast<int>(p.outputs.size())), "instrument_sample");
+    EXPECT_EQ(c.mismatches, 0);
   }
   {
     const fixtures::RfrBook b = fixtures::make_rfr_book();
-    scanned.push_back({"rfr_book", ir::infer(fixtures::record_rfr(b))});
+    const Program p = ir::infer(fixtures::record_rfr(b));
+    ASSERT_GT(ir::scan_domains(p).size(), 0u);
+    std::vector<std::vector<double>> states;
+    for (int r = 0; r < 2; ++r) {
+      std::vector<double> z(p.input_values);
+      for (std::size_t k = 0; k < z.size(); ++k) z[k] *= 1.0 + 1e-3 * static_cast<double>(r + 1);
+      states.push_back(z);
+    }
+    std::vector<std::vector<double>> seeds = out_bar_seeds(static_cast<int>(p.outputs.size()));
+    seeds.resize(3);
+    const Counts c = gate(p, states, seeds, "rfr_book", {1, 4});
+    EXPECT_EQ(c.mismatches, 0);
   }
+}
+
+// The asymmetry D96 §3 measured, asserted on the emitted program rather than recalled: the
+// carry's edge slot is a member of the pull AT ITS TRUE CSR POSITION, which is the first of two
+// on default-tenor compare_ois and the last of two on affine_scan(path). Mutant
+// a2p.scan_forward_order is about which ROW that member names; this test is about which
+// POSITION it occupies, and it is the one that fails if anyone "fixes" the reverse scan by
+// appending the carry to the pull — which would change Adjoint::run's bits and is a §5.2a
+// case-1 question reserved to the owner (D96 §3's recorded, not-taken, owner flag).
+TEST(AdjointToProgram, TheReverseScanKeepsTheCarryAtItsCsrPosition) {
+  struct Case {
+    const char* name;
+    Program p;
+    bool carry_first;  // else last
+  };
+  std::vector<Case> cases;
   {
-    // The DEFAULT tenor set, and it has to be. With a short set (measured: 2 trades over
-    // 1Y/2Y/5Y/10Y, and over six tenors to 10Y) D81's collapse telescopes every compounded
-    // coupon away and `ir::infer` finds NO scan at all -- that program is the C3a gate below.
-    // The long end is what still carries one.
     fixtures::CompareOisOptions o;
     o.trades = 2;
     const fixtures::CompareOis s = fixtures::make_compare_ois(o);
-    scanned.push_back({"compare_ois (default tenors)", ir::infer(fixtures::record_compare_ois(s).tape)});
+    cases.push_back({"compare_ois (default tenors)", ir::infer(fixtures::record_compare_ois(s).tape), true});
   }
-  for (const Named& n : scanned) {
-    const std::size_t scans = ir::scan_domains(n.p).size();
-    std::cout << "[  scan  ] " << n.name << ": " << scans << " scan domain(s)\n";
-    EXPECT_GT(scans, 0u) << n.name << " was expected to contain a scan";
+  {
+    const fixtures::AffineScanFixture f = fixtures::make_affine_scan();
+    cases.push_back({"affine_scan(path)", ir::infer(fixtures::record_affine_scan(f, true)), false});
+  }
+  for (const Case& cs : cases) {
+    const Program q = adjoint::adjoint_to_program(cs.p);
+    // The reverse scan's domain: the one recurrent non-scan domain of Q.
+    int rec = -1;
+    for (std::size_t d = 0; d < q.domains.size(); ++d) {
+      if (q.domains[d].recurrent && q.domains[d].scan < 0) rec = static_cast<int>(d);
+    }
+    ASSERT_GE(rec, 0) << cs.name << ": the reverse of a scan is a recurrent non-scan domain";
+    const ir::Domain& dm = q.domains[static_cast<std::size_t>(rec)];
+    // Its pull is the group's FIRST step, over a segment; its last step is the carry's edge slot.
+    const ir::Step& first = q.groups[static_cast<std::size_t>(rec)].steps.front();
+    ASSERT_EQ(first.a.kind, ir::SlotKind::Segment) << cs.name;
+    ASSERT_GT(q.groups[static_cast<std::size_t>(rec)].steps.size(), 1u)
+        << cs.name << ": the carry's edge-slot chain follows the pull in the same group";
+    const ir::Segment& sg = q.segments[static_cast<std::size_t>(first.a.index)];
+    int self_first = 0, self_last = 0, self_mid = 0, rows_with_carry = 0;
+    for (std::int32_t r = 0; r < dm.rows; ++r) {
+      const std::int32_t lo = sg.offsets[static_cast<std::size_t>(r)];
+      const std::int32_t hi = sg.offsets[static_cast<std::size_t>(r) + 1];
+      for (std::int32_t m = lo; m < hi; ++m) {
+        const ir::value_id v = sg.members[static_cast<std::size_t>(m)];
+        if (v < dm.value_base || v >= dm.value_base + r) continue;  // not a self-read
+        ++rows_with_carry;
+        // The rows run BACKWARDS, so the carried adjoint is the PREVIOUS emitted row and nothing
+        // else. That is what makes `exec::Interpreter`'s one-row-at-a-time order sufficient.
+        EXPECT_EQ(v, dm.value_base + r - 1) << cs.name << " row " << r;
+        if (m == lo) ++self_first;
+        else if (m == hi - 1) ++self_last;
+        else ++self_mid;
+      }
+    }
+    std::cout << "[  carry  ] " << cs.name << ": " << rows_with_carry << " carry-bearing rows of " << dm.rows
+              << "; position first " << self_first << ", last " << self_last << ", middle " << self_mid << "\n";
+    EXPECT_GT(rows_with_carry, 0) << cs.name;
+    EXPECT_EQ(self_mid, 0) << cs.name << ": the fixtures' pulls are 1 or 2 members wide";
+    if (cs.carry_first) {
+      EXPECT_EQ(self_last, 0) << cs.name
+                              << ": the carry is FIRST in every carry-bearing row of this fixture (D96 §3). "
+                              << "A pull that appended it would be a different accumulation order and a "
+                              << "different answer -- §5.2a case 1, the owner's call, not this emitter's.";
+      EXPECT_EQ(self_first, rows_with_carry) << cs.name;
+    } else {
+      EXPECT_EQ(self_first, 0) << cs.name << ": the carry is LAST in every carry-bearing row of this fixture";
+      EXPECT_EQ(self_last, rows_with_carry) << cs.name;
+    }
+  }
+}
+
+// ---- what is still refused: a SECOND carried quantity ---------------------------------------------
+//
+// Until 2026-10-07 this file asserted that every scan was refused with a message naming C3b.
+// That assertion is now false about a better emitter (§5.2a case 3). What remains refused is a
+// recurrence whose reverse would need to carry more than one value per row, which no domain can
+// express, because a domain row produces exactly one value.
+TEST(AdjointToProgram, RefusesASecondCarriedQuantity) {
+  // A recurrent domain that is not a scan. `ir::validate` accepts it and `ir::Evaluator` runs it
+  // (D96 §3); its REVERSE is what has no encoding, because there is no carry gather whose edge
+  // slot could be the carried value.
+  {
+    Program p;
+    {
+      ir::Domain d;
+      d.name = "in";
+      d.rows = 1;
+      d.value_base = 0;
+      p.domains.push_back(d);
+      ir::Group g;
+      g.domain = 0;
+      g.steps.push_back(ir::Step{Op::Input, ir::Slot{ir::SlotKind::Input, -1}, {}, {}, {}});
+      p.groups.push_back(g);
+    }
+    const std::int32_t rows = 4;
+    {
+      ir::Domain d;
+      d.name = "rec";
+      d.rows = rows;
+      d.value_base = 1;
+      d.recurrent = true;
+      d.reads = {0, 1};
+      p.domains.push_back(d);
+      ir::Segment s;
+      s.domain = 1;
+      s.offsets.push_back(0);
+      for (std::int32_t r = 0; r < rows; ++r) {
+        s.members.push_back(0);
+        s.coefs.push_back(1.0);
+        if (r > 0) {
+          s.members.push_back(1 + r - 1);
+          s.coefs.push_back(0.5);
+        }
+        s.offsets.push_back(static_cast<std::int32_t>(s.members.size()));
+      }
+      p.segments.push_back(s);
+      p.literals = {0.0};
+      ir::Group g;
+      g.domain = 1;
+      g.steps.push_back(
+          ir::Step{Op::Affine, ir::Slot{ir::SlotKind::Segment, 0}, {}, {}, ir::Slot{ir::SlotKind::Literal, 0}});
+      p.groups.push_back(g);
+    }
+    p.inputs = {0};
+    p.input_values = {2.0};
+    for (std::int32_t r = 0; r < rows; ++r) p.outputs.push_back(1 + r);
+    ASSERT_NO_THROW(ir::validate(p)) << "the IR accepts a recurrent non-scan domain, which is the point";
     try {
-      (void)adjoint::adjoint_to_program(n.p);
-      ADD_FAILURE() << n.name << ": a scan program must be refused, not emitted";
+      (void)adjoint::adjoint_to_program(p);
+      ADD_FAILURE() << "a recurrent non-scan domain must be refused, not emitted";
     } catch (const std::logic_error& e) {
-      EXPECT_NE(std::string(e.what()).find("C3b"), std::string::npos)
-          << n.name << ": the refusal must name the stage that lifts it; got: " << e.what();
+      // `build_plan` reaches this one FIRST (`adjoint: domain N is recurrent but not a scan`),
+      // and std::invalid_argument IS a std::logic_error, so the emitter's own check of the same
+      // condition is defence in depth rather than the message seen here. Both say the same
+      // thing, which is what this asserts.
+      EXPECT_NE(std::string(e.what()).find("recurrent but not a scan"), std::string::npos) << e.what();
+    }
+  }
+  // A scan that reads its own rows through a SECOND gather. Taken from the real affine_scan
+  // program and bent by hand: no fixture produces one, and the refusal exists so that a future
+  // program that does is loud rather than silently wrong.
+  {
+    const fixtures::AffineScanFixture f = fixtures::make_affine_scan();
+    Program p = ir::infer(fixtures::record_affine_scan(f, false));
+    const std::vector<ir::domain_id> scans = ir::scan_domains(p);
+    ASSERT_EQ(scans.size(), 1u);
+    const ir::domain_id sd = scans.front();
+    const std::int32_t carry = p.scans[static_cast<std::size_t>(p.domains[static_cast<std::size_t>(sd)].scan)].carry_gather;
+    // Some other gather of the same domain, pointed at an earlier row of the scan.
+    int other = -1;
+    for (std::size_t gi = 0; gi < p.gathers.size(); ++gi) {
+      if (p.gathers[gi].domain == sd && static_cast<std::int32_t>(gi) != carry) other = static_cast<int>(gi);
+    }
+    ASSERT_GE(other, 0);
+    const ir::Domain& dm = p.domains[static_cast<std::size_t>(sd)];
+    p.gathers[static_cast<std::size_t>(other)].index.back() = dm.value_base;
+    ASSERT_NO_THROW(ir::validate(p)) << "ir::validate accepts it: only the REVERSE has no encoding";
+    try {
+      (void)adjoint::adjoint_to_program(p);
+      ADD_FAILURE() << "a scan reading itself through a non-carry gather must be refused";
+    } catch (const std::logic_error& e) {
+      EXPECT_NE(std::string(e.what()).find("which is not its carry"), std::string::npos) << e.what();
     }
   }
 }

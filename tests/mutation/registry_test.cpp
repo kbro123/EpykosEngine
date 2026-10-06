@@ -98,6 +98,7 @@ const std::vector<std::string> documented = {
     "adjoint.div_aliased_targets",
     "a2p.drop_zero_start",
     "a2p.div_not_aliased",
+    "a2p.scan_forward_order",
 };
 
 std::vector<std::string> registry_names() {

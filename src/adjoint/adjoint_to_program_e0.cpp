@@ -59,15 +59,25 @@ inline std::int32_t i32(std::size_t i) noexcept { return static_cast<std::int32_
 // forward program, remapped, and the IDENTITY gather value_base + r that reads one emitted
 // domain's rows from another of the same length.
 struct Operand {
-  enum class Kind { Literal, Column, Values } kind = Kind::Literal;
+  enum class Kind { Literal, Column, Values, Direct } kind = Kind::Literal;
   double literal = 0.0;
   std::vector<double> column;
   std::vector<value_id> values;
+  Slot direct{};  // Kind::Direct: a slot already in the host group (an earlier Step of it)
 
   static Operand lit(double v) {
     Operand o;
     o.kind = Kind::Literal;
     o.literal = v;
+    return o;
+  }
+  // An earlier step of the SAME group. The reverse of a scan needs this: the chain from v̄ to the
+  // carry's edge slot must live in one group (a cross-domain cycle is not expressible), so its
+  // intermediates are steps rather than their own domains read back through identity gathers.
+  static Operand direct_slot(Slot s) {
+    Operand o;
+    o.kind = Kind::Direct;
+    o.direct = s;
     return o;
   }
   static Operand col(std::vector<double> v) {
@@ -150,6 +160,8 @@ struct Builder {
   // Materialises an operand as a slot of domain `d` (a literal, a fresh column, a fresh gather).
   Slot slot_of(domain_id d, const Operand& o) {
     switch (o.kind) {
+      case Operand::Kind::Direct:
+        return o.direct;
       case Operand::Kind::Literal:
         return lit_slot(o.literal);
       case Operand::Kind::Column: {
@@ -184,17 +196,26 @@ struct Builder {
     for (std::int32_t r = 0; r < dm.rows; ++r) v[ix(r)] = dm.value_base + r;
     return v;
   }
+  // The rows of a finished domain in the READER's row order: v[i] is the source domain's row
+  // rowmap[i]. The reverse of a scan is laid out backwards, so every operand it reads from a
+  // forward-order domain is re-indexed through its row map.
+  std::vector<value_id> rows_of(domain_id d, const std::vector<std::int32_t>& rowmap) const {
+    const value_id base = q.domains[ix(d)].value_base;
+    std::vector<value_id> v(rowmap.size());
+    for (std::size_t i = 0; i < rowmap.size(); ++i) v[i] = base + rowmap[i];
+    return v;
+  }
   value_id value_base(domain_id d) const noexcept { return q.domains[ix(d)].value_base; }
 
-  // Builds the domain holding one accumulator target over `rows` rows: its contributions, folded
-  // left to right into a running accumulator exactly as adjoint_e0.cpp folds them into a buffer
-  // that was memset to +0.0 first.
-  domain_id accumulate(std::int32_t rows, const std::vector<Contribution>& cs, std::string name) {
-    const domain_id d = open(rows, std::move(name));
+  // Folds one accumulator target's contributions into domain `d`'s group, left to right into a
+  // running accumulator exactly as adjoint_e0.cpp folds them into a buffer that was memset to
+  // +0.0 first, and returns the slot naming the result. The target may be the group's own value
+  // (the whole group is this one chain) or an intermediate of a longer group (the reverse of a
+  // scan, where the pull, the step adjoints and the carry's edge slot share one group).
+  Slot fold_into(domain_id d, const std::vector<Contribution>& cs) {
     if (cs.empty()) {
       // Nothing accumulates here: the runtime's buffer keeps the +0.0 it was memset to.
-      push(d, Step{Op::Const, {}, {}, {}, lit_slot(0.0)});
-      return d;
+      return push(d, Step{Op::Const, {}, {}, {}, lit_slot(0.0)});
     }
     Slot acc{};
     bool first = true;
@@ -253,6 +274,14 @@ struct Builder {
       }
       first = false;
     }
+    return acc;
+  }
+
+  // The same chain as its own DOMAIN, over `rows` rows: what every target of a non-recurrent
+  // domain's reverse gets, so that later domains can read it through an identity gather.
+  domain_id accumulate(std::int32_t rows, const std::vector<Contribution>& cs, std::string name) {
+    const domain_id d = open(rows, std::move(name));
+    fold_into(d, cs);
     return d;
   }
 
@@ -281,15 +310,15 @@ struct Builder {
   }
 };
 
-// C3b. A scan's reverse runs the rows backwards with the carry's edge slot feeding its
-// predecessor, which this emitter does not express; refuse it rather than emit something that
-// is nearly right.
-[[noreturn]] void refuse_scan(const std::string& what) {
+// A recurrent domain that is not a scan, and a scan whose rows read themselves through anything
+// but the carry: the reverse of either would need TWO carried quantities per row, and a domain
+// row produces exactly one value, so neither is expressible. Refuse rather than emit something
+// that is nearly right. (`build_plan` refuses the first of them too.)
+[[noreturn]] void refuse(const std::string& what) {
   throw std::logic_error(
       "adjoint_to_program: " + what +
-      ". The reverse of a scan (the carried adjoint, rows walked backwards) is stage C3b of "
-      "invariant I1; stages C2 (elementwise + gather) and C3a (segments) are what this emitter "
-      "covers. See PRINCIPLES.md §1b.");
+      ". The reverse of a recurrence carries ONE value per row — the carry gather's edge slot — "
+      "and a second carried quantity is not expressible in the IR (C3b, PRINCIPLES.md §1b).");
 }
 
 }  // namespace
@@ -299,14 +328,35 @@ ir::Program adjoint_to_program(const ir::Program& p, const AdjointPlan& plan) {
     throw std::invalid_argument("adjoint_to_program: the program has no outputs, so there is nothing to seed");
   }
   for (std::size_t d = 0; d < p.domains.size(); ++d) {
-    if (p.domains[d].scan >= 0) refuse_scan("domain " + std::to_string(d) + " is a scan");
-    if (p.domains[d].recurrent) refuse_scan("domain " + std::to_string(d) + " is recurrent");
+    const Domain& dm = p.domains[d];
+    if (dm.recurrent && dm.scan < 0) {
+      refuse("domain " + std::to_string(d) + " is recurrent but not a scan");
+    }
     for (const Step& s : p.groups[d].steps) {
-      if (ir::is_fixed_sum(s)) {
-        refuse_scan("domain " + std::to_string(d) + " holds a fixed-arity Sum (a scan group's fold)");
-      }
       if (!op_is_supported(s.op)) {
         throw std::invalid_argument(std::string("adjoint_to_program: unsupported op ") + to_string(s.op));
+      }
+    }
+    if (dm.scan < 0) continue;
+    // C3b's one structural precondition, checked rather than assumed: a scan row may be read by
+    // its own domain ONLY through the carry. Another self-reading gather, or a self-reading
+    // segment, would put a second edge slot of this domain into an earlier row's pull — a second
+    // carried quantity. Measured absent on both scan fixtures and on compare_ois.
+    const std::int32_t carry = p.scans[ix(dm.scan)].carry_gather;
+    for (const std::int32_t gi : plan.domains[d].gathers) {
+      if (gi == carry) continue;
+      for (const value_id v : p.gathers[ix(gi)].index) {
+        if (v >= dm.value_base && v < dm.value_base + dm.rows) {
+          refuse("scan domain " + std::to_string(d) + " reads itself through gather " + std::to_string(gi) +
+                 ", which is not its carry");
+        }
+      }
+    }
+    for (const std::int32_t si : plan.domains[d].segments) {
+      for (const value_id v : p.segments[ix(si)].members) {
+        if (v >= dm.value_base && v < dm.value_base + dm.rows) {
+          refuse("scan domain " + std::to_string(d) + " reads itself through segment " + std::to_string(si));
+        }
       }
     }
   }
@@ -316,6 +366,7 @@ ir::Program adjoint_to_program(const ir::Program& p, const AdjointPlan& plan) {
   // elided -- the chain's first Add(Lit 0.0, ·) / Sub(Lit 0.0, ·) and, where the pull's every
   // coefficient is 1.0, its Affine konst (emitted as a Sum). a2p.div_not_aliased: an aliased Div
   // emits acc_div's two separate accumulations instead of acc_div_aliased's single one.
+  // a2p.scan_forward_order is queried where it fires, below.
   b.drop_zero_start = mutant("a2p.drop_zero_start");
   const bool div_not_aliased = mutant("a2p.div_not_aliased");
 
@@ -333,45 +384,68 @@ ir::Program adjoint_to_program(const ir::Program& p, const AdjointPlan& plan) {
     const Domain& dm = p.domains[d];
     const Group& g = p.groups[d];
     const std::size_t last = g.steps.size() - 1;
-    for (std::size_t k = 0; k < g.steps.size(); ++k) {
-      const Step& s = g.steps[k];
-      const domain_id nd = b.open(dm.rows, "f" + std::to_string(d) + "_" + std::to_string(k));
-      // Re-expresses one operand slot of the forward step in the emitted domain.
-      auto remap = [&](const Slot& sl) -> Slot {
-        switch (sl.kind) {
-          case SlotKind::None:
-            return Slot{};
-          case SlotKind::Literal:
-            return b.lit_slot(p.literals[ix(sl.index)]);
-          case SlotKind::Column:
-            return b.slot_of(nd, Operand::col(p.columns[ix(sl.index)].values));
-          case SlotKind::Step: {
-            // An earlier step of the same group is now its own domain of the same length: the
-            // identity gather reads it row for row.
-            return b.slot_of(nd, Operand::vals(b.rows_of(step_domain[d][ix(sl.index)])));
-          }
-          case SlotKind::Gather: {
-            const Gather& og = p.gathers[ix(sl.index)];
-            std::vector<value_id> index(ix(dm.rows));
-            for (std::int32_t r = 0; r < dm.rows; ++r) index[ix(r)] = fwd[ix(og.index[ix(r)])];
-            return b.slot_of(nd, Operand::vals(std::move(index)));
-          }
-          case SlotKind::Input:
-            return Slot{SlotKind::Input, -1};
-          case SlotKind::Segment:
-          default: {
-            const Segment& og = p.segments[ix(sl.index)];
-            Segment ng;
-            ng.domain = nd;
-            ng.offsets = og.offsets;
-            ng.coefs = og.coefs;
-            ng.members.reserve(og.members.size());
-            for (const value_id m : og.members) ng.members.push_back(fwd[ix(m)]);
-            b.q.segments.push_back(std::move(ng));
-            return Slot{SlotKind::Segment, i32(b.q.segments.size()) - 1};
-          }
+    step_domain[d].assign(g.steps.size(), -1);
+    // C3b. A SCAN's forward half cannot be one emitted domain per step: the step that reads the
+    // carry would read the domain holding the group's LAST step, which is emitted after it — a
+    // cycle BETWEEN emitted domains, which is not a recurrence inside one and which ir::validate
+    // rejects. So the whole group is emitted as ONE domain, and as a genuine `ir::Scan` of Q
+    // (same chain layout, the carry gather remapped), which exec::Interpreter and ir::Evaluator
+    // already run. The intermediates the reverse needs are then RECOMPUTED after it, one domain
+    // per step, each reading the finished scan's rows through an ordinary gather — deterministic,
+    // and therefore bitwise: nothing about an elementwise recompute depends on where it runs.
+    const bool is_scan = dm.scan >= 0;
+    const std::int32_t src_carry = is_scan ? p.scans[ix(dm.scan)].carry_gather : -1;
+    // The domain being filled, and whether it is the scan's own group: `remap` reads both, and
+    // both change as this loop walks the scan domain and then its recompute domains.
+    domain_id nd = -1;
+    bool in_scan_group = false;
+    std::int32_t scan_carry = -1;  // the carry gather's index in Q, for the Scan descriptor
+    // Re-expresses one operand slot of the forward step in the emitted domain.
+    auto remap = [&](const Slot& sl) -> Slot {
+      switch (sl.kind) {
+        case SlotKind::None:
+          return Slot{};
+        case SlotKind::Literal:
+          return b.lit_slot(p.literals[ix(sl.index)]);
+        case SlotKind::Column:
+          return b.slot_of(nd, Operand::col(p.columns[ix(sl.index)].values));
+        case SlotKind::Step: {
+          // Inside the scan's own group an earlier step stays an earlier step. Everywhere else
+          // it is now its own domain of the same length: the identity gather reads it row for
+          // row.
+          if (in_scan_group) return sl;
+          return b.slot_of(nd, Operand::vals(b.rows_of(step_domain[d][ix(sl.index)])));
         }
-      };
+        case SlotKind::Gather: {
+          // One remapped carry per scan domain, reused by every slot of the group that reads it,
+          // so the Scan descriptor names a gather a step of the group actually reads.
+          const bool carry = in_scan_group && sl.index == src_carry;
+          if (carry && scan_carry >= 0) return Slot{SlotKind::Gather, scan_carry};
+          const Gather& og = p.gathers[ix(sl.index)];
+          std::vector<value_id> index(ix(dm.rows));
+          for (std::int32_t r = 0; r < dm.rows; ++r) index[ix(r)] = fwd[ix(og.index[ix(r)])];
+          const Slot out = b.slot_of(nd, Operand::vals(std::move(index)));
+          if (carry) scan_carry = out.index;
+          return out;
+        }
+        case SlotKind::Input:
+          return Slot{SlotKind::Input, -1};
+        case SlotKind::Segment:
+        default: {
+          const Segment& og = p.segments[ix(sl.index)];
+          Segment ng;
+          ng.domain = nd;
+          ng.offsets = og.offsets;
+          ng.coefs = og.coefs;
+          ng.members.reserve(og.members.size());
+          for (const value_id m : og.members) ng.members.push_back(fwd[ix(m)]);
+          b.q.segments.push_back(std::move(ng));
+          return Slot{SlotKind::Segment, i32(b.q.segments.size()) - 1};
+        }
+      }
+    };
+    auto emit_step = [&](std::size_t k) {
+      const Step& s = g.steps[k];
       Step ns;
       ns.op = s.op;
       ns.a = remap(s.a);
@@ -379,10 +453,41 @@ ir::Program adjoint_to_program(const ir::Program& p, const AdjointPlan& plan) {
       ns.c = remap(s.c);
       ns.konst = remap(s.konst);
       b.push(nd, ns);
-      step_domain[d].push_back(nd);
+    };
+
+    if (is_scan) {
+      nd = b.open(dm.rows, "f" + std::to_string(d) + "_scan");
+      in_scan_group = true;
+      // Published BEFORE the operands are remapped, so that the carry gather — whose entries are
+      // this domain's own earlier rows — resolves through the same `fwd` map as everything else,
+      // which is what makes it the recurrence ir::validate demands of a Scan.
+      for (std::int32_t r = 0; r < dm.rows; ++r) fwd[ix(dm.value_base + r)] = b.value_base(nd) + r;
+      for (std::size_t k = 0; k < g.steps.size(); ++k) emit_step(k);
+      Domain& sd = b.q.domains[ix(nd)];
+      sd.recurrent = true;
+      sd.scan = i32(b.q.scans.size());
+      ir::Scan nsc;
+      nsc.domain = nd;
+      nsc.carry_gather = scan_carry;
+      nsc.chain_offsets = p.scans[ix(dm.scan)].chain_offsets;
+      b.q.scans.push_back(std::move(nsc));
+      step_domain[d][last] = nd;
+      in_scan_group = false;
+      for (std::size_t k = 0; k < last; ++k) {
+        nd = b.open(dm.rows, "f" + std::to_string(d) + "_" + std::to_string(k) + "r");
+        emit_step(k);
+        step_domain[d][k] = nd;
+      }
+      continue;
+    }
+
+    for (std::size_t k = 0; k < g.steps.size(); ++k) {
+      nd = b.open(dm.rows, "f" + std::to_string(d) + "_" + std::to_string(k));
+      emit_step(k);
+      step_domain[d][k] = nd;
       if (k != last) continue;
       for (std::int32_t r = 0; r < dm.rows; ++r) fwd[ix(dm.value_base + r)] = b.value_base(nd) + r;
-      if (s.op != Op::Input) continue;
+      if (g.steps[k].op != Op::Input) continue;
       const std::vector<std::int32_t>& ordinal = plan.domains[d].ordinal;
       for (std::int32_t r = 0; r < dm.rows; ++r) q_inputs[ix(ordinal[ix(r)])] = b.value_base(nd) + r;
     }
@@ -393,100 +498,122 @@ ir::Program adjoint_to_program(const ir::Program& p, const AdjointPlan& plan) {
   b.push(ob_domain, Step{Op::Input, Slot{SlotKind::Input, -1}, {}, {}, {}});
   const value_id ob_base = b.value_base(ob_domain);
 
+  // A value READ BY NOTHING has an adjoint of +0.0 and a pull with no terms, and ir::validate
+  // rejects a segment row with no members. One shared row holding +0.0 stands in for it: the
+  // pull of such a row becomes `konst(+0.0) + 1.0 · 0.0`, which is +0.0 to the bit, the same
+  // +0.0 adjoint_e0.cpp's memset leaves in the buffer and never accumulates into.
+  //
+  // Not a scan matter, and not new: `instrument_sample` and `rfr_book` both declare inputs that
+  // nothing reads (12 and 3 rows of their Input domains), and until this existed the emitter
+  // refused them for that and not for the scan they also carry — so half the scan fixtures in
+  // the tree could not be gated at all. Emitted only when the program has such a value, so that
+  // every program that does not keeps the shape it had.
+  value_id zero_value = ir::invalid_value;
+  for (std::size_t v = 0; v < p.num_values(); ++v) {
+    if (plan.domains[ix(p.domain_of(i32(v)))].is_const) continue;  // no pull is emitted for those
+    if (plan.output_offsets[v + 1] != plan.output_offsets[v] || plan.gather_offsets[v + 1] != plan.gather_offsets[v] ||
+        plan.sum_offsets[v + 1] != plan.sum_offsets[v] || plan.affine_offsets[v + 1] != plan.affine_offsets[v]) {
+      continue;
+    }
+    const domain_id zd = b.open(1, "zero");
+    b.push(zd, Step{Op::Const, {}, {}, {}, b.lit_slot(0.0)});
+    zero_value = b.value_base(zd);
+    break;
+  }
+
   // ---- the reverse half -------------------------------------------------------------------------
   std::vector<value_id> gather_bar(ix(plan.n_gather_slots), ir::invalid_value);    // gbar slot -> Q value
   std::vector<value_id> segment_bar(ix(plan.n_segment_slots), ir::invalid_value);  // segbar slot -> Q value
   std::vector<value_id> value_bar(p.num_values(), ir::invalid_value);              // v̄ of a P value
 
-  for (std::size_t dd = n_dom; dd-- > 0;) {
+  // The pull (adjoint_e0.cpp's pull()): v̄ = +0.0, then the four CSR reader lists in plan order
+  // -- outputs, gathers, sums, affines -- summed left to right. That is Op::Affine's own fold
+  // over one segment, with konst +0.0 (trap 1) and coefficient 1.0 for the first three lists
+  // (trap 2: 1.0·x is exact, and the pull already multiplies for affine readers).
+  //
+  // `host` is the domain the step is pushed into; its emitted row i holds domain `dd`'s forward
+  // row `rowmap[i]`, which is the identity everywhere except in the reverse of a scan. `self`,
+  // when >= 0, says that `host` IS the recurrent carry domain of a scan: the carry's own edge
+  // slots are what host produces, so a carry entry in the CSR resolves to host's PREVIOUS
+  // emitted row rather than through `gather_bar`. That one substitution is the whole recurrence.
+  // Returns the slot naming the pushed step.
+  auto emit_pull = [&](std::size_t dd, domain_id host, const std::vector<std::int32_t>& rowmap, domain_id self,
+                       std::int32_t carry_gather) -> Slot {
     const Domain& dm = p.domains[dd];
-    const Group& g = p.groups[dd];
-    const AdjointPlan::DomainPlan& dp = plan.domains[dd];
-    if (dp.is_const) continue;  // a Const row's adjoint is read by nothing: adjoint_e0.cpp's `continue`
-    const std::size_t last = g.steps.size() - 1;
-
-    // The pull (adjoint_e0.cpp's pull()): v̄ = +0.0, then the four CSR reader lists in plan order
-    // -- outputs, gathers, sums, affines -- summed left to right. That is Op::Affine's own fold
-    // over one segment, with konst +0.0 (trap 1) and coefficient 1.0 for the first three lists
-    // (trap 2: 1.0·x is exact, and the pull already multiplies for affine readers).
-    const domain_id pull = b.open(dm.rows, "vbar" + std::to_string(dd));
-    {
-      Segment sg;
-      sg.domain = pull;
-      sg.offsets.push_back(0);
-      bool all_unit = true;
-      for (std::int32_t r = 0; r < dm.rows; ++r) {
-        const std::size_t v = ix(dm.value_base + r);
-        for (std::int32_t e = plan.output_offsets[v]; e < plan.output_offsets[v + 1]; ++e) {
-          sg.members.push_back(ob_base + plan.output_readers[ix(e)]);
-          sg.coefs.push_back(1.0);
-        }
-        for (std::int32_t e = plan.gather_offsets[v]; e < plan.gather_offsets[v + 1]; ++e) {
-          sg.members.push_back(gather_bar[ix(plan.gather_readers[ix(e)])]);
-          sg.coefs.push_back(1.0);
-        }
-        for (std::int32_t e = plan.sum_offsets[v]; e < plan.sum_offsets[v + 1]; ++e) {
-          sg.members.push_back(segment_bar[ix(plan.sum_readers[ix(e)])]);
-          sg.coefs.push_back(1.0);
-        }
-        for (std::int32_t e = plan.affine_offsets[v]; e < plan.affine_offsets[v + 1]; ++e) {
-          sg.members.push_back(segment_bar[ix(plan.affine_readers[ix(e)])]);
-          const double coef = plan.affine_coefs[ix(e)];
-          sg.coefs.push_back(coef);
-          all_unit = all_unit && coef == 1.0;
-        }
-        if (sg.offsets.back() == i32(sg.members.size())) {
-          // ir::Program's validate rejects a segment row with no members (src/ir/program.cpp).
-          // Measured zero such values on the fixtures this stage gates; relaxing validate for a
-          // reader-less value is a separate C1 item with its own test, not something to do here.
+    const std::int32_t carry_lo = carry_gather >= 0 ? plan.gather_slot_base[ix(carry_gather)] : -1;
+    Segment sg;
+    sg.domain = host;
+    sg.offsets.push_back(0);
+    bool all_unit = true;
+    for (std::size_t i = 0; i < rowmap.size(); ++i) {
+      const std::int32_t r = rowmap[i];
+      const std::size_t v = ix(dm.value_base + r);
+      for (std::int32_t e = plan.output_offsets[v]; e < plan.output_offsets[v + 1]; ++e) {
+        sg.members.push_back(ob_base + plan.output_readers[ix(e)]);
+        sg.coefs.push_back(1.0);
+      }
+      for (std::int32_t e = plan.gather_offsets[v]; e < plan.gather_offsets[v + 1]; ++e) {
+        const std::int32_t slot = plan.gather_readers[ix(e)];
+        const bool is_carry = self >= 0 && slot >= carry_lo && slot < carry_lo + dm.rows;
+        // The carried adjoint: the edge slot (carry, r + 1), which this very domain produced one
+        // emitted row ago, because its rows run backwards. i == 0 cannot reach here — forward row
+        // `rows - 1` is the last row of the last chain and has no successor to carry from.
+        sg.members.push_back(is_carry ? b.value_base(self) + i32(i) - 1 : gather_bar[ix(slot)]);
+        sg.coefs.push_back(1.0);
+      }
+      for (std::int32_t e = plan.sum_offsets[v]; e < plan.sum_offsets[v + 1]; ++e) {
+        sg.members.push_back(segment_bar[ix(plan.sum_readers[ix(e)])]);
+        sg.coefs.push_back(1.0);
+      }
+      for (std::int32_t e = plan.affine_offsets[v]; e < plan.affine_offsets[v + 1]; ++e) {
+        sg.members.push_back(segment_bar[ix(plan.affine_readers[ix(e)])]);
+        const double coef = plan.affine_coefs[ix(e)];
+        sg.coefs.push_back(coef);
+        all_unit = all_unit && coef == 1.0;
+      }
+      if (sg.offsets.back() == i32(sg.members.size())) {
+        // Read by nothing: the shared +0.0 row stands in, because ir::validate rejects a segment
+        // row with no members. `konst(+0.0) + 1.0 · 0.0` is +0.0 to the bit (see `zero_value`).
+        if (zero_value == ir::invalid_value) {
           throw std::logic_error("adjoint_to_program: value " + std::to_string(v) + " (domain " +
                                  std::to_string(dd) + ", row " + std::to_string(r) +
-                                 ") is read by nothing, so its pull would be an empty segment row");
+                                 ") is read by nothing, but the +0.0 stand-in row was not emitted");
         }
-        sg.offsets.push_back(i32(sg.members.size()));
+        sg.members.push_back(zero_value);
+        sg.coefs.push_back(1.0);
       }
-      for (const value_id m : sg.members) {
-        if (m == ir::invalid_value) {
-          throw std::logic_error("adjoint_to_program: a pull member of domain " + std::to_string(dd) +
-                                 " was not emitted before it was read (reverse order is wrong)");
-        }
-      }
-      const bool as_sum = b.drop_zero_start && all_unit;  // mutant: no leading +0.0
-      if (as_sum) sg.coefs.clear();
-      b.q.segments.push_back(std::move(sg));
-      const Slot seg{SlotKind::Segment, i32(b.q.segments.size()) - 1};
-      b.push(pull, as_sum ? Step{Op::Sum, seg, {}, {}, {}} : Step{Op::Affine, seg, {}, {}, b.lit_slot(0.0)});
+      sg.offsets.push_back(i32(sg.members.size()));
     }
-    for (std::int32_t r = 0; r < dm.rows; ++r) value_bar[ix(dm.value_base + r)] = b.value_base(pull) + r;
-    // An Input group's pull IS the state adjoint (adjoint_e0.cpp's Input rule assigns it).
-    if (dp.is_input) continue;
-
-    // How a forward operand slot reads in the reverse half: the same value, re-addressed.
-    auto operand_of = [&](const Slot& sl) -> Operand {
-      switch (sl.kind) {
-        case SlotKind::Literal:
-          return Operand::lit(p.literals[ix(sl.index)]);
-        case SlotKind::Column:
-          return Operand::col(p.columns[ix(sl.index)].values);
-        case SlotKind::Step:
-          return Operand::vals(b.rows_of(step_domain[dd][ix(sl.index)]));
-        case SlotKind::Gather: {
-          const Gather& og = p.gathers[ix(sl.index)];
-          std::vector<value_id> index(ix(dm.rows));
-          for (std::int32_t r = 0; r < dm.rows; ++r) index[ix(r)] = fwd[ix(og.index[ix(r)])];
-          return Operand::vals(std::move(index));
-        }
-        default:
-          return Operand::lit(0.0);  // None / Segment / Input: no operand vector is read
+    for (const value_id m : sg.members) {
+      if (m == ir::invalid_value || m < 0) {
+        throw std::logic_error("adjoint_to_program: a pull member of domain " + std::to_string(dd) +
+                               " was not emitted before it was read (reverse order is wrong)");
       }
-    };
+    }
+    const bool as_sum = b.drop_zero_start && all_unit;  // mutant: no leading +0.0
+    if (as_sum) sg.coefs.clear();
+    b.q.segments.push_back(std::move(sg));
+    const Slot seg{SlotKind::Segment, i32(b.q.segments.size()) - 1};
+    return b.push(host, as_sum ? Step{Op::Sum, seg, {}, {}, {}} : Step{Op::Affine, seg, {}, {}, b.lit_slot(0.0)});
+  };
 
+  // adjoint_e0.cpp's reverse(): the group's steps from the LAST to the first, each op's rule
+  // pushing its operands' contributions into their targets — an operand that is an earlier Step
+  // into that step's adjoint, one that is a Gather into that (gather, row) edge slot, a Sum /
+  // Affine step's own adjoint into the (segment, row) edge slot, a literal or a column nothing.
+  //
+  // `rowmap[i]` is the forward row the host's emitted row i holds — the identity everywhere
+  // except inside the reverse of a scan, whose rows run backwards, so every operand it reads
+  // from a forward-order domain is re-indexed through it. `ybar_of(k, chain)` supplies step k's
+  // own adjoint: the pull for the last step, and for every earlier one the chain just completed,
+  // folded wherever the caller wants it — its own domain on the ordinary path, a step of the
+  // host's group inside the reverse of a scan, where the whole chain must live in one group.
+  auto collect = [&](std::size_t dd, const std::vector<std::int32_t>& rowmap, auto&& ybar_of,
+                     std::map<std::int32_t, std::vector<Contribution>>& gather_acc,
+                     std::map<std::int32_t, std::vector<Contribution>>& segment_acc) {
+    const Group& g = p.groups[dd];
     std::vector<std::vector<Contribution>> step_acc(g.steps.size());
-    std::map<std::int32_t, std::vector<Contribution>> gather_acc;   // gather index -> chain
-    std::map<std::int32_t, std::vector<Contribution>> segment_acc;  // segment index -> chain
-    // adjoint_e0.cpp's `target()`: an operand that is an earlier Step accumulates into that
-    // step's adjoint, one that is a Gather into that (gather, row) edge slot, anything else
-    // receives nothing.
+    // adjoint_e0.cpp's `target()`.
     auto target = [&](const Slot& sl, Contribution c) {
       if (sl.kind == SlotKind::Step) {
         step_acc[ix(sl.index)].push_back(std::move(c));
@@ -494,21 +621,33 @@ ir::Program adjoint_to_program(const ir::Program& p, const AdjointPlan& plan) {
         gather_acc[sl.index].push_back(std::move(c));
       }
     };
-
-    // Steps from the last to the first, as adjoint_e0.cpp's reverse() runs them. A step's own
-    // adjoint is complete once every later step has contributed, which is exactly when its
-    // domain is emitted here.
+    // How a forward operand slot reads in the reverse half: the same value, re-addressed.
+    auto operand_of = [&](const Slot& sl) -> Operand {
+      switch (sl.kind) {
+        case SlotKind::Literal:
+          return Operand::lit(p.literals[ix(sl.index)]);
+        case SlotKind::Column: {
+          const std::vector<double>& src = p.columns[ix(sl.index)].values;
+          std::vector<double> col(rowmap.size());
+          for (std::size_t i = 0; i < rowmap.size(); ++i) col[i] = src[ix(rowmap[i])];
+          return Operand::col(std::move(col));
+        }
+        case SlotKind::Step:
+          return Operand::vals(b.rows_of(step_domain[dd][ix(sl.index)], rowmap));
+        case SlotKind::Gather: {
+          const Gather& og = p.gathers[ix(sl.index)];
+          std::vector<value_id> index(rowmap.size());
+          for (std::size_t i = 0; i < rowmap.size(); ++i) index[i] = fwd[ix(og.index[ix(rowmap[i])])];
+          return Operand::vals(std::move(index));
+        }
+        default:
+          return Operand::lit(0.0);  // None / Segment / Input: no operand vector is read
+      }
+    };
     for (std::size_t k = g.steps.size(); k-- > 0;) {
       const Step& s = g.steps[k];
-      Operand ybar;
-      if (k == last) {
-        ybar = Operand::vals(b.rows_of(pull));
-      } else {
-        const domain_id sd = b.accumulate(dm.rows, step_acc[k],
-                                          "sbar" + std::to_string(dd) + "_" + std::to_string(k));
-        ybar = Operand::vals(b.rows_of(sd));
-      }
-      const Operand y = Operand::vals(b.rows_of(step_domain[dd][k]));
+      const Operand ybar = ybar_of(k, step_acc[k]);
+      const Operand y = Operand::vals(b.rows_of(step_domain[dd][k], rowmap));
       const Operand a = operand_of(s.a);
       const Operand bb = operand_of(s.b);
       // Trap 5: adjoint_e0.cpp dispatches acc_div_aliased when the two target POINTERS coincide,
@@ -563,6 +702,17 @@ ir::Program adjoint_to_program(const ir::Program& p, const AdjointPlan& plan) {
           target(s.c, {Acc::SelectFalse, ybar, {}, {}, a});
           break;
         case Op::Sum:
+          if (ir::is_fixed_sum(s)) {
+            // C3b. A scan group's Sum over operand slots (ir::is_fixed_sum): every member of the
+            // fold receives the step's adjoint whole, a then b then c, which is exactly
+            // adjoint_e0.cpp's `if (ta) acc_plus; if (tb) acc_plus; if (tc) acc_plus`. `target`
+            // already drops the slots that receive nothing, c included when it is None.
+            target(s.a, {Acc::Plus, ybar, {}, {}, {}});
+            target(s.b, {Acc::Plus, ybar, {}, {}, {}});
+            target(s.c, {Acc::Plus, ybar, {}, {}, {}});
+            break;
+          }
+          [[fallthrough]];
         case Op::Affine:
           // C3a. The step's adjoint goes whole into the (segment, row) edge slot; plan.cpp
           // guarantees one reading step per segment, so this chain has exactly one term.
@@ -572,6 +722,91 @@ ir::Program adjoint_to_program(const ir::Program& p, const AdjointPlan& plan) {
           break;  // Const and the comparisons contribute nothing (adjoint_e0.cpp's empty cases)
       }
     }
+  };
+
+  for (std::size_t dd = n_dom; dd-- > 0;) {
+    const Domain& dm = p.domains[dd];
+    const Group& g = p.groups[dd];
+    const AdjointPlan::DomainPlan& dp = plan.domains[dd];
+    if (dp.is_const) continue;  // a Const row's adjoint is read by nothing: adjoint_e0.cpp's `continue`
+    const std::size_t last = g.steps.size() - 1;
+    const std::int32_t carry = dm.scan >= 0 ? p.scans[ix(dm.scan)].carry_gather : -1;
+
+    // Forward row order everywhere except inside the reverse scan's own recurrent domain.
+    std::vector<std::int32_t> ident(ix(dm.rows));
+    for (std::int32_t r = 0; r < dm.rows; ++r) ident[ix(r)] = r;
+
+    // ---- C3b: the reverse of a scan ---------------------------------------------------------
+    //
+    // adjoint_e0.cpp runs a scan's rows from the LAST to the first, one at a time, so that row
+    // r's pull sees the edge slot (carry, r + 1) its successor's reverse has just written. Here
+    // that is one RECURRENT domain whose emitted row i holds forward row rows - 1 - i and whose
+    // value is the carry's edge slot for that row: then (carry, r + 1) is literally the previous
+    // emitted row, the self-read is backwards, and nothing had to be reordered — in particular
+    // the pull's segment still carries the carry's edge slot as an ordinary member at its TRUE
+    // CSR position, which on compare_ois is position 0 of 2 and on affine_scan the last of 2.
+    // Reordering the pull so the carry came last would change Adjoint::run's bits and is a §5.2a
+    // case-1 question reserved to the owner (D96 §3); this encoding does not raise it.
+    //
+    // The chain from v̄ to the carry's edge slot lives in that ONE group, because a cycle between
+    // domains is not expressible. Everything else the row's reverse produces — the other gather
+    // edge slots, the segment edge slots, the step adjoints — is recomputed below in ordinary
+    // non-recurrent domains that read this one, which is deterministic and therefore bitwise.
+    if (dm.scan >= 0) {
+      std::vector<std::int32_t> rev(ix(dm.rows));
+      for (std::int32_t i = 0; i < dm.rows; ++i) rev[ix(i)] = dm.rows - 1 - i;
+      const domain_id cbar = b.open(dm.rows, "cbar" + std::to_string(dd));
+      b.q.domains[ix(cbar)].recurrent = true;
+      const Slot vbar = emit_pull(dd, cbar, rev, cbar, carry);
+      std::map<std::int32_t, std::vector<Contribution>> cg_acc, cs_acc;
+      collect(
+          dd, rev,
+          [&](std::size_t k, const std::vector<Contribution>& cs) -> Operand {
+            return Operand::direct_slot(k == last ? vbar : b.fold_into(cbar, cs));
+          },
+          cg_acc, cs_acc);
+      // The carry's edge slot is this domain's VALUE, so its chain is the group's LAST step:
+      // that is what makes the previous emitted row, read by the pull above, the carried adjoint.
+      const auto cit = cg_acc.find(carry);
+      b.fold_into(cbar, cit == cg_acc.end() ? no_contribution : cit->second);
+      // Published to the rest of Q AFTER the domain is built, because the recurrence above reads
+      // its own previous row STRUCTURALLY (`value_base + i - 1`) and not through this map.
+      //
+      // Mutant a2p.scan_forward_order publishes the FORWARD row order instead: the recurrence
+      // itself stays valid and self-consistent, and every reader outside it -- the vbar pull
+      // below, and the pull of whatever earlier domain holds the chains' initial values -- takes
+      // row r's carried adjoint from the row the FORWARD scan would have had. That is the
+      // emitter's form of adjoint.scan_forward_order, and it is the only form of it a Program
+      // can express: laying this domain out forwards instead would make the self-read a FORWARD
+      // read, which ir::validate rejects outright, so there would be nothing to compare.
+      const bool forward_order = mutant("a2p.scan_forward_order");
+      for (std::int32_t r = 0; r < dm.rows; ++r) {
+        gather_bar[ix(plan.gather_slot_base[ix(carry)] + r)] =
+            b.value_base(cbar) + (forward_order ? r : dm.rows - 1 - r);
+      }
+    }
+
+    const domain_id pull = b.open(dm.rows, "vbar" + std::to_string(dd));
+    emit_pull(dd, pull, ident, -1, carry);
+    for (std::int32_t r = 0; r < dm.rows; ++r) value_bar[ix(dm.value_base + r)] = b.value_base(pull) + r;
+    // An Input group's pull IS the state adjoint (adjoint_e0.cpp's Input rule assigns it).
+    if (dp.is_input) continue;
+
+    std::map<std::int32_t, std::vector<Contribution>> gather_acc;   // gather index -> chain
+    std::map<std::int32_t, std::vector<Contribution>> segment_acc;  // segment index -> chain
+    // Steps from the last to the first, as adjoint_e0.cpp's reverse() runs them. A step's own
+    // adjoint is complete once every later step has contributed, which is exactly when its
+    // domain is emitted here. On a scan domain this is the SECOND walk: the carry's edge slot
+    // came out of the recurrent domain above, and every other quantity the row's reverse
+    // produces is recomputed here, reading that domain's rows like any other value.
+    collect(
+        dd, ident,
+        [&](std::size_t k, const std::vector<Contribution>& cs) -> Operand {
+          if (k == last) return Operand::vals(b.rows_of(pull));
+          return Operand::vals(b.rows_of(
+              b.accumulate(dm.rows, cs, "sbar" + std::to_string(dd) + "_" + std::to_string(k))));
+        },
+        gather_acc, segment_acc);
 
     // C3a. The segment edge slots of this domain, read by the pulls of earlier domains through
     // plan.cpp's transpose: a Sum member reads its row's slot with coefficient 1.0, an Affine
@@ -584,8 +819,12 @@ ir::Program adjoint_to_program(const ir::Program& p, const AdjointPlan& plan) {
         segment_bar[ix(plan.segment_slot_base[ix(si)] + r)] = b.value_base(sd) + r;
       }
     }
-    // The gather edge slots of this domain, likewise.
+    // The gather edge slots of this domain, likewise — except a scan's carry, which the
+    // recurrent domain above has already produced and published, and which must NOT be
+    // re-emitted here: a second copy would be a different value id and the recurrence's own
+    // readers would stop seeing the carried adjoint.
     for (const std::int32_t gi : dp.gathers) {
+      if (gi == carry) continue;
       const auto it = gather_acc.find(gi);
       const domain_id gd = b.accumulate(dm.rows, it == gather_acc.end() ? no_contribution : it->second,
                                         "gbar" + std::to_string(gi));

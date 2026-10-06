@@ -56,11 +56,34 @@
 //      `(ȳ/b)·(1 − y)` as ONE contribution, reproducing `acc_div_aliased`'s dispatch
 //      structurally. Two separate accumulations are NOT bitwise (D84's defect, inverted).
 //
-// Scope. Elementwise ops, gathers and segments (`Sum` / `Affine`). A **scan** domain is refused
-// with `std::logic_error`: the reverse scan is stage C3b. The forward half needs no transcendental
-// policy beyond `ExpMode::std_exp`, and the reverse needs none at all — `acc_exp` and `acc_sqrt`
-// consume the already-materialised value `y`, so no `exp`, `log` or `sqrt` appears in the reverse
-// half of Q.
+// Scans (C3b). A scan domain's forward half is emitted as ONE domain, a genuine `ir::Scan` of Q
+// with the same chain layout and the carry gather remapped — one emitted domain per step would
+// put the step that reads the carry BEFORE the domain holding the group's last step, which is a
+// cycle between domains rather than a recurrence inside one. The intermediates the reverse needs
+// are recomputed after it, one domain per step, reading the finished scan through an ordinary
+// gather.
+//
+// Its reverse is one RECURRENT, non-scan domain (`ir::validate` has always accepted that shape;
+// `exec::Interpreter` learned it for this stage) whose emitted row i holds forward row
+// `rows - 1 - i` and whose VALUE is the carry gather's edge slot for that row. Laid out that
+// way, the edge slot `(carry, r + 1)` that `adjoint_e0.cpp`'s reverse scan hands row r is
+// literally the previous emitted row, so nothing is reordered: the pull's segment still carries
+// the carry's edge slot as an ordinary member **at its true CSR position** — position 0 of 2 on
+// `compare_ois` and the last of 2 on `affine_scan`, which is why an encoding that appended the
+// carry would pass the toy fixture and fail the production one. The chain from v̄ down to that
+// edge slot lives in that ONE group, because a cycle between domains is not expressible; every
+// other quantity the row's reverse produces is recomputed in ordinary non-recurrent domains that
+// read it, which is deterministic and therefore bitwise. A fixed-arity `Sum` (`ir::is_fixed_sum`,
+// a scan group's fold) reverses as a, then b, then c, each `+= ȳ`.
+//
+// Still refused with `std::logic_error`: a recurrent domain that is not a scan, and a scan that
+// reads its own rows through anything but the carry. Either would need TWO carried quantities per
+// row and a domain row produces exactly one value.
+//
+// Scope. Elementwise ops, gathers, segments (`Sum` / `Affine`) and scans. The forward half needs
+// no transcendental policy beyond `ExpMode::std_exp`, and the reverse needs none at all —
+// `acc_exp` and `acc_sqrt` consume the already-materialised value `y`, so no `exp`, `log` or
+// `sqrt` appears in the reverse half of Q.
 #pragma once
 
 #include "epykos/adjoint/plan.hpp"
@@ -70,8 +93,8 @@ namespace epykos::adjoint {
 
 // The reverse of `program` as a Program (see the file header for its input / output layout).
 //
-// Throws std::logic_error when `program` contains a scan domain (or any other recurrent domain,
-// or a fixed-arity Sum, which only scan groups carry): the reverse scan is stage C3b.
+// Throws std::logic_error when `program` contains a recurrent domain that is not a scan, or a
+// scan that reads its own rows through anything but its carry gather (see "Scans" above).
 // Throws std::invalid_argument when `program` has no outputs (there would be nothing to seed),
 // or std::runtime_error / std::invalid_argument from `build_plan` for a program the adjoint
 // itself refuses.

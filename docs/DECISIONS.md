@@ -6942,3 +6942,92 @@ be labelled as one from here.
 3. **Cache residency, ~40% of the realistic number** — and nothing on the roadmap attacks it.
 
 What is NOT a lever: the chord's linear algebra (6%), and `max_batch` (§3).
+
+## D92 — The closed-form residual Jacobian: ceiling measured, and it collapses. Do not build it (2026-10-06)
+
+Having read the other engine's `OPTIMIZATION.md` (owner-granted, §5 below), its **W-cache** —
+`DF = exp(−W·x)` with `W` precomputed and "an analytic Jacobian that falls straight out" — is named
+there as "the single biggest win". Epykos has the detector for it already (`is_linmap_domain` fires
+on the residual slice's d2, `affine(#0;%0)`, 76 rows), `DESIGN.md` §6 named the optimisation, and
+`AdMode::ClosedFormAffine` exists as an annotation slot with no consumer. Wiring that consumer was
+recommended as the next package.
+
+**The ceiling was measured first, and it does not support the work.** Do not build it.
+
+### 1. What the ceiling is
+
+Fingerprint `d448afd70180`, release preset, load 1.16-1.89, nothing else running. **Informational
+under D9.** One full 25-column residual Jacobian measures **55.4-57.2 us**.
+
+| phase | total us | Jacobian share |
+|---|---|---|
+| calibrate_cold (Newton, flat start) | 262.7 | **87.1%** (4 builds) |
+| warm + chord, +1bp | 19.9 | **0.0%** (0 builds) |
+| warm + chord, +100bp | 49.6 | **0.0%** (0 builds) |
+| warm + Newton, +1bp | 140.9 | 81.2% (2 builds) |
+| risk ladder, 1 output row | 177.3 | 31.3% |
+| risk ladder, 8 rows | 436.8 | 12.7% |
+| risk ladder, 64 rows | 2,870.4 | 1.9% |
+| **risk ladder, 256 rows** | **11,249.8** | **0.5%** |
+
+### 2. Two corrections to the recommendation that led here, both mine
+
+**First: it does not touch the warm path at all.** The package was proposed "against the 53% D91
+attributed to residual evaluation". That conflated the W-cache's two halves. Its evaluation half —
+`W·x` then `exp` — **Epykos already has**: d2 IS an `Affine` op and d3 IS `exp`, so the forward
+residual already has that shape, and D81 removed the rest. Its Jacobian half is worth **zero** on
+the warm path, because under chord with warm start the solver builds **no Jacobian at all** for
+moves up to +25bp (D91's own table says `jacobians = 0`; this entry confirms it).
+
+**Second: the risk-ladder share was an artefact of a one-row ladder.** The first measurement used a
+single output ordinal on a 16-trade book and reported 63.7%. The Jacobian is built once per solve
+and reused across every output seed — that is what `solver::Factors` is for — so its share falls
+with the row count: 31.3% at one row, 1.9% at 64, **0.5% at 256**. Stage A's ladder is 2,043
+outputs. The honest figure for a realistic ladder is **under one percent**.
+
+### 3. The arithmetic that settles it
+
+A Jacobian that cost **nothing** would take cold calibration from 262.7 us to about 34 us: a 229 us
+saving, **once per session**. Against one 256-row ladder at 11,250 us that is **0.2%**, and against
+a warm re-quote it is zero. Even the achievable factor is bounded well below "free": the structured
+chain is roughly 4x fewer operations than 25 batched reverse lanes (W is 76x25 with exactly 2
+nonzeros per row — `segments[0]`, 152 members — but the tangents densify at the scan d6 and the
+level sums d7-d11), so 2x-4x on the Jacobian, not 10x.
+
+This is D68's arithmetic in a different subsystem, reached by D68's method: measure the share before
+fitting. There it was a cost model worth 0.166% of an O4 batch. Here it is a Jacobian worth 0.2% of
+a ladder.
+
+### 4. Why their biggest win is our smallest, which is the useful part
+
+Nothing above says the other engine is wrong. **A win's size is a property of the surrounding
+architecture, not of the optimisation.** Their own text names what the W-cache removes: "no curve
+rebuild, no autodiff sweep". Epykos never rebuilds a curve — the curve is *inlined into the tape* as
+d2 and d3 at recording time — and its adjoint is batched over a collapsed 402-value slice rather
+than swept per instrument. **We already hold the W-cache's benefit, by construction, obtained at
+recording time instead of by caching.** That is why the remaining value here is noise.
+
+The corollary is the part worth keeping: reading a specialist's optimisation list tells you what it
+was expensive for *them* to do, not what is expensive for you. Each item still needs its own
+denominator measured locally before it becomes a package. Of their five technique families, D90 §1's
+table already showed two are ours by construction (analytic AAD, no bumping; the fused coupon) and
+this entry retires the third.
+
+### 5. The D11 grant this rests on
+
+The owner directed reading the other engine's checkout on 2026-10-05, widening D11 beyond D78's
+`tools/h2h/` exception. **Files read, in full:** `OPTIMIZATION.md` (its technique sections),
+`ls` of the repository root and of `include/swaps/`, and `git log -1`. **No source file was opened**,
+nothing was copied, and nothing in this repository is derived from it — the measurements above are
+all of Epykos.
+
+One guard, recorded because it will matter later: having read their list, **no search that
+"rediscovers" an item on it is evidence of anything.** A discovery mechanism (D88) must be tested on
+something not on that list.
+
+### 6. What this leaves
+
+The warm calibration gap of D90 (2.24x) is untouched by any of this, and D91 says where it is: 53%
+residual evaluation, 43% fixed cost of which the ‖JᵀF‖∞ diagnostic is ~5.5 us, and ~40% of the
+head-to-head figure is cache refill. Those are the live levers. `AdMode::ClosedFormAffine` stays an
+unconsumed annotation, and R7's header already explains why that was the right call the first time.

@@ -64,6 +64,19 @@ number is cache refill, not arithmetic**. `max_batch` was tested as the cause an
 The levers, measured: residual evaluation (§10 step 9's vector transcendentals now have a
 denominator — d3 is `exp` over 101 of 402 values), the diagnostic, and residency, which nothing on
 the roadmap attacks.
+
+**D92, 2026-10-06: the owner widened D11 to read the other engine's `OPTIMIZATION.md`; its "single
+biggest win" turns out to be our smallest.** Their W-cache (`DF = exp(−W·x)`, precomputed W,
+analytic Jacobian) removes "no curve rebuild, no autodiff sweep" — and Epykos never rebuilds a
+curve, because the curve is inlined into the tape as d2/d3 at recording time, with the adjoint
+batched over a collapsed 402-value slice. **We already hold that benefit by construction.** Measured
+ceiling for a closed-form residual Jacobian: 87% of cold calibration, **0% of the warm path** (chord
+builds none), and **0.5% of a 256-row risk ladder** — the earlier 63.7% was a one-row artefact,
+since `Factors` is built once per solve and reused across every seed. A *free* Jacobian would save
+229 us once per session, i.e. 0.2% of one ladder. **Not built; `AdMode::ClosedFormAffine` stays
+unconsumed.** D68's method in a new subsystem: measure the share before fitting. The guard that
+matters now: having read their list, no search that "rediscovers" an item on it is evidence of
+anything (D88).
 Dropping the final Jacobian outright is NOT the same thing and is wrong: the O3 ladder goes 6.5%
 wrong at +25bp and 24% at +100bp.
 

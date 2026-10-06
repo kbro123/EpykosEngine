@@ -151,9 +151,16 @@ would need to emit nodes.
 **I2. Second order is reachable.** Every `Scalar`-templated component instantiates at a NESTING
 scalar.
 
-*Gate:* `Dual<Dual<1>, N>` compiles over the pricing maths, and its second derivatives agree with
-central differences of the first derivatives within a measured tolerance (§5's error contract, case
-2 — a tolerance, stated once measured, never guessed).
+*Gate:* a nested dual compiles over the pricing maths and its second derivatives agree with central
+differences of the first derivatives within a measured tolerance (§5's error contract, case 2 — a
+tolerance, stated once measured, never guessed).
+
+The spelling is **`Dual<N, Dual<1>>`**, amended 2026-10-06 (D95) from the `Dual<Dual<1>, N>` this
+section was written with. `Dual`'s parameter order becomes `template <int N = 1, class S = double>`,
+not `<S, N>`, because all 150 existing call sites pass a single argument (`Dual<1>` ×48, `Dual<N>`
+×47, `Dual<12>`, `Dual<n_knots>`, …) and that order leaves every one of them compiling unchanged.
+The `<S, N>` order would cost 150 mechanical edits and buy no capability. The invariant is
+unaffected: what is gated is that the scalar NESTS, not how the nesting is spelled.
 
 *Status: **DOES NOT HOLD.*** `Dual` is `template <int N>` over a hardcoded `double`, not
 `Dual<Scalar, N>`, so it cannot nest; `adjoint::Adjoint`'s whole interface is `double*`; and the
@@ -747,12 +754,20 @@ roughly nothing:
 12. **Tier 2 opens**, with `ExpMode::poly` as its first citizen — blocked on its own entry
     criterion, that it become lane-width independent (D80).
 
-**Not in this list, because it is not scheduled and the owner has not decided it (D87).** The
-engine's own numerics are not recorded, and cannot be, because a derivative is not expressible as a
-tape node. That is where D68 measures ~95% of an O4 lane to be and where D85's win was hiding. D87
-§7 sets out three options — leave it and instrument by hand; build a derivative operator and
-self-host the thesis; or give the cost model a solver (D68's recommendation 3). It is listed here
-rather than numbered because its priority against steps 8–12 is a decision, not an ordering.
+**SCHEDULED 2026-10-06 (D95): the owner commissioned all three invariants.** D87 §7's three options
+are resolved by taking the second — build the derivative operator and self-host the thesis — and
+§1b's invariants become the work rather than the specification of it. This supersedes the paragraph
+that stood here, which said the item was unscheduled and undecided.
+
+The ordering is set by dependency, not preference. **I3's gate** (the pinned host-input registry) is
+a ratchet that needs no capability and goes first. **I2** is independent of both others. **I1** is
+staged — the scatter-accumulate op, then `adjoint_to_program` on an elementwise subset gated
+bitwise, then gather and segment, then the full gate — and **I3's substantive fix is downstream of
+I1's completion**, because recording ‖JᵀF‖∞ requires an IR that can express a derivative. Each stage
+carries its own gate and lands independently; none of this rewrites anything below the pin.
+
+The capability argument stands where D93 left it: this is justified as *the engine cannot compute a
+gamma*, not as an optimisation case, which D92 priced at roughly nothing.
 
 Nothing in this list rewrites anything below the pin, because nothing below the pin is implicated —
 with one exception already taken: D81 §6(a), a pre-existing interpreter defect the collapse exposed.

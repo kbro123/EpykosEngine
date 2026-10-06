@@ -7439,3 +7439,88 @@ nothing outside the noise.
 D91 attributed **5.46 us** to the diagnostic by timing `jt_product` in isolation. That sits inside
 the +0bp spread. Two methods, one number, now with a spread to judge the agreement against rather
 than a single point — which is the standard D91 §1 set when isolated unit costs attributed 111.5%.
+
+---
+
+## D95 — The owner commissions all three invariants; the staging, and two amendments the recon forced (2026-10-06)
+
+D93 specified the architecture as three invariants with gates and left them all failing. D87 §7 set
+out three options for the underlying problem and decided none. **The owner has now taken the second
+option — build the derivative operator and self-host the thesis — and commissioned all three
+invariants as work.** §1b stops being a specification and becomes the backlog; §10's "not scheduled
+and the owner has not decided it" paragraph is superseded.
+
+This entry records the plan and the two things reconnaissance changed about it before any code was
+written. It does not record results: the work was starting as this was written.
+
+### 1. Status at commissioning, verified rather than recalled
+
+| | holds? | evidence re-checked 2026-10-06 |
+|---|---|---|
+| I1 closed under differentiation | **no** | `Adjoint(const ir::Program&)` takes the FORWARD program and `program()` returns it; there is no `adjoint(P) → Program` at all. `Op::Gather`/`SegmentSum`/`Linmap` appear only as name strings in `src/tape/op.cpp` |
+| I2 second order reachable | **no** | `template <int N = 1> class Dual`, `tangent_type = std::array<double, N>`. Grep for gamma/cross-gamma/vanna/volga across `include/` and `src/`: **0 hits** |
+| I3 engine's own maths recorded | **no**, 2 entries | `src/solver/implicit.cpp:103` sets `diag_jtr_input` from `report.jtr_inf`. **The gate itself does not exist** — no test references `diag_jtr_input` or `set_input_value` |
+
+The third row is the one worth separating out. I1's and I2's gates are *definitions of done*: they
+cannot be written until the capability exists. **I3's gate is a ratchet and needs no capability at
+all**, and it had not been built — so nothing stopped the violation list growing silently while the
+real fix waited, which is precisely the failure mode §1b was written to stop.
+
+### 2. Two amendments the recon forced
+
+**(a) I2 is much cheaper than §1b implies, and its gate was spelled wrong.** All 150 `Dual<…>` call
+sites pass a SINGLE argument — `Dual<1>` ×48, `Dual<N>` ×47, `Dual<12>` ×20, `Dual<70>` ×11,
+`Dual<n_knots>` ×10, `Dual<3>` ×9, and six more spellings. So parameter order
+`template <int N = 1, class S = double>` leaves every existing call site compiling unchanged, and
+the work is `dual.hpp`'s 261 lines plus whatever the pricing maths assumes about `double`. §1b's
+`Dual<Dual<1>, N>` presumes `<S, N>`, which would cost 150 mechanical edits for no capability.
+Amended to **`Dual<N, Dual<1>>`**. What is gated is that the scalar nests, not how it is spelled.
+
+**(b) I1's reverse data flow already exists — it just is not made of nodes.** `src/adjoint/plan.cpp`
+line 111 reads *"Edge slots: one per (gather, row) and per (segment, row)"* and builds
+`gather_slot_base`, `segment_slot_base` and the reverse-adjacency CSR lists. If that reading holds,
+**the scatter-accumulate is computed today and lives in CSR arrays instead of IR**, which makes I1
+an expression problem rather than a discovery problem. Stated as a lead to verify, not a finding:
+the design stage was commissioned to confirm or refute it, because the staging below depends on it.
+
+Sizing that follows: the adjoint subsystem is **1,479 lines** total (758 of them
+`src/adjoint/adjoint_e0.cpp`), the twelve `acc_*` kernels are correct and are not the obstacle, and
+a new producing op costs ~14 `case Op::` dispatch sites across 30 ops.
+
+### 3. The staging, and what each stage is allowed to claim
+
+Dependency, not preference, sets the order.
+
+- **A — I3's gate.** Enumerate every host-computed tape input, classify each as problem input or
+  laundered engine computation, pin with justifications, fail when the list grows. No capability
+  needed. Independent.
+- **B — I2.** B1 re-template `Dual`, existing tests **bit-identical**. B2 instantiate the pricing
+  maths at `Dual<1, Dual<1>>`. B3 second derivatives against central differences of the first,
+  tolerance **measured then stated**. B4 report on `Adjoint`'s `double*` interface, change nothing.
+  Independent of A and C.
+- **C — I1, staged so each step verifies alone.** C0 design: the op set, and whether bitwise is
+  reachable. C1 the op — producer, interpreter kernel, `ir::validate` rules, round-trip. C2
+  `adjoint_to_program` on the elementwise subset, bitwise-gated. C3 gather and segment. C4 the full
+  gate.
+- **I3's substantive fix is downstream of C4** and is explicitly not attempted now: recording
+  ‖JᵀF‖∞ requires an IR that can express a derivative.
+
+**The question C0 exists to answer, and the one that may stop all of this:** the gate demands the
+interpreter running the emitted program reproduce `Adjoint::run` **bitwise**, and floating-point
+accumulation is order-dependent. If the emitted program cannot be made to accumulate in the order
+the `acc_*` kernels do, then either the emitted structure changes or `Adjoint::run` does — and the
+second is a §5.2a contract question **reserved to the owner**. No agent may take it.
+
+### 4. Process for this programme
+
+Work lands on `integrate/invariants`, not `main`. Three concurrent builds make the box dirty, so
+**no performance claim made during this programme is admissible** — every number waits for a
+reserved box under D29. Agents write code and tests only; `PRINCIPLES.md`, `DECISIONS.md` and
+`CLAUDE.md` stay with the orchestrator so parallel work cannot collide in the ledger. The standing
+prohibition that matters most under autonomy: **no agent may relax a tolerance, skip a test or
+weaken a gate to make its work pass** — a blocked task reported honestly is the good outcome, and
+B3's measured tolerance is where that temptation is sharpest, because a loose bound would fake the
+capability rather than deliver it.
+
+D11 is unchanged and applies to every agent: nothing is read from, copied from or derived from the
+other checkout.

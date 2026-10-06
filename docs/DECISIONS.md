@@ -7073,8 +7073,42 @@ Three corrections and consequences:
 2. **It strengthens D91.** Monotone cubic is 21% more expensive per solve (484 vs 400 us) and all
    of that is extra residual evaluations. Residual evaluation — already D91's 53% lever — gets
    BIGGER as the interpolator gets harder.
-3. **The declined optimisation is also the one that does not generalise.** `is_linmap_domain` finds
-   nothing on monotone cubic: the Hyman limiter makes the slopes value-dependent, which is exactly
-   why the other engine's own text says "only the value-dependent MonotoneCubic falls off it". On
-   the harder curves a closed-form Jacobian is not merely low-value, it is **inapplicable** — while
-   the lever that does matter grows.
+3. **On the other engine's own W-cache boundary**, its text says "only the value-dependent
+   MonotoneCubic falls off it" — so the closed-form route is already excluded there for the one
+   scheme in this table that is not purely affine.
+
+### 7a. CORRECTION, same day: §7 does NOT test a genuinely non-linear interpolator (owner)
+
+The owner: *"monotone cubic is still linear in the knots right? I was thinking more of monotone
+convex and other interpolations which are fundamentally non linear in the knots because they depend
+on the level."* **Correct, and §7 as first written overclaims.** Measured on the residual slice:
+
+| variant | domains | values | linmap domains | Select steps |
+|---|---|---|---|---|
+| `USD-SOFR-LOGDF` | 18 | 284 | 1 | **0** |
+| `USD-SOFR-MONOTONE` | 39 | 708 | **3** | **7** (+6 comparisons) |
+
+Monotone cubic has MORE affine domains, not fewer, plus seven `select`s: the Hyman limiter is
+recorded as a **value branch** exactly as CLAUDE.md's recording discipline requires. So it is
+**piecewise linear in the knots** — affine within a branch, the branch chosen by the data level.
+A 1-100bp bump almost never flips a limiter branch, so the frozen Jacobian stays LOCALLY EXACT.
+§7 measured branch stability, not non-linearity. Two statements in it are withdrawn: that it tests
+"an interpolator that is not linear in the knots", and that `is_linmap_domain` finds nothing on
+monotone cubic (it finds three).
+
+**The engine cannot test the real question.** `SchemeKind` is `flat, linear, hermite,
+natural_cubic, monotone_cubic, bspline`; there is no monotone convex (Hagan-West) and no tension
+scheme, and all six present schemes are linear or piecewise-linear in the knot values. A scheme
+whose interpolant depends on the LEVEL within a region — monotone convex's shape parameter derived
+from the discrete forwards, a data-adapted tension — is not expressible here today.
+
+**What it would predict, stated as a prediction and not a measurement.** Genuine level-dependence
+should make the chord stall, so Jacobian builds on the warm path would rise above zero and §1's
+"0%" would need re-measuring on that scheme. It would NOT revive the closed-form Jacobian: that
+needs an affine map and there would not be one, so D92's "do not build it" holds a fortiori. And
+the residual slice would grow again — monotone cubic is already 708 values against log-DF's 284,
+a 2.5x slice for a limiter — which lands once more on D91's residual-evaluation lever.
+
+**The open item this creates:** §1's warm-path result is established only for schemes that are
+affine or piecewise-affine in the knots. Adding monotone convex would be the way to close it, and
+that is a maths-layer feature, not an optimisation.

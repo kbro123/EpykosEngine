@@ -255,6 +255,20 @@ struct GroupPlan {
   std::vector<std::int32_t> wave_rows;
   std::vector<std::int32_t> wave_begin;  // waves + 1
 
+  // A RECURRENT domain that is not a scan (PRINCIPLES.md §1b invariant I1, stage C3b): rows read
+  // earlier rows of their own domain through a SEGMENT member, not through a scan's carry gather,
+  // so there is no `ir::Scan` to schedule waves from. That is the shape of the reverse of a scan
+  // — `adjoint::adjoint_to_program` lays the reverse scan's rows backwards and the pull's Affine
+  // carries the carry's edge slot as an ordinary member at its true CSR position — and the IR has
+  // accepted it since D41 (`ir::validate` checks only that a recurrent domain's reads are of
+  // EARLIER rows; `ir::Evaluator` runs it; `exec::Interpreter` refused it until C3b).
+  //
+  // Deliberately the slow path: rows strictly in row order, one at a time, no tiling, no fusion,
+  // no inlining, no catalogue, and NOT the whole-segment path — `build_segment` bucket-sorts rows
+  // by segment length, which reorders them, and a recurrence may not be reordered. Correctness
+  // only; no performance claim is made about it in either direction.
+  bool recurrent = false;
+
   // M4/C1 (docs/PROBLEM.md §7, DESIGN.md §7 tier 1): this domain's op sequence matches a
   // registered catalogue kernel AND is eligible for it (a plain per-tile Materialize domain —
   // not fused, not inlined, not a scan; interpreter.cpp's own already-optimised whole-segment

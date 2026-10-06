@@ -177,6 +177,31 @@ conventions.
 Payoff scripting language targeting the op set; vol surfaces/cubes; SIMM and marginal (pre-trade) analytics; portable
 kernel serialisation; GPU backend for the batch axis.
 
+### Interpolation schemes (owner, 2026-10-06)
+
+`curve::SchemeKind` has six: `flat, linear, hermite, natural_cubic, monotone_cubic, bspline`. Two items, and they are
+NOT the same job — the first is coverage, the second is the one that answers an open question.
+
+1. **`tension` — scheme parity.** The only scheme the other engine has that we do not (its `Scheme` enum is
+   `Flat, Linear, NaturalCubic, Hermite, MonotoneCubic, BSpline, Tension`; read under the D11 grant of D92 §5). A
+   coverage item only: with a FIXED tension parameter the basis is fixed, so the interpolant stays a linear map of the
+   knot values — that engine's own `scheme_is_linear` excludes only `MonotoneCubic`. So adding it does **not** stress
+   anything the existing schemes do not already stress. Wanted for breadth, not for the solver.
+2. **`monotone_convex` (Hagan–West) — and this is the open item.** **Neither engine has it.** Every scheme either
+   engine ships is linear or piecewise-linear in the knot values, which is exactly why D92 §7a could not answer the
+   question it set out to: *does genuine level-dependence stall the chord, so the warm path's zero Jacobian builds
+   becomes positive?* Monotone cubic only looked like that case — its Hyman limiter is recorded as a `select`, so it
+   is affine within a branch and a 1–100bp bump almost never flips one. Monotone convex is genuinely non-linear
+   within a region (a shape parameter derived from the discrete forwards, with case analysis on the data), so it is
+   the scheme that would test it. **A maths-layer feature, not an optimisation**, and until it exists D92 §1's
+   warm-path result is established only for affine and piecewise-affine schemes.
+
+Also worth taking when a scheme is added: a **compile-time tripwire** on the scheme count, so appending one fails to
+build until every place that must learn about it has. The idea is an ordinary `static_assert` pattern and not
+borrowed code; `is_linmap_domain` is the equivalent here of the "does this ride the closed-form path" question, and
+it answers by structure rather than by exclusion, so a new value-dependent scheme would correctly find no linmap
+rather than silently claiming one.
+
 ---
 
 ## Risk register

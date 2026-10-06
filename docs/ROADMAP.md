@@ -196,9 +196,29 @@ NOT the same job — the first is coverage, the second is the one that answers a
    (D92 §7a). Tension controls cubic overshoot **without** value-dependent branches, so it would buy similar shape
    control at linear cost and stay eligible for every structure-keyed decision `is_linmap_domain` gates. It does not
    stress the solver — it is a cheaper way to avoid needing to.
-2. **`monotone_convex` (Hagan–West) — the open item, and nobody has it.** Absent here AND absent there: that
+2. **Parametric forms: `nelson_siegel`, `svensson`.** We have no parametric curve at all; they have both (plus
+   `ModularCurve` for splines). A few economically-interpretable, time-stable parameters instead of a forward per
+   pillar — the fair-value-curve workhorse for bond RV. Note for item 3: **as implemented there they are also linear
+   in the free parameters**, because τ is held as a fixed hyperparameter and only the betas are fitted. Freeing τ is
+   what makes them non-linear, and their own header lists that as a later option too.
+
+3. **`monotone_convex` (Hagan–West) — the open item, and NOBODY has it.** Absent here and absent there: that
    engine's only Hagan–West reference is a comment citing the overshoot problem its `Tension` scheme solves a
-   different way, so **this cannot be obtained by porting.** Every scheme either
+   different way, so **this cannot be obtained by porting.**
+
+   **And the reason it is absent there is a finding worth keeping.** Every curve form that engine ships is linear —
+   or, for `MonotoneCubic`, piecewise-linear — in its free parameters: `scheme_is_linear` excludes only
+   `MonotoneCubic`, `Tension` is built to control overshoot without value-dependent branches, and the parametric
+   forms fix τ to keep the zero rate linear in the betas. That is not incidental. Their W-cache *is* the assumption
+   that `DF = exp(−W·x)` with constant `W`, and a genuinely level-dependent interpolant breaks it — so the scheme
+   set is chosen to preserve the optimisation.
+
+   **Epykos has no such dependency.** The chord policy needs CONTRACTION, not linearity: it freezes a factorisation
+   and refreshes when a step stalls, which is a property of the iteration rather than of the curve's algebra (and
+   D92 §7a measured monotone cubic's seven recorded `select`s never flipping a branch over ±100bp). So monotone
+   convex is the case where their fast path has to fall back and ours does not have one to fall off. Whether that
+   converts into a measured advantage is unknown and would be the point of building it — stated as the hypothesis it
+   is, not a claim. Until then D92 §1's warm-path result holds only for affine and piecewise-affine schemes. Every scheme either
    engine ships is linear or piecewise-linear in the knot values, which is exactly why D92 §7a could not answer the
    question it set out to: *does genuine level-dependence stall the chord, so the warm path's zero Jacobian builds
    becomes positive?* Monotone cubic only looked like that case — its Hyman limiter is recorded as a `select`, so it

@@ -289,13 +289,33 @@ TEST(Interp, SameClassChainsSplitByLevelRunBitwise) {
       }
     }
   }
-  // A recurrent domain that is not a scan is refused (only scans read themselves).
+  // A recurrent domain that is NOT a scan. This clause asserted, until 2026-10-07, that the
+  // Interpreter refused such a domain outright ("only scan domains read themselves"). It no
+  // longer does: PRINCIPLES.md §1b invariant I1, stage C3b, needs that shape, because the
+  // reverse of a scan reads its own earlier rows through a SEGMENT member rather than through a
+  // carry gather, so no ir::Scan describes it. `ir::validate` always accepted it and
+  // ir::Evaluator always ran it; only exec::Interpreter did not.
+  //
+  // What is asserted instead is the thing that has to be true of the new path (§5.2's standing
+  // "the slow and fast paths must agree"): marking a domain recurrent changes HOW its rows are
+  // evaluated -- one at a time, in row order, no tiling, no whole-segment bucket sort, no
+  // catalogue -- and must not change a single bit of the answer.
   {
     const fixtures::Book book = fixtures::make_m1_book();
     const Tape tape = fixtures::record_m1(book);
-    ir::Program program = ir::infer(tape);
-    program.domains.back().recurrent = true;
-    EXPECT_THROW(exec::Interpreter in(program), std::invalid_argument);
+    const ir::Program program = ir::infer(tape);
+    ir::Program marked = program;
+    marked.domains.back().recurrent = true;
+    marked.domains.back().reads.push_back(static_cast<ir::domain_id>(marked.domains.size() - 1));
+    ASSERT_NO_THROW(ir::validate(marked));
+    const std::vector<std::vector<double>> states = {std::vector<double>(book.z0.begin(), book.z0.end())};
+    for (int tile : {1, 7, 256}) {
+      exec::Options o;
+      o.tile = tile;
+      EXPECT_NO_THROW(exec::Interpreter in(marked, o)) << "tile " << tile;
+      EXPECT_EQ(check_against_replay(tape, marked, states, o), 0u)
+          << "a recurrent non-scan domain is the slow path, not a different arithmetic (tile " << tile << ")";
+    }
   }
 }
 

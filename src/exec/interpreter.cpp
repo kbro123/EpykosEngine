@@ -869,12 +869,16 @@ void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
     table_bytes += (g.wave_rows.size() + g.wave_begin.size()) * sizeof(std::int32_t);
   }
   if (grp.steps.empty()) throw std::invalid_argument("exec: a group with no steps");
-  // A recurrent non-scan domain never takes the whole-domain reduction path, even when its group
-  // is one Sum / Affine step: `build_segment` bucket-sorts the rows by segment length, so the
-  // rows come out in a different order, and a row of a recurrence may not be evaluated before the
-  // row it reads. It falls through to the per-row Sum / Affine step below (the same fold, the
-  // same bits), evaluated one row at a time by run()'s `g.recurrent` branch.
-  if (is_whole_segment(grp) && !g.recurrent) {
+  // A RECURRENT domain never takes the whole-domain reduction path, even when its group is one
+  // Sum / Affine step: `build_segment` bucket-sorts the rows by segment length, so the rows come
+  // out in a different order, and a row of a recurrence may not be evaluated before the row it
+  // reads. It falls through to the per-row Sum / Affine step below (the same fold, the same
+  // bits), evaluated one row at a time by run()'s `g.recurrent` branch or wave by wave by its
+  // `g.scan` one. No program in the tree reaches this for a SCAN — a scan's carry must be read
+  // by an operand slot of a step, and a one-step Sum / Affine group has only `konst` free — but
+  // the guard is on `dom.recurrent` rather than on `g.recurrent` because the hazard is the row
+  // reordering, which is the same hazard either way.
+  if (is_whole_segment(grp) && !dom.recurrent) {
     const ir::Step& last = grp.steps.back();
     const bool affine = last.op == Op::Affine;
     build_segment(static_cast<std::int32_t>(d), p->segments[static_cast<std::size_t>(last.a.index)], affine, last.konst,

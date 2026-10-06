@@ -541,7 +541,15 @@ TEST(AdjointToProgram, DefaultTenorOisIsBitwiseTheAdjoint) {
 
 TEST(AdjointToProgram, OtherScanFixturesAreBitwiseTheAdjoint) {
   // The two fixtures D41 built the scan machinery against. Until C3b they were this file's
-  // refusal cases.
+  // refusal cases -- though not, as that case claimed, for their scans: both declare INPUTS
+  // THAT NOTHING READS (12 rows and 3), and the pull of a reader-less value was an empty segment
+  // row, which `ir::validate` rejects. The shared `+0.0` stand-in row lifted that.
+  //
+  // `instrument_sample` is the only fixture in the tree with TWO scan domains, and it catches
+  // `a2p.scan_forward_order`. `rfr_book` does NOT and cannot: its scan compounds realised
+  // fixings, so 0 of its 40 scan rows depend on an input (measured) and no error in the reverse
+  // scan can reach a state adjoint. It is a structural gate here — validate, round-trip, and the
+  // Interpreter against `Adjoint::run` on a scan whose adjoints are all zero — not a numeric one.
   {
     const fixtures::InstrumentSample s = fixtures::make_instrument_sample();
     const Program p = ir::infer(fixtures::record_sample(s));

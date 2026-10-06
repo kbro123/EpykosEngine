@@ -206,12 +206,19 @@ NOT the same job — the first is coverage, the second is the one that answers a
    engine's only Hagan–West reference is a comment citing the overshoot problem its `Tension` scheme solves a
    different way, so **this cannot be obtained by porting.**
 
-   **And the reason it is absent there is a finding worth keeping.** Every curve form that engine ships is linear —
-   or, for `MonotoneCubic`, piecewise-linear — in its free parameters: `scheme_is_linear` excludes only
-   `MonotoneCubic`, `Tension` is built to control overshoot without value-dependent branches, and the parametric
-   forms fix τ to keep the zero rate linear in the betas. That is not incidental. Their W-cache *is* the assumption
-   that `DF = exp(−W·x)` with constant `W`, and a genuinely level-dependent interpolant breaks it — so the scheme
-   set is chosen to preserve the optimisation.
+   **Corrected 2026-10-06 (owner, who wrote that engine).** An earlier version of this entry said "every curve form
+   that engine ships is linear — or, for `MonotoneCubic`, piecewise-linear — in its free parameters". That
+   mischaracterises it. **`MonotoneCubic` IS a non-linear-in-the-knots interpolator by that engine's own
+   classification** — `scheme_is_linear` returns false for it and nothing else, its own comment saying "whose Hyman
+   filter is value-dependent" — and its W-cache, `is_linear_map` and hybrid-residual machinery exist precisely to
+   route around that one case. Calling it "piecewise-linear" softened a distinction that engine treats as binary and
+   load-bearing. The narrower thing actually measured here (D92 §7a) is that over ±100bp bumps monotone cubic's
+   recorded `select`s do not flip, so OUR chord does not stall: that is branch stability over a bump range, and it
+   licenses nothing about global linearity.
+
+   What stands: `Tension` is built to control overshoot without value-dependent branches, and the parametric forms
+   fix τ to keep the zero rate linear in the betas — so most of that scheme set is deliberately kept on the
+   fast path, with `MonotoneCubic` the acknowledged exception that falls off it.
 
    **Epykos has no such dependency.** The chord policy needs CONTRACTION, not linearity: it freezes a factorisation
    and refreshes when a step stalls, which is a property of the iteration rather than of the curve's algebra (and

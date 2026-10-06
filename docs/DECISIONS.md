@@ -7113,7 +7113,13 @@ on the level."* **Correct, and §7 as first written overclaims.** Measured on th
 
 Monotone cubic has MORE affine domains, not fewer, plus seven `select`s: the Hyman limiter is
 recorded as a **value branch** exactly as CLAUDE.md's recording discipline requires. So it is
-**piecewise linear in the knots** — affine within a branch, the branch chosen by the data level.
+**affine within a branch**, the branch chosen by the data level.
+
+*(Framing corrected 2026-10-06 by the owner, who wrote the other engine: "affine within a branch"
+is not the same as "linear in the knots", and this entry should not be read as the latter. That
+engine's own `scheme_is_linear` returns false for `MonotoneCubic` and for nothing else — it IS its
+non-linear-in-the-knots scheme, and its W-cache exists to route around it. What is measured below is
+branch stability over a bump range, which is a narrower claim.)*
 A 1-100bp bump almost never flips a limiter branch, so the frozen Jacobian stays LOCALLY EXACT.
 §7 measured branch stability, not non-linearity. Two statements in it are withdrawn: that it tests
 "an interpolator that is not linear in the knots", and that `is_linmap_domain` finds nothing on

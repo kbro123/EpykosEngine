@@ -68,9 +68,11 @@ default true and bit-for-bit today's behaviour, and when false the `jt_product` 
 both `SolveReport::jtr_inf` and the block's diagnostic output are **NaN**, never zero — zero is the
 signature of a converged solve, so it would announce success, and this repository has twice shipped
 a plausible number where there should have been an unmistakable one (D81 §6(a), D89 §3). Paired
-interleaved arms, **load 4.22, not a reserved box, so read the delta and not the levels**: the
-record point **9.94 → 4.51 us** and a +1bp re-quote **20.33 → 15.19 us**, i.e. ~5.4/5.1 us saved
-against the 5.46 us D91 attributed to it by an independent method; a clean re-run is pending. The engine
+interleaved arms on an idle box (load 1.90, committed binary, D94 §6): the record point
+**9.94 → 4.50 us (5.44 saved, 54.7%)** and a +1bp re-quote **19.14 → 14.19 us (4.95, 25.9%)**.
+Four runs spanning load 1.90–4.22 put the saving at 5.30–5.55 us at +0bp and 4.82–5.49 at +1bp, so
+**run-to-run spread exceeds the load effect** — and D91's independently-derived 5.46 us sits inside
+it. When nothing iterates, over half the call was the diagnostic. The engine
 could not find this itself — a derivative is not a tape node (D87 §1), so the one optimisation every
 compiler does to an unused value, deleting it, is unavailable here. That is **invariant I3 failing
 in its smallest instance**, and the switch is a mitigation, not a discharge of its gate.

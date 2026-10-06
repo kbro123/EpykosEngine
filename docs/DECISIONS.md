@@ -7405,3 +7405,37 @@ Renamed to what it actually tests, and the member deleted. The caught value is t
 one anyway.
 
 `ctest --preset release`: **133/133**.
+
+### 6. The clean measurement §3 promised (appended same day, 2026-10-06)
+
+The box freed at 22:09. Three further runs, all at **1-minute load 1.90–1.98** on an otherwise idle
+machine, so D29-conforming; the last is rebuilt against the committed code (§5's rename removed one
+`double` store from the ON arm, so the earlier binary was stale by exactly that much).
+
+| run | binary | load | +0bp: on → off | saved | +1bp: on → off | saved |
+|---|---|---|---|---|---|---|
+| §3's | pre-rename | 4.22 | 9.94 → 4.51 | 5.43 (54.6%) | 20.33 → 15.19 | 5.14 (25.3%) |
+| parked | pre-rename | 1.91 | 9.82 → 4.51 | 5.30 (54.0%) | 19.12 → 14.30 | 4.82 (25.2%) |
+| repeat | pre-rename | 1.98 | 10.08 → 4.53 | 5.55 (55.0%) | 20.90 → 15.41 | 5.49 (26.3%) |
+| **HEAD** | **committed** | **1.90** | **9.94 → 4.50** | **5.44 (54.7%)** | **19.14 → 14.19** | **4.95 (25.9%)** |
+
+**Headline, superseding §3's provisional pair:** at the record point **9.94 → 4.50 us, 5.44 us
+saved (54.7%)**; on a +1bp re-quote **19.14 → 14.19 us, 4.95 us saved (25.9%)**.
+
+Two things the repeats settle, and both cut against the caution §3 was written with:
+
+**The dirty load barely mattered.** §3's figures were taken at load 4.22 and flagged as
+not-D29-conforming with "read the delta, not the levels". The delta was indeed stable — but so were
+the levels: 9.94 at load 4.22 against 9.94 at load 1.90 on the same arm. The caveat was right in
+method and overstated in effect. Worth recording, because the reflex to discount a loaded
+measurement entirely is as wrong as trusting it blindly; what a dirty box costs is *precision*, and
+here it cost less than the run-to-run noise.
+
+**The stale binary mattered less.** Across the three quiet runs the saving spans 5.30–5.55 us at
++0bp and 4.82–5.49 us at +1bp, so **run-to-run spread (±0.3 us) exceeds both the load effect and
+the stale-binary effect**. Rebuilding against HEAD was the right call for rigour and changed
+nothing outside the noise.
+
+D91 attributed **5.46 us** to the diagnostic by timing `jt_product` in isolation. That sits inside
+the +0bp spread. Two methods, one number, now with a spread to judge the agreement against rather
+than a single point — which is the standard D91 §1 set when isolated unit costs attributed 111.5%.

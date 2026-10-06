@@ -79,24 +79,39 @@ struct DualBool {
 static_assert(!std::is_convertible_v<DualBool, bool>, "no implicit DualBool -> bool");
 static_assert(!std::is_constructible_v<bool, DualBool>, "no explicit DualBool -> bool either");
 
+template <int N = 1, class S = double>
+class Dual;
+
 namespace detail {
 // The value-channel bit of a comparison of the underlying scalar: a plain bool when that scalar is
 // double, the DualBool's own bit when it is itself a Dual. This is the one place the comparison
 // machinery has to know that the value channel may not be a double.
 constexpr bool dual_bit(bool b) noexcept { return b; }
 constexpr bool dual_bit(const DualBool& b) noexcept { return b.unchecked_value(); }
+
+// S is another Dual. Stated as a trait rather than as `!is_same_v<S, double>` so that the two
+// things it decides — the recursion below, and which constructors exist — mean what they say:
+// `Wide` is also "not double" and is NOT a scalar this header can nest over (it has no all_zero,
+// and its comparisons are its own); the static_assert in Dual says so rather than letting the
+// error land twenty lines deep in a tangent loop.
+template <class T>
+inline constexpr bool is_dual_v = false;
+template <int M, class T>
+inline constexpr bool is_dual_v<Dual<M, T>> = true;
 }  // namespace detail
 
-template <int N = 1, class S = double>
+template <int N, class S>
 class Dual {
   static_assert(N >= 1, "Dual<N, S>: at least one tangent slot");
+  static_assert(std::is_same_v<S, double> || detail::is_dual_v<S>,
+                "Dual<N, S>: S is double (first order) or another Dual (second order and beyond)");
 
  public:
   using scalar_type = S;
   using tangent_type = std::array<S, N>;
   static constexpr int n_tangents = N;
   // S is itself a Dual: this instantiation reaches second order (or higher).
-  static constexpr bool nested = !std::is_same_v<S, double>;
+  static constexpr bool nested = detail::is_dual_v<S>;
 
  private:
   static constexpr std::size_t n_ = static_cast<std::size_t>(N);

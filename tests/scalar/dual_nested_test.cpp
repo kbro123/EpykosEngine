@@ -34,6 +34,7 @@ using epykos::DualError;
 using D1 = Dual<1>;        // first order, one direction
 using D2 = Dual<1, D1>;    // second order, one outer direction over one inner
 using D22 = Dual<2, D1>;   // second order, two outer directions over one inner
+using D3 = Dual<1, D2>;    // third order — the nesting is closed, not special-cased at depth 2
 
 // ---- the type, at depth 2 ---------------------------------------------------------------------
 
@@ -250,6 +251,46 @@ TEST(DualNested, WideOuterGivesAHessianRow) {
   EXPECT_DOUBLE_EQ(r.d[1].v, 2.0 * std::exp(x0) * y0);       // f_y
   EXPECT_DOUBLE_EQ(r.d[0].d[0], std::exp(x0) * y0 * y0);     // f_xx
   EXPECT_DOUBLE_EQ(r.d[1].d[0], 2.0 * std::exp(x0) * y0);    // f_yx
+}
+
+// ---- the nesting is closed: depth 3 is depth 2's construction again ----------------------------
+
+// I2 says second order is REACHABLE, and the honest test of that is whether depth 2 is a special
+// case or the general one. It is the general one: `Dual<1, Dual<1, Dual<1>>>` needs no new code,
+// and the innermost-seed-in-the-value convention extends by induction — a constant 1 in each
+// tangent channel above the seeded value, and r.d[0].d[0].d[0] is the third derivative.
+TEST(DualNested, ThirdOrderNeedsNothingNew) {
+  static_assert(std::is_same_v<D3::scalar_type, D2> && D3::nested);
+  static_assert(sizeof(D3) == 8 * sizeof(double));
+  static_assert(std::is_trivially_copyable_v<D3>);
+  static_assert(std::is_convertible_v<double, D3> && !std::is_convertible_v<D3, D2>);
+
+  const double x0 = 1.75;
+  const D3 x(D2(D1(x0, {1.0}), {D1(1.0)}), {D2(D1(1.0), {D1(0.0)})});
+  auto third = [](const D3& r) { return r.d[0].d[0].d[0]; };
+  auto second = [](const D3& r) { return r.d[0].d[0].v; };
+  auto first3 = [](const D3& r) { return r.d[0].v.v; };
+
+  {  // every derivative of exp is exp
+    const D3 r = exp(x);
+    EXPECT_DOUBLE_EQ(r.v.v.v, std::exp(x0));
+    EXPECT_DOUBLE_EQ(first3(r), std::exp(x0));
+    EXPECT_DOUBLE_EQ(second(r), std::exp(x0));
+    EXPECT_DOUBLE_EQ(third(r), std::exp(x0));
+  }
+  {  // (1/x)''' = −6/x⁴
+    const D3 r = recip(x);
+    EXPECT_DOUBLE_EQ(second(r), 2.0 / (x0 * x0 * x0));
+    EXPECT_DOUBLE_EQ(third(r), -6.0 / (x0 * x0 * x0 * x0));
+  }
+  {  // (log x)''' = 2/x³
+    EXPECT_DOUBLE_EQ(third(log(x)), 2.0 / (x0 * x0 * x0));
+  }
+  {  // (x³)''' = 6 exactly
+    const D3 r = x * x * x;
+    EXPECT_DOUBLE_EQ(second(r), 6.0 * x0);
+    EXPECT_EQ(third(r), 6.0);
+  }
 }
 
 // ---- branches and the recording discipline at depth 2 -------------------------------------------

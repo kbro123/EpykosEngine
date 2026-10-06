@@ -6,7 +6,7 @@
 // textbook central-difference curve, falling a clean 100x per decade from h = 1e-3 down to a floor
 // near h = 1e-6 and rising again below it. The floor is the FINITE DIFFERENCE's — truncation
 // against cancellation, ~eps^(2/3) at best — and not the dual's. Then, at h = 1e-6, over the
-// twenty-one cases this file runs (the [ MEASURED ] lines it prints are that measurement):
+// twenty-two cases this file runs (the [ MEASURED ] lines it prints are that measurement):
 //
 //     max |H_dual − H_fd| / max |H_dual|                    worst 2.290e-9   (the SOFR 3M future)
 //     the same, entry by entry, over |H_ij| >= 0.1 max|H|   worst 3.562e-9   (the same case)

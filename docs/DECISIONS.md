@@ -7027,10 +7027,33 @@ this entry retires the third.
 ### 5. The D11 grant this rests on
 
 The owner directed reading the other engine's checkout on 2026-10-05, widening D11 beyond D78's
-`tools/h2h/` exception. **Files read, in full:** `OPTIMIZATION.md` (its technique sections),
-`ls` of the repository root and of `include/swaps/`, and `git log -1`. **No source file was opened**,
-nothing was copied, and nothing in this repository is derived from it — the measurements above are
-all of Epykos.
+`tools/h2h/` exception. It is a **local checkout already on this machine** (the path is in the
+project's own setup notes); nothing was downloaded, cloned or fetched, and no network was involved.
+Read at its commit `81955c3`.
+
+**Files read — corrected 2026-10-06.** This section first said "no source file was opened". That
+was true when written and **became false within the hour**, while answering the owner's questions
+about interpolation schemes. D78's standard is that every file read is listed, so the full list is:
+
+| | what was read |
+|---|---|
+| `git log -1`, `ls` of the root and of `include/swaps/`, `ls include/swaps/curve/` | metadata and directory listings |
+| `OPTIMIZATION.md` | the five technique sections (lines 39-95) and the heading list |
+| `include/swaps/curve/curve_module.hpp` | the `Scheme` enum and its two following comments (lines ~140-156) |
+| `include/swaps/curve/regions.hpp` | the `Tension` class's header comment (lines ~1062-1078); grep hits for `hagan`/`CONVEX` |
+| `include/swaps/curve/parametric.hpp` | the file header comment (lines 1-31) |
+| tree-wide greps | `monotone convex` spellings (no hits), `hagan` (~10 matching lines), class names under `curve/` |
+
+**What was NOT read:** no function body, no algorithm, no build script, no test. The three headers
+above were read for their DECLARATIONS and their prose documentation — an enum's members, a class's
+explanation of why its basis keeps an interpolant linear. Nothing was copied and nothing in this
+repository is derived from any of it; every measurement in this entry is of Epykos.
+
+The mathematical facts recorded from those comments (a fixed-σ tension spline is linear in the knot
+values; fixing Nelson-Siegel's τ keeps the zero rate linear in the betas) are standard properties of
+published methods, not that engine's design. Where an idea of theirs is noted as worth adopting —
+the compile-time scheme-count tripwire in `ROADMAP.md` — it is named as an idea and reimplemented
+from scratch or not at all.
 
 One guard, recorded because it will matter later: having read their list, **no search that
 "rediscovers" an item on it is evidence of anything.** A discovery mechanism (D88) must be tested on

@@ -6625,6 +6625,23 @@ nodes.
 algebra it DESTROYS** — a whole-program question. That is the negative term §2's test lacks, and
 nothing in the engine prices it.
 
+**A SECOND, independent cost, added 2026-10-06: it would degrade every derivative taken
+downstream.** Today `exp` is one op with an ANALYTIC adjoint — `acc_exp` is `t += yb * y`, the rule
+`d/dx exp(x) = exp(x)` applied to the computed forward value. So a polynomial `exp` accurate to ε in
+VALUE yields a derivative accurate to ε as well: the engine never differentiates the approximation's
+internals, so there is no amplification. (This also retires a concern raised and withdrawn the same
+day: §5.3's value-accuracy criterion IS sufficient as written, precisely because of this.)
+
+Expand `exp` into `mul`/`add` above the pin and that property is lost. `exp` stops being an op, the
+analytic rule goes with it, and the adjoint differentiates the polynomial — returning **p′(x), not
+p(x)**. Differentiating a degree-n polynomial on a reduced range h amplifies its sup-norm error by
+roughly n²/h (Markov), so for a typical kernel (n≈7, h≈0.69) about 70x per differentiation: from
+ε≈1e-16, ~1e-14 at first order and ~1e-11 at third. **Degradation rather than catastrophe, but it
+compounds per order**, and it lands on exactly the quantity §1b's I2 exists to make reachable. An
+error budget for this rewrite must therefore bound the error of the DERIVATIVES it will be used to
+compute, not only of the value — which is strictly more than `algebra/error.hpp` currently
+proposes.
+
 **An untested hypothesis, recorded as a hypothesis.** D82 found a closed-form Jacobian inapplicable
 because *"0 of 1 residual output domains satisfy `is_linmap_domain` — the residual is a par rate
 minus a quote and every discount factor is `exp` of an affine function."* A polynomial DF changes

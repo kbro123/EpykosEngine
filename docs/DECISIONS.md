@@ -7042,3 +7042,39 @@ The warm calibration gap of D90 (2.24x) is untouched by any of this, and D91 say
 residual evaluation, 43% fixed cost of which the ‖JᵀF‖∞ diagnostic is ~5.5 us, and ~40% of the
 head-to-head figure is cache refill. Those are the live levers. `AdMode::ClosedFormAffine` stays an
 unconsumed annotation, and R7's header already explains why that was the right call the first time.
+
+### 7. The scheme sweep, because §1 measured ONE curve family (owner, 2026-10-06)
+
+§1 was taken entirely on `compare_ois`, which is `scheme = linear, variable = logdf` — the one
+family where the interpolation is AFFINE in the knots, chosen by that fixture precisely to remove
+the scheme from the comparison. The owner asked the obvious question §1 does not answer: **with an
+interpolator that is not linear in the knots, does the chord stall and refresh, turning "0 Jacobian
+builds" into something positive?**
+
+Measured on Stage A's own scheme sweep (`StageAOptions::usd_curve`), Jacobian builds per solve,
+chord + warm start, load 1.60-1.80:
+
+| `usd_curve` | +1bp | +25bp | +100bp | +300bp |
+|---|---|---|---|---|
+| base, linear zero | 0.00 | 0.00 | 0.00 | 0.37 |
+| `USD-SOFR-LOGDF` | 0.00 | 0.00 | 0.00 | 0.18 |
+| **`USD-SOFR-MONOTONE`** (Hyman) | **0.00** | **0.00** | **0.00** | **0.18** |
+| `USD-SOFR-COMPOSITE` | 0.00 | 0.00 | 0.00 | 0.20 |
+
+**The answer is no, and the reason is that the chord refreshes on CONTRACTION STALLING, not on
+curvature.** Monotone cubic needs 40-70% more iterations (0.64 → 1.11 at +1bp, 1.90 → 2.51 at
++100bp) and every one of them still contracts well enough that the record-point factorisation is
+never abandoned. At +300bp it refreshes LESS than the base linear scheme.
+
+Three corrections and consequences:
+
+1. **The 0% is a property of MOVE SIZE, not of the scheme.** Every scheme begins refreshing at
+   +300bp (3-4% of solves). §1's conclusion should be read as "0% for realistic market moves".
+2. **It strengthens D91.** Monotone cubic is 21% more expensive per solve (484 vs 400 us) and all
+   of that is extra residual evaluations. Residual evaluation — already D91's 53% lever — gets
+   BIGGER as the interpolator gets harder.
+3. **The declined optimisation is also the one that does not generalise.** `is_linmap_domain` finds
+   nothing on monotone cubic: the Hyman limiter makes the slopes value-dependent, which is exactly
+   why the other engine's own text says "only the value-dependent MonotoneCubic falls off it". On
+   the harder curves a closed-form Jacobian is not merely low-value, it is **inapplicable** — while
+   the lever that does matter grows.

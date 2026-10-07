@@ -417,3 +417,87 @@ TEST(SecondOrderIftReachability, FreezingFzChangesTheGammaAndNotTheDelta) {
   EXPECT_GT(d2z_diff, 0.5 * d2z_norm);
   EXPECT_GT(gamma_diff, 0.5 * gamma_norm);
 }
+
+// ---- third order, for free ----------------------------------------------------------------------
+//
+// The honest test that depth 2 is not special-cased: `Dual<3, Dual<3, Dual<3>>>` through the same
+// calibration, with no further code anywhere. Three of the twelve quotes vary (a depth-3 scalar is
+// (1+3)^3 = 64 doubles), and the third derivative is checked two ways —
+//
+//   * full permutation symmetry over all six orderings of (i, j, l), which needs no reference at
+//     all and is held to roundoff: measured worst 4.533e-17, gated 1e-15;
+//   * against central differences of the EXACT second derivatives the depth-2 pass already
+//     produces. The sweep falls a clean 100x per decade from h = 1e-3 to a floor at h = 3e-6:
+//     3.156e-6, 2.840e-7, 3.156e-8, 2.837e-9 (h = 3e-5), 3.348e-10 (1e-5), 1.906e-10 (3e-6),
+//     5.165e-10 (1e-6). Worst at the floor 1.906e-10, gated 2e-9.
+TEST(SecondOrderIft, ThirdOrderThroughTheCalibrationNeedsNoFurtherCode) {
+  constexpr int M = 3;
+  constexpr double kStepT = 3.0e-6;
+  constexpr double kTolThird = 2e-9;
+  constexpr double kTolThirdSymmetry = 1e-15;
+  constexpr int kVary[M] = {1, 3, 5};  // which quotes move
+  using D1 = Dual<M>;
+  using D2 = Dual<M, D1>;
+  using D3 = Dual<M, D2>;
+
+  // out[0] = the book PV, out[1..3] = the three calibrated knots at the varied tenors.
+  auto f = [](const auto* x, auto* out) {
+    using Scalar = std::decay_t<decltype(*x)>;
+    std::vector<Scalar> q(static_cast<std::size_t>(Nq));
+    for (int k = 0; k < Nq; ++k) q[static_cast<std::size_t>(k)] = Scalar(m1_quotes()[static_cast<std::size_t>(k)]);
+    for (int k = 0; k < M; ++k) q[static_cast<std::size_t>(kVary[k])] = x[k];
+    std::vector<Scalar> all(static_cast<std::size_t>(fx::so_m1_outputs()));
+    fx::calibrated_m1<Scalar>(book(), disc_swaps(), q.data(), all.data());
+    out[0] = all[static_cast<std::size_t>(fx::so_m1_book_pv)];
+    for (int k = 0; k < M; ++k) out[1 + k] = all[static_cast<std::size_t>(fx::so_m1_state0 + kVary[k])];
+  };
+  double x0[M];
+  for (int k = 0; k < M; ++k) x0[k] = m1_quotes()[static_cast<std::size_t>(kVary[k])];
+
+  std::vector<D3> xd(M);
+  for (int k = 0; k < M; ++k) xd[static_cast<std::size_t>(k)] = D3::variable(D2::variable(D1::variable(x0[k], k), k), k);
+  std::vector<D3> out(M + 1);
+  f(xd.data(), out.data());
+
+  // The depth-2 references at the two shifted points, once for every direction.
+  std::vector<fx::NestedRun<M>> plus, minus;
+  for (int m = 0; m < M; ++m) {
+    double xp[M], xm[M];
+    for (int k = 0; k < M; ++k) {
+      xp[k] = x0[k];
+      xm[k] = x0[k];
+    }
+    xp[m] += kStepT;
+    xm[m] -= kStepT;
+    plus.push_back(fx::nested_run<M>(f, xp, M + 1));
+    minus.push_back(fx::nested_run<M>(f, xm, M + 1));
+  }
+
+  for (int o = 0; o <= M; ++o) {
+    const D3& r = out[static_cast<std::size_t>(o)];
+    auto T = [&](int i, int j, int l) {
+      return r.d[static_cast<std::size_t>(i)].d[static_cast<std::size_t>(j)].d[static_cast<std::size_t>(l)];
+    };
+    double tn = 0.0, sym = 0.0, worst = 0.0;
+    for (int i = 0; i < M; ++i) {
+      for (int j = 0; j < M; ++j) {
+        for (int l = 0; l < M; ++l) {
+          tn = std::fmax(tn, std::fabs(T(i, j, l)));
+          const double p[6] = {T(i, j, l), T(i, l, j), T(j, i, l), T(j, l, i), T(l, i, j), T(l, j, i)};
+          for (int a = 1; a < 6; ++a) sym = std::fmax(sym, std::fabs(p[a] - p[0]));
+          const double ref =
+              (plus[static_cast<std::size_t>(l)].h(o, i, j) - minus[static_cast<std::size_t>(l)].h(o, i, j)) /
+              (2.0 * kStepT);
+          worst = std::fmax(worst, std::fabs(T(i, j, l) - ref));
+        }
+      }
+    }
+    ASSERT_GT(tn, 0.0) << "output " << o << ": the third derivative through the calibration is identically zero";
+    std::printf("[ MEASURED ] third order, output %d: max|T| %-12.4e perm-sym rel %-11.3e vs cd(H) rel %.3e\n", o, tn,
+                sym / tn, worst / tn);
+    EXPECT_LE(sym / tn, kTolThirdSymmetry) << "output " << o << ": the third derivative is not permutation-symmetric";
+    EXPECT_LE(worst / tn, kTolThird) << "output " << o
+                                     << ": the third derivative disagrees with central differences of the exact "
+                                        "second derivatives";
+  }
+}

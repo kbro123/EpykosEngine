@@ -62,13 +62,17 @@ inline solver::SolveOptions so_ift_options() {
 // at a nesting scalar is the second-order rule as well (solver/tangent.hpp). This exists so that
 // ONE templated callable can serve as the double oracle, the first-order pass and the nested pass,
 // which is what makes the bitwise E0 gate possible.
-template <int N, class Scalar, class Residual>
+//
+// The number of seeded directions comes from the Scalar, not from the caller: the callables below
+// take whatever width they are instantiated at, so the same fixture serves a 12-quote Jacobian, a
+// 3-direction depth-3 probe and anything else.
+template <class Scalar, class Residual>
 solver::SolveReport solve_block(Residual& R, int n_z, int n_p, int n_r, const Scalar* p, Scalar* z,
                                 const solver::SolveOptions& options) {
   if constexpr (std::is_same_v<Scalar, double>) {
     return solver::solve_newton(R, n_z, n_p, n_r, p, z, options);
   } else {
-    return solver::implicit_dual<N>(R, n_z, n_p, n_r, p, z, options);
+    return solver::implicit_dual<Scalar::n_tangents>(R, n_z, n_p, n_r, p, z, options);
   }
 }
 
@@ -88,7 +92,7 @@ solver::SolveReport calibrated_m1(const Book& book, const std::vector<CalSwap>& 
   std::vector<Scalar> z(static_cast<std::size_t>(so_m1_quotes));
   for (int k = 0; k < so_m1_quotes; ++k) z[static_cast<std::size_t>(k)] = Scalar(so_ift_start);
   const solver::SolveReport rep =
-      solve_block<so_m1_quotes>(R, so_m1_quotes, so_m1_quotes, so_m1_quotes, q, z.data(), so_ift_options());
+      solve_block(R, so_m1_quotes, so_m1_quotes, so_m1_quotes, q, z.data(), so_ift_options());
   price_book<Scalar>(book, z.data(), out, out + book.n_swaps);
   for (int k = 0; k < so_m1_quotes; ++k) out[static_cast<std::size_t>(so_m1_state0 + k)] = z[static_cast<std::size_t>(k)];
   return rep;
@@ -135,11 +139,11 @@ void two_curve_chain(const std::vector<CalSwap>& dswaps, const std::vector<CalSw
   std::vector<Scalar> zd(static_cast<std::size_t>(n_knots)), zp(static_cast<std::size_t>(n_proj_knots));
   for (int k = 0; k < n_knots; ++k) zd[static_cast<std::size_t>(k)] = Scalar(so_ift_start);
   for (int k = 0; k < n_proj_knots; ++k) zp[static_cast<std::size_t>(k)] = Scalar(so_ift_start);
-  solve_block<so_2c_quotes>(Rd, n_knots, so_2c_quotes, n_knots, q, zd.data(), so_ift_options());
+  solve_block(Rd, n_knots, so_2c_quotes, n_knots, q, zd.data(), so_ift_options());
   std::vector<Scalar> p2(static_cast<std::size_t>(so_2c_quotes));
   for (int k = 0; k < n_proj_knots; ++k) p2[static_cast<std::size_t>(k)] = q[n_knots + k];
   for (int k = 0; k < n_knots; ++k) p2[static_cast<std::size_t>(n_proj_knots + k)] = zd[static_cast<std::size_t>(k)];
-  solve_block<so_2c_quotes>(Rp, n_proj_knots, so_2c_quotes, n_proj_knots, p2.data(), zp.data(), so_ift_options());
+  solve_block(Rp, n_proj_knots, so_2c_quotes, n_proj_knots, p2.data(), zp.data(), so_ift_options());
   two_curve_book<Scalar>(dswaps, pswaps, base_quotes, zd.data(), zp.data(), out);
   for (int k = 0; k < n_knots; ++k) out[static_cast<std::size_t>(so_2c_disc_state0 + k)] = zd[static_cast<std::size_t>(k)];
   for (int k = 0; k < n_proj_knots; ++k) out[static_cast<std::size_t>(so_2c_proj_state0 + k)] = zp[static_cast<std::size_t>(k)];

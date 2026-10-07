@@ -100,6 +100,10 @@ namespace epykos::adjoint {
 // itself refuses.
 //
 // The two-argument form takes a plan already built from the SAME program (it is not re-derived).
+//
+// A caller that already has an `adjoint::Adjoint` should call its `to_program()` instead
+// (adjoint/adjoint.hpp, M5/C4): it is this function over that object's own program and plan, so
+// the emitted reverse cannot be derived from a plan other than the one `Adjoint::run` uses.
 ir::Program adjoint_to_program(const ir::Program& program);
 ir::Program adjoint_to_program(const ir::Program& program, const AdjointPlan& plan);
 

@@ -51,6 +51,32 @@
 //     ResidualProgram, timed on its own. D91 §1 says this route over-attributes; the tool prints
 //     the disagreement rather than choosing a winner.
 //
+// ---- the paired comparison with tools/revcollapse/, and what it says about D102 ---------------
+//
+// `ladderprobe --mode phases --trades 256` and `revcollapse "compare_ois(telescoped, 256)"` run
+// the SAME program: both report 12,280 pinned nodes, 24 domains, 7,209 values, 34 inputs, 291
+// outputs. (`record_compare_ois` records the naive coupon and compiles it; D102 §2 showed naive
+// and telescoped reach the same pinned tape, so P, Q and the reverse are identical.) So the two
+// tools' numbers can be divided, and that division is the test D102 asked for:
+//
+//   revcollapse   reverse-only arithmetic 42,791 OPS against the forward half's 15,645  = 2.74x
+//   ladderprobe   reverse (A - F0) 26.43 us/row against the forward F0's 5.08 us/row    = 5.20x
+//
+// The reverse pass takes 5.20x the forward's TIME while the emitted reverse program does 2.74x
+// the forward's ARITHMETIC, so per operation the reverse runs about 1.90x less efficiently than
+// the forward. The candidate cause is named in `adjoint.hpp`'s own header and is deliberate
+// (D31): the reverse RECOMPUTES every group's intermediate steps per tile --
+// `adjoint_e0.cpp`'s reverse() calls forward_step for steps 0..last-1 -- arithmetic the emitted
+// program materialises instead and which therefore never enters revcollapse's reverse-only count.
+// That attribution is an ESTIMATE; nothing here counts the recomputed operations.
+//
+// The consequence for D102 cuts both ways and should not be quoted by halves. The denominator it
+// lacked is LARGE -- the reverse pass is 75%-80% of a realistic ladder -- so its 1.76x-1.92x
+// ceiling is not a D92. But that ceiling is a ratio of EMITTED-PROGRAM op counts, and the runtime
+// executes more arithmetic than that program contains, so 1.92x of the count is not 1.92x of the
+// time. D102's own closing line still stands unamended: the paired before/after of its two local
+// edits is the only thing that settles it.
+//
 // Modes:
 //   shape    structural facts: sizes, chunking, buffer bytes, RunStats. No timing.
 //   phases   the subtraction ladder above, at each --rows value
@@ -712,6 +738,10 @@ void mode_phases(const Config& c) {
   std::printf("    * below one full lane_tile the per-row cost has not reached its asymptote.\n");
   std::printf("  A-F0 is an UPPER BOUND on the reverse pass, not an estimate; A-F is a far looser one\n");
   std::printf("  and is printed only to show how much looser (see this file's header).\n");
+  std::printf("  At --trades 256 with the default tenors this program is the one\n");
+  std::printf("  `revcollapse \"compare_ois(telescoped, 256)\"` counts, so (A-F0)/F0 here and its\n");
+  std::printf("  reverse-only/forward-half OPS ratio are directly divisible: see this file's header\n");
+  std::printf("  for that comparison and what it does and does not license about D102.\n");
   std::printf("  In D-A the ROWS slope is the per-lane IFT contraction plus its bookkeeping and the\n");
   std::printf("  CHUNKS slope is the per-chunk solve (one residual evaluation, the diagnostic, the\n");
   std::printf("  exit Jacobian and its LU) plus to_soa. Neither needed an isolated call -- but rows\n");

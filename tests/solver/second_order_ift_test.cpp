@@ -435,7 +435,9 @@ TEST(SecondOrderIft, ThirdOrderThroughTheCalibrationNeedsNoFurtherCode) {
   constexpr double kStepT = 3.0e-6;
   constexpr double kTolThird = 2e-9;
   constexpr double kTolThirdSymmetry = 1e-15;
-  constexpr int kVary[M] = {1, 3, 5};  // which quotes move
+  static constexpr int kVary[M] = {1, 3, 5};  // which quotes move (static: a captureless lambda below
+                                             // subscripts it with a runtime index, which ODR-uses the
+                                             // array -- GCC requires a capture, clang does not)
   using D1 = Dual<M>;
   using D2 = Dual<M, D1>;
   using D3 = Dual<M, D2>;

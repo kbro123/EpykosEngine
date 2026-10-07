@@ -8263,3 +8263,131 @@ own collapse is **555x**. Fixed by passing `passes = false`.
 Two smaller ones. `PassResult::changed` is a **composed count of rewrites**, not the node delta: 4,874
 against a true delta of 4,794 at 64 trades. And the brief framed the attribution across five passes
 when `fold_sum` and `affine_collapse` contribute exactly zero.
+
+---
+
+## D103 — The risk ladder decomposed: the reverse pass is 62–80%, D90's headline ladder is ONE row, and an op count does not convert to time (2026-10-07)
+
+The ladder was the last major cost centre nobody had taken apart, and D102 ended by saying its own
+1.76x arithmetic ceiling meant nothing until someone supplied the denominator. This supplies it.
+New tool `tools/ladder/ladderprobe`, which times only public API calls and **reads the load itself,
+refusing above cores/2**. Fingerprint `d448afd70180`, release preset. Every figure below was taken
+at 1-minute load between **1.91 and 2.94** against a threshold of 8.0, loads stated per run.
+`ctest --preset release` 116/116.
+
+### 1. D90's flagship ladder is a ONE-ROW ladder, and D92 already called that an artefact
+
+`tools/h2h/h2h_main.cpp:334` is `const std::vector<int> ordinals = {sd.full.book_output};` — **one
+book-level gradient, 25 buckets, B = 1.** So the 531.5 us in D90's table, the number this project
+quotes as ~6.1x in its favour, is the single-row case.
+
+D92 §4 independently established that *"the risk-ladder share was an artefact of a one-row
+ladder"* and measured the Jacobian's share decaying **31.3% at one row → 1.9% at 64 → 0.5% at 256**.
+Both entries are correct and **neither noticed it was describing the other's object.** D92 dismissed
+the one-row figure as misleading while D90's headline *is* that measurement.
+
+The comparison itself remains sound — the other engine's `price_portfolio_risk(book).ladder` returns
+the same quantity — but **a ladder number is meaningless without its row count, and from here both
+are always stated.** A second parameter matters nearly as much and was also unstated: **book size.**
+D92's 31.3%/0.5% pair is a 16-trade book throughout; at R = 1 the reverse pass is 42% on a 256-trade
+book and 57–62% on a 1,000-trade book.
+
+### 2. The decomposition
+
+**25 knots, 1,000 trades, R = 1 — D90's shape.** Load 2.77 → 2.84. L = 449.5–470.2 us over four
+runs.
+
+| | us | share |
+|---|---|---|
+| **reverse pass** (A−F0) | 287.2 | **62.0%** |
+| forward pass (F0, materialising) | 85.7 | 18.5% |
+| solve + IFT + to_soa + copy-out | 85.6 | 18.5% |
+| — the exit Jacobian, by option toggle | 73.2 | **15.8%** |
+| — ‖JᵀF‖∞, by option toggle | 8.8 | 1.9% |
+| — one IFT contraction, isolated | 1.5 | 0.3% |
+| marshalling, measured directly | 2.2 | 0.5% |
+
+**A realistic per-trade ladder, rows ≥ 8, B = 64:** `total = 184.4·rows + 335 us`, **worst fit error
+4.71%** — better than D91's 8.45%, and 0.75% on the 256-trade fixture. Reverse **79.4%**, forward
+15.5%, solve+IFT 1.2%, marshalling 0.4%. The per-row reverse share was 79.4 / 79.6 / 79.7% across
+three independent runs.
+
+Isolated unit costs reproduce the ledger, which is the cross-check that the harness is sound:
+eval 2.26 us (D91's 2.22), Jacobian 57.4 us (D92's 55.4–57.2), diagnostic 5.58 us (D91's 5.46,
+D94's 5.30–5.55), `ift_adjoint` 1.51 us/lane.
+
+Reproduced independently by the orchestrator at the tool's 16-quote default: L 348.2, A−F0 228.5,
+**reverse 65.6%**, marshalling (L−D) 3.0 us. The tool *reports* its forward-proxy validity rather
+than assuming it — the shipped interpreter fuses or inlines 24,618 rows while the unfused one fuses
+0, which is what makes F0 the exact proxy for `adjoint_e0.cpp`'s `forward()`.
+
+### 3. D102's denominator — and the reason an op count still does not become a time
+
+**The reverse pass is 75–80% of a realistic ladder and 42–62% at R = 1.** So D102's ceiling has a
+large denominator and its "not D92" conclusion needs no qualifying on that score.
+
+But the paired division cuts the other way, and this is the more important half.
+`ladderprobe --trades 256` and `revcollapse "compare_ois(telescoped, 256)"` run the **same program**
+— both report 12,280 pinned nodes, 24 domains, 7,209 values, 34 inputs, 291 outputs — so their
+numbers divide:
+
+    revcollapse  reverse-only 42,791 OPS / forward half 15,645  =  2.74x
+    ladderprobe  reverse 26.43 us/row  / forward 5.08 us/row    =  5.20x
+
+**Per operation the reverse runs ~1.90x less efficiently than the forward.** The candidate cause is
+deliberate and named in `adjoint.hpp`'s own header (D31): `reverse()` calls `forward_step` for steps
+0..last−1 per tile, **recomputing intermediates that the emitted program materialises instead** — so
+they never enter revcollapse's count at all. **That attribution is an estimate; nothing counts the
+recomputed ops.**
+
+The consequence is the thing to keep: **1.92x of an emitted-program op count is not 1.92x of the
+ladder's reverse time, in either direction.** D102's closing line — that a paired before/after of its
+two local edits is the only thing that settles it — stands unamended, and is now the only open route.
+
+### 4. Residency: a factor, not *the* factor
+
+Forced eviction between consecutive ladders, load 2.94 → 2.87, median us:
+
+| rows | none | 16 MB | 64 MB | 256 MB | 64MB/none |
+|---|---|---|---|---|---|
+| 1 | 449.5 | 498.8 | 516.2 | 575.0 | **1.15x** |
+| 4 | 840.7 | 912.3 | 1027.6 | 1201.2 | 1.22x |
+| 16 | 2,967.5 | 3,063.5 | 3,347.6 | 3,654.6 | 1.13x |
+| 64 | 11,871.5 | 12,028.0 | 11,952.8 | 12,559.8 | **1.01x** |
+| 256 | 46,626.3 | 46,974.4 | 47,013.8 | 47,564.5 | 1.01x |
+
+D91 measured **2.52x** at 64 MB on the calibration; the ladder gets **1.15x, decaying to 1.01x by
+64 rows** — the 8.5 MB working set is refilled once and amortised across the rows. It does reconcile
+D90's figure: 449.5 clean + ~66 us refill ≈ 516 against D90's 531.5, so roughly **13–15% of D90's
+ladder number is plausibly refill**, against D91's ~40% for the calibration.
+
+### 5. Four methods discarded, and one lesson that generalises
+
+1. **`A − F` using the shipped interpreter as the forward proxy** over-attributes the reverse by
+   **13%** (90% vs 79% of the ladder), because the shipped interpreter fuses or inlines **31,298 of
+   35,265 values (88.8%)** while the adjoint's forward materialises all of them.
+2. **`L − D` for marshalling** over-attributes by **~8.9x** (4.8–7.0 us/row against 0.78 measured
+   directly) — it differences two ~47 ms medians where 1% drift is 470 us.
+3. **A three-regressor fit** (rows, chunks, const) returns physically impossible negative chunk
+   slopes: `chunks = ceil(R/batch)` is near-collinear with rows. Reported, not hidden.
+4. **Isolated unit costs UNDER-attribute here** — the exit Jacobian is 62.0 us isolated against 73.2
+   by in-ladder toggle, **15% under.** D91 §1's 111.5% over-attribution has been treated since as
+   the characteristic failure of isolated costs; **the direction is not universal, and that is the
+   generalisable lesson.**
+
+### 6. Findings reported, not built
+
+- **Lane-width specialisation holes.** Both `exec::Interpreter` and `adjoint::Adjoint` specialise
+  {1,4,8,16,32,64} and fall to a generic variant for 2,3,5,6,7. At R = 256 / 1,000 trades **B = 2
+  costs more in total than B = 1** (124.5 ms vs 108.1), and R = 5,6,7 cost 252–277 us/row against
+  R = 4's 188 and R = 8's 175.
+- **Batching the ladder is worth 2.3x per row** (B=1 422 us/row, B=16 184), and the optimum is
+  **B = 16, not 64** (183.7 vs 190.9) — consistent with an 8.5 MB adjoint buffer against a 16.5 MB
+  L3. D90's ladder runs at B = 1 because it has one row; structural, not a defect.
+- **The adjoint's forward half costs 3.1x the shipped interpreter's** (28.8 vs 9.4 us/row at 1,000
+  trades) and is 14.5–15.5% of the ladder. Not freely removable — the reverse needs the values — but
+  never before priced.
+- **The exit Jacobian is 15.8% of D90's one-row ladder.** D92's *"0.5%"* is right for 256 rows and
+  **wrong for the number this project quotes**; §1's rule about always stating the row count is why.
+- The IFT contraction, the solve at realistic R, and marshalling are **not** cost centres: 0.3–0.8%,
+  1–5%, 0.4–0.6%.

@@ -4,7 +4,8 @@
 # scaling harness D62's numbers come from; tools/compare/ is the MX head-to-head driver (D21, D71);
 # tools/revcollapse/ measures whether the algebra above the pin collapses invariant I1's emitted
 # reverse, and whether the collapsed reverse is still bitwise `adjoint::Adjoint::run` (counts only,
-# no timing).
+# no timing); tools/ladder/ decomposes the O3 risk ladder's TIME (D90's 531.5 us) and, unlike
+# revcollapse, therefore refuses a loaded box itself.
 #
 # costmodel/, egraph_scale/ and egraph_eval/ measure the quarantined M4 plan-level search and are
 # built only with it (EPYKOS_LEGACY_SEARCH, root CMakeLists.txt; PRINCIPLES.md §7.1). This is not a
@@ -23,6 +24,9 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/compare/CMakeLists.txt")
 endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/revcollapse/CMakeLists.txt")
   add_subdirectory(revcollapse)
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ladder/CMakeLists.txt")
+  add_subdirectory(ladder)
 endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/h2h/CMakeLists.txt")
   add_subdirectory(h2h)

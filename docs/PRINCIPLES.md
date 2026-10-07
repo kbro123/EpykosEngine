@@ -136,15 +136,30 @@ is a test that fails. **The backlog derives from these**, not from whatever is n
 *Gate:* it passes `ir::validate`, round-trips through `ir::serialize`/`deserialize`, and
 `exec::Interpreter` run on it reproduces `adjoint::Adjoint::run` **bitwise** — the same program and
 the same inputs, so §5.2a case 1, and a failure is a defect.
+**Built 2026-10-07: `tests/adjoint/i1_gate_e0_test.cpp`.**
 
-*Status: **DOES NOT HOLD** — but for a much smaller reason than this section first claimed
-(corrected 2026-10-06, D96).* `Adjoint` is constructed from the FORWARD program and `program()`
-returns that same forward program; `AdjointPlan` is buffer layout plus four reverse-adjacency CSR
-lists with no ops in it; the derivative arithmetic is a `switch` over `Op` in
-`src/adjoint/adjoint_e0.cpp`. The twelve `acc_*` kernels are not the obstacle — they exist and are
-correct; they write doubles where they would need to emit nodes.
+**What this gate does NOT establish, stated here because it is easy to misread (D100).** It is a
+**closure check, not a correctness check** — which is the right aim, since I1 is a closure property,
+but a green I1 must never be read as *"the adjoint is correct"*. Both sides of the comparison consume
+the **same `AdjointPlan`**: the emitter builds its pull from `plan.cpp`'s CSR lists and
+`Adjoint::run` walks those same lists. So a defect in `build_plan` moves both answers together and
+passes. Demonstrated, not inferred: **`adjoint.affine_not_transposed` survives this gate**, and its
+real catcher is `curve_composite_vs_dual_test` (14 catchers). The derivative *rules* are carried by
+the 14 vs-`Dual` gates in `scripts/mutation_catchers.tsv`; this gate carries only that the reverse
+is expressible as a program and that the two executions agree.
 
-**The root cause stated here until 2026-10-06 was wrong.** It read: *"`SlotKind::Gather` is an
+*Status: **HOLDS as of 2026-10-07 (D98, D99, D100).*** `adjoint::Adjoint::to_program()` returns an
+`ir::Program` for the reverse. The gate passes over **12 programs — 1,184,540 `memcmp` comparisons,
+0 mismatches** — including the Stage A desk problem, both scan fixtures, and two hand-built programs
+covering cases no fixture contains. `program()` keeps its old meaning (the forward program) and the
+header states the contrast at three places.
+
+Reached with **no new op, no `Op` dispatch site changed and `src/adjoint/adjoint_e0.cpp` untouched**,
+so the §5.2a case-1 question D96 reserved to the owner was never raised. The root cause this section
+asserted until 2026-10-06 — that the IR cannot express the reverse of a gather — was wrong; see
+below.
+
+**The root cause stated here until 2026-10-06 was wrong** (D96). It read: *"`SlotKind::Gather` is an
 operand ADDRESSING MODE, and the reverse of an addressing mode is a scatter-accumulate, which the
 IR cannot express."* The IR **can** express it. `Op::Affine` over a `Segment` **is** a
 scatter-accumulate, and `src/adjoint/plan.cpp` already transposes every index array into CSR, so
@@ -155,11 +170,9 @@ every interpreter configuration — with **no new op, no `Op` enum change and no
 `Adjoint::run`**. `Op::SegmentSum` needs no producer; `Op::Linmap` is a dead name, appearing only
 in `src/tape/op.cpp`'s name table and one string assertion.
 
-So I1 does not fail on representation. **It fails because nobody wrote the emitter**, with one
-genuine and much narrower exception: **`exec::Interpreter` refuses a recurrent non-scan domain**
-(`src/exec/interpreter.cpp:833`), which is what the reverse of a scan needs. `ir::validate` already
-accepts such a domain and `ir::Evaluator` already runs it correctly, so that gap too is in the
-executor, not the IR.
+So I1 never failed on representation. **It failed because nobody had written the emitter.** The one
+genuine and much narrower gap — `exec::Interpreter` refusing a recurrent non-scan domain, which the
+reverse of a scan needs — was in the executor, not the IR, and was closed in D99.
 
 ---
 

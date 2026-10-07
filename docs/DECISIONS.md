@@ -7919,3 +7919,99 @@ carry-bearing rows of each"*. At `trades = 2`, which is what the test uses, it i
 domain, 18 rows, 2 chains, **16** carry-bearing rows. The substance the stage turned on — the carry
 at position 0 in every one of them — is exactly right. The count was wrong because it was taken at a
 different trade count than the one quoted.
+
+---
+
+## D100 — I1 HOLDS. And its gate is a closure check, not a correctness check: a surviving mutant proves it (2026-10-07)
+
+Stage C4 of D95's programme. `adjoint::Adjoint::to_program()` returns an `ir::Program` for the
+reverse, and §1b's clause passes verbatim over **12 programs, 1,184,540 `memcmp` comparisons, 0
+mismatches** — `tests/adjoint/i1_gate_e0_test.cpp`, re-run by the orchestrator. **I1 holds.**
+
+Reached with no new op, no `Op` dispatch site changed and `src/adjoint/adjoint_e0.cpp` untouched, so
+the §5.2a case-1 question D96 reserved to the owner was never raised in C2, C3a, C3b or C4.
+
+### 1. The finding that matters most: what a green I1 does not license
+
+**Both sides of the gate consume the same `AdjointPlan`.** The emitter builds its pull from
+`plan.cpp`'s CSR lists; `Adjoint::run` walks those same lists. A defect in `build_plan` therefore
+moves *both* answers together and the gate passes. Demonstrated rather than argued:
+
+```
+EPYKOS_MUTANT=adjoint.affine_not_transposed  ./build/mutation/tests/adjoint_i1_gate_e0_test
+  [  PASSED  ] 1 test.        <-- survives
+scripts/mutation_catchers.tsv:18
+  adjoint.affine_not_transposed  curve_composite_vs_dual_test  14
+```
+
+That mutant reads an `Affine` coefficient from the untransposed table, and its real catchers are the
+**14 vs-`Dual` gates**. So I1's gate carries exactly two things: that the reverse is **expressible
+as a program**, and that the two executions **agree**. It carries nothing about whether the
+derivative rules are right.
+
+This is the correct aim — I1 *is* a closure property, and a closure check is what a closure property
+deserves. The hazard is purely in the reading: a green I1 must never be taken for *"the adjoint is
+correct"*. §1b now says so at the gate.
+
+**Two of the ten mutants tested are "killed" but not on their merits**, which would have flattered
+the matrix if left unexamined. `adjoint.drop_broadcast` and `adjoint.wrong_transpose` corrupt the
+plan those fixtures' own **record-time solves** use; the solve diverges, the recording's
+`input_values` come back NaN, and `Program::operator==` is then false *against itself* because
+`NaN != NaN` — so the **round-trip** clause fires, not the bitwise one. Verified directly with a
+probe: under `adjoint.wrong_transpose`, `q == q` is false on `compare_ois(default)` and the
+differing member is `input_values`. A kill that says nothing about `adjoint_to_program`.
+
+And `a2p.drop_zero_start` is killed by the **`ir::validate`** clause, not the bitwise one — exactly
+as predicted, because every quantity reaching an output passes through a pull whose first term is
+`+0.0`. Nine of ten killed; the matrix is in the test header with the clause that killed each.
+
+### 2. The night's recurring pattern, mechanised
+
+Three times yesterday an implementer found a gate that could not observe what it gated (D98 §2(c),
+D99 §4). C4 stopped finding these by hand and **made the test measure it**: it computes the forward
+outputs' dependency cone, then injures one reverse-half site at a time — an accumulation step's
+`Add`↔`Sub`, an `Affine` pull coefficient's sign — and checks bitwise whether a state adjoint moved.
+Each fixture's verdict is **pinned in `kFixtures`, so a fixture that goes quietly dead fails the
+gate.**
+
+It reproduces D99 §4's hand finding mechanically and over the *complete* site set, which makes it a
+proof rather than a sample: **`rfr_book`'s reverse scan is 0 of 2 observable**, while the rest of its
+reverse half is 39 of 45. `stage_a` is 49/49 and 8/8; `compare_ois(default)` 44/45 and 2/2.
+
+This is the durable artefact of the whole programme. *"Can a defect here reach an observable"* has
+gone from something three agents each discovered the hard way to a number the gate prints.
+
+### 3. No fixture in the tree contains an aliased Div
+
+Drafted over fixtures alone, the gate let `a2p.div_not_aliased` and `adjoint.div_aliased_targets`
+both survive — because **`simplify` turns `div(x, x)` into `1` while `ir::validate` still accepts
+one**, so the shape exists in the IR and in no recorded program. Two hand-built programs were added
+(`div_xx_mix`, rounding-sensitive because plain `x/x` cannot observe its own mutant per D98 §2(c);
+and `neg` for signed zero) so **I1's gate is not parasitic on another file's choice of fixture.**
+
+### 4. Stage A fits
+
+P: 119,503 values / 67 domains / 148 inputs / 8,191 outputs. Q: **468,790 values / 316 domains** —
+3.92× the values, 4.72× the domains — 451,400 gather entries, 387,881 segment members, **7.0 MB of
+tables, 12.8 MB serialized**. Emission 0.02 s, `validate` 0.00 s, round trip 0.40 s. Recording the
+fixture peaks the process at ~3.8 GB before the adjoint is touched and **building Q moves that by
+nothing measurable** (3,762 → 3,762 MB). All 8,339 outputs bitwise; 148/148 state adjoints non-zero.
+Sizes, not performance claims — the box was dirty.
+
+### 5. Two items left for the owner
+
+**(a) `scripts/mutation_catchers.tsv` is stale.** The new gate is a second catcher for the three
+`a2p.*` mutants, each still recorded as 1. The file's own header forbids hand-maintaining the counts
+and `mutation_test.sh` wants a `--full` run (order of an hour) to regenerate them. Staleness here
+costs time, never correctness.
+
+**(b) The worktree an agent was given was 19 commits behind** the branch it was told to build on,
+and it fast-forwarded before starting. Worth checking when dispatching against a fast-moving branch.
+
+### 6. I1, I2, I3 after the programme's first night
+
+| | at commissioning (D95) | now |
+|---|---|---|
+| **I1** | fails, believed representational | **HOLDS** (D100); never was representational (D96) |
+| **I2** | fails | **holds at the maths level** (D97); calibrated path in flight, compiled path separated out |
+| **I3** | fails, **no gate** | fails, gate built and verified to bite (D97); its blind side stated |

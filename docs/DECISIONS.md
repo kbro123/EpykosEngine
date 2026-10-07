@@ -8113,3 +8113,153 @@ in `tests/solver/m1_implicit_vs_dual_test.cpp` as *"the Jacobian has no exact ze
 exact-zero clause needed a second, two-block fixture, which then turned out to carry the better
 reachability story as well. A reminder that one fixture carrying every clause of a gate is usually
 a sign the clauses have not been thought about separately.
+
+---
+
+## D102 — What I1 opened: a 1.76x ceiling on the reverse pass that the route itself cannot cash. I1 bought the question, not the answer (2026-10-07)
+
+D100 left I1 holding and nobody had asked what it was worth. D68's method and D92's precedent say
+measure the share before fitting anything, so this is that measurement. **Counts, operation counts,
+sizes and bitwise comparisons only — no timing.** The box had run parallel builds all night and D95
+§4 declared every timing from this programme inadmissible in advance. New tool: `tools/revcollapse/`,
+built by default, never run by ctest or CI, so every figure below is reproducible on a quiet box.
+
+The route exists with no new code: `Tape --compile--> P --to_program--> Q --ir::expand--> Tape
+--compile-->`. `ir::expand(const Program&) -> Tape` regenerates a scalar tape from a Program; the
+orchestrator asserted no such path existed, which was simply a bad search.
+
+### 1. The collapse preserves the answer, bitwise
+
+**0 mismatches over 11 programs × 5 `out_bar` seeds, through `Replayer`, `ir::Evaluator` and
+`exec::Interpreter`**, against `Adjoint::run`. Stage A alone is 83,390 `memcmp` comparisons on the
+collapsed form, re-run by the orchestrator. The seed set includes the zero seed and a mixed
+`-0.0`/`1.0` seed — the two that can expose a signed zero, which is the only thing the rule doing
+the work can move.
+
+**A contract gap this exposes, and it is the owner's call.** `ir::expand(Q) → standard_passes` is the
+four value-preserving passes: both sides evaluate the same expression, so it is §5.2a case 1 and
+legal below the pin today, needing no decision (1.03x–1.36x in nodes). But `compile` also runs
+**`simplify`**, which is the algebra phase, licensed **above** the pin only — and §1's pipeline
+diagram puts `adjoint` *after* the pin, so Q is produced below it, where §5.2's column reads *"may
+change roundings: no"*. **On the contract as written, `simplify` is forbidden there.** The competing
+reading — that Q is a fresh recording entering its own pin — would turn §1b's I1 gate from a bitwise
+comparison into a tolerance one, and §5.2a case 1 says that is never done to a case-1 gate.
+
+Measured, the question is **moot for everything in the tree**: the `compile` form is bitwise too, so
+it meets the stricter standard. There is a structural reason — every state-adjoint output of Q is an
+`Affine` whose `konst` is `+0.0`, `simplify` does not rewrite `Affine`, and `affine_collapse` removes
+zero nodes on every fixture, so a sign of zero cannot escape. **That is not a theorem.**
+`add(0,x)->x` is not an IEEE identity when `x` is `-0.0`, and `simplify`'s rule set also contains the
+telescope, which is not a floating-point identity at all. On these programs only `add(0,x)->x` fires;
+on a different program something else could. So the tool **prints** the mismatch count rather than
+asserting it.
+
+### 2. The measurement
+
+Forward collapse, for scale, on the *naive* recording: `compare_ois` 64 trades **1,679,435 → 3,026
+(555x)**, `stage_a` **27,459,283 → 174,388 (157x)**. Naive and telescoped `compare_ois` compile to
+the **same** pinned tape (3,026 at 64 trades), hence the same P, the same Q and bit-identical reverse
+collapse — the naive/telescoped axis moves only the first column, which is itself a confirmation of
+D81.
+
+| | stage_a | m1_book | compare_ois 256 | affine_scan |
+|---|---|---|---|---|
+| Q | 468,790 / 316 dom | 199,909 / 58 | 31,299 / 86 | 5,828 / 37 |
+| reverse tape raw → `compile` | 645,136 → **400,452** (1.61x) | 285,150 → 157,358 (1.81x) | 45,790 → 25,032 (1.83x) | 9,132 → 5,030 (1.82x) |
+| reverse-**only** arithmetic | 627,968 → **347,067 (1.81x)** | 267,579 → 140,787 (1.90x) | 42,791 → 22,289 (1.92x) | 7,919 → 4,214 (1.88x) |
+
+**Nodes overstate it; arithmetic is the honest denominator** — an `Affine` of *k* members is *k* adds
+plus a multiply only for a non-unit coefficient. The reverse is **2.34x the forward raw and 1.29x
+collapsed** on Stage A.
+
+**The forward half of the reverse tape IS the pinned forward tape, exactly.** `fwd 42,646 + shared
+131,742 = 174,388`, equal on every fixture. So none of the collapse is in the forward half, and the
+hypothesis that it contained unread forward nodes is refuted.
+
+### 3. It is two passes, and `simplify` is one rule
+
+| | simplify | cse | dce | fold_sum | affine_collapse |
+|---|---|---|---|---|---|
+| stage_a | 165,567 (**68%**) | 78,795 (32%) | 322 (0.1%) | **0** | **0** |
+| nearmiss | 271 (93%) | 13 (4%) | 7 | **0** | **0** |
+
+Leave-one-out confirms it: disabling `fold_sum` or `affine_collapse` changes the final count by
+**+0** everywhere. And **`simplify`'s sites are 100% `add(0,x)->x`** — 165,567 on Stage A, not the
+telescope, not the τ cancellation, not `mul(1,x)`.
+
+What each part is:
+
+- **The 63–93% is not encoding overhead, and the first instinct that it was is wrong.**
+  `adjoint_e0.cpp:518-543` does `for (l) dst[l] = 0.0;` then `dst[l] += src[l]` per reader — so the
+  zero start is **an explicit per-element store `Adjoint::run` also pays.** Removing it is a real
+  saving against the runtime, not against the emitter.
+- **The 4–36% (`cse`) is genuine duplicate arithmetic present in Q itself, not introduced by
+  `expand`.** Measured at Q level: of 139,535 Stage A segment rows, **94,790 (67.9%) are an identity
+  copy and 39,474 (28.3%) exactly duplicate an earlier row** — and those duplicate counts equal the
+  first-order duplicate-`Affine` counts in the expanded tape exactly, so each `cse` merge
+  corresponds to a fold `Adjoint::run` evaluates twice. **One carve-out:** duplicate `Div`s are not a
+  win over the kernel — `acc_div` hoists `t = yb/b` for both accumulators while the emitter must
+  write the quotient twice (32,189 → 14,776 divides, 54%). That slice is the emitter catching up.
+- **The 0–6% (`dce`) is a small emission inefficiency, reported not fixed**: 684 dead nodes on Stage
+  A (0.1%), and on `affine_scan` exactly the scan's 400 rows — forward intermediates the emitter
+  recomputes after the scan, per its deliberate materialise-not-recompute trade, that nothing reads.
+
+**Where it comes from, in one line: 79.4% of Stage A's reverse-half pull `Affine`s are
+`+0.0 + 1.0*x`** — an identity. At Q level 81.5%–86.6% of segment rows have one unit-coefficient
+member, and **the share rises with book size** (72.3% at 16 trades, 85.1% at 64, 93.4% at 256),
+because each trade's PV is a long single-reader chain. A value with exactly one reader needs no pull
+at all, and `plan.cpp` already has the reader count.
+
+### 4. The verdict: not D92, and not a door either — D85's shape
+
+**The share is not ~0, so this is not D92.** Discounting the two emitter-only items, the ceiling on
+the reverse pass's arithmetic is **1.59x–1.92x, 1.76x on Stage A**; on a full forward-plus-reverse
+evaluation **1.36x–1.54x, 1.43x on Stage A**. Two orders of magnitude more than D92's 0.5%. And the
+denominator matters: the reverse pass is what the risk ladder is made of, the engine's strongest
+number (D90, ~6x in our favour).
+
+Two objections that did not survive measurement:
+
+- **Footprint.** The route looked like it would trade arithmetic for residency, the lever D91 put at
+  ~40% of the head-to-head number. The collapsed reverse Program's working set against
+  `Adjoint::run`'s is **1.38x on Stage A, 1.05x on `compare_ois(256)` at B = 64** — the ladder batch
+  size. Collapsing is what makes it close (Q uncollapsed is 11.09 MB on Stage A against 8.39
+  collapsed and 6.09 for `Adjoint`).
+- **Domain structure** survives where it matters (`stage_a` 316 → 255 domains) but is **destroyed on
+  the scan-heavy fixtures** — `affine_scan` 37 → 622, `instrument_sample` 255 → 2,689 — because
+  `ir::expand` unrolls scans and `ir::infer` does not put them back.
+
+**What kills it as a route is that nothing in the 1.76x needs the route.** Both components are local
+edits to `src/adjoint/`, cashable without `expand`, without `compile`, without re-inference and
+without any decision about the pin:
+
+1. **`pull()`'s zero start — 27% of Stage A's reverse arithmetic, 1.37x alone.** Seed the accumulator
+   with its first contribution instead of `dst[l] = 0.0` then `+=`. Signed-zero-visible, so §5.2
+   forbids it *as written* — but the i1 gate's own header already argues the elision is unobservable
+   at any output passing through an outer pull, and the outermost pull can keep its zero.
+2. **Single-reader pull aliasing — 16%, 1.19x alone.** A reader-count check in `plan.cpp` aliases a
+   one-reader value's adjoint to its edge slot.
+
+So **I1's measured value here is diagnostic, not productive**: it found two real inefficiencies in
+the hand-written reverse pass, and both are cheaper to fix by hand than to route through
+`Tape → Program → Tape`. That is D85's shape — a mechanism built, measured, and what it produced was
+a finding a person acts on directly. The route's one unique property is that it finds the duplication
+*automatically*; but the duplication is visible in `AdjointPlan`'s CSR lists with a 20-line counter,
+which is what the tool's `q_duplication()` is. **I1 bought the question, not the answer.**
+
+And converting *"1.43x of arithmetic"* into *"1.43x of anything"* is exactly the inference D91 warned
+against. **The next step is a paired before/after of those two edits on a reserved box, not a
+pipeline.** Nothing here measures time and nothing here should be read as if it did.
+
+### 5. Corrections to the orchestrator's own measurement
+
+The scratch run that opened this (`compare_ois` 64, *"FORWARD 3,026 → 3,026, 1.0x, already
+collapsed"*) was wrong twice over. `record_compare_ois(s, bool passes = true)` **calls
+`epykos::compile` itself** at `src/fixtures/compare_ois_e0.cpp:304`, so it ran `compile` on an
+already-pinned tape and observed a fixpoint. The attribution given — *"the fixture records an
+already-telescoped tape"* — is also wrong: it records the **naive** product loop, and the forward's
+own collapse is **555x**. Fixed by passing `passes = false`.
+
+Two smaller ones. `PassResult::changed` is a **composed count of rewrites**, not the node delta: 4,874
+against a true delta of 4,794 at 64 trades. And the brief framed the attribution across five passes
+when `fold_sum` and `affine_collapse` contribute exactly zero.

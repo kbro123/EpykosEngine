@@ -7823,3 +7823,99 @@ domain with a segment self-read and `ir::Evaluator` already runs it correctly; o
 an earlier row, and the carry rides the pull's segment at its true CSR position. **The owner-
 reserved alternative — reordering the pull so the carry comes last — remains not needed and not
 taken.**
+
+---
+
+## D99 — The reverse of a scan, bitwise: I1's capability is complete, and a third gate was found unable to observe what it gated (2026-10-07)
+
+Stage C3b, the one D96 §3 flagged as carrying the only real risk in the programme. **It holds, and
+`Adjoint::run`'s accumulation order was never touched** — the owner-reserved §5.2a case-1 question
+was not raised at any point in C2, C3a or C3b.
+
+### 1. What was built
+
+**`exec::Interpreter` learns a recurrent non-scan domain** (`src/exec/interpreter.cpp`,
+`src/exec/plan.hpp`): a new `GroupPlan::recurrent` walking rows strictly in order, one at a time,
+straight to the value-buffer slot, tile forced to 1, no fusion, inlining or catalogue — the planner
+already excluded recurrent domains from all three. Verified first against D96 §3's own
+reconnaissance program, reproducing `2.0 3.0 3.5 3.75 3.875` exactly.
+
+One hazard was widened rather than narrowly patched: the whole-segment guard moved from
+`!g.recurrent` to `!dom.recurrent`, because `build_segment` bucket-sorts rows by segment length and
+**that reordering is wrong for any recurrence, scan or not**. Unreachable for a scan today; made
+safe anyway.
+
+**The emitter.** Forward: a scan's group becomes *one* domain emitted as a genuine `ir::Scan` —
+one-domain-per-step would place the carry-reading step before the domain holding the group's last
+step, a cycle between domains. Reverse: one recurrent domain with rows laid **backwards**
+(`i ↔ rows−1−i`), the row value being the carry's edge slot, so `(carry, r+1)` is literally the
+previous emitted row. **Nothing is reordered** — the pull keeps the carry at its true CSR position,
+which is what makes the carry-first case work without touching `Adjoint::run`.
+
+### 2. The gate
+
+**0 mismatches / 1,929,577 comparisons**, re-run by the orchestrator. C2/C3a's 1,389,222 reproduce
+exactly; 540,355 are new.
+
+| fixture | comparisons | reverse defect reaches an observable? |
+|---|---|---|
+| **`compare_ois`, default tenors** | **128,865** | yes — the production gate |
+| `affine_scan` (final / path) | 21,780 / 223,992 | yes |
+| `instrument_sample` (2 scans) | 157,300 | yes |
+| `rfr_book` | 8,418 | **NO — structural only, see §4** |
+| `nearmiss`, `m1_book`, short-tenor ois, 3 hand-built | 1,389,222 | yes |
+
+Thirteen evaluator configurations, batch widths 1/4/5, `memcmp`. `ir::validate` and the serialize
+round-trip pass on all. Same results under reference flags.
+
+### 3. The mutant, and why it could not be written the obvious way
+
+`a2p.scan_forward_order` kills on every scan fixture and **every single mismatch is in `state_bar`,
+none in `out`** — checked by a half-marker added to the comparison helper rather than asserted in
+prose. First failing element on `affine_scan(final)` is `state_bar[0]`, the chain's initial-value
+adjoint: 1.235671 against 0.469951.
+
+It could **not** be written as "lay the domain out forwards": that makes the self-read a forward
+read, `ir::validate` rejects the program, and there is then nothing to compare — a mutant that
+crashes the gate proves nothing about the gate's sensitivity. It moves only the *published* row
+map, keeping the program valid and the failure numeric.
+
+### 4. Third time tonight: a gate that cannot see what it gates
+
+**`rfr_book` cannot catch a reverse-scan defect at all.** Its scan compounds realised fixings, and
+**0 of its 40 scan rows depend on an input** — measured — so no error in the reverse scan can reach
+a state adjoint. Its 8,418 comparisons are a structural check, and it is now labelled one in the
+test and in its `WORKLOADS.md` row rather than being banked as coverage.
+
+That is the third instance in one night, after D98 §2(c)'s aliased-Div case and the unobservable
+half of `a2p.drop_zero_start`. The pattern is now established well enough to state as a rule:
+**a passing gate is evidence only about the quantities it can observe, and whether it can observe
+them is a separate measurement that nobody was taking.** All three were found by the implementer
+rather than by review, and in each case the brief — written from verified reconnaissance — asserted
+coverage that did not exist.
+
+### 5. The scan fixtures were not blocked by scans
+
+The reason `instrument_sample` and `rfr_book` had been excluded turned out to have nothing to do
+with recurrence: they declare **12 and 3 input rows that nothing reads**, and a reader-less value's
+pull is an empty segment row, which `ir::validate` rejects (`src/ir/program.cpp:259`). C2 had
+recorded that as a "separate C1 item" and moved on — and in doing so it was **silently gating half
+the scan fixtures out of the suite**, which is why D96's C1 stage, priced at ~40 lines, had looked
+deferrable. Lifted with one shared `+0.0` row (`konst(+0.0) + 1.0·0.0` is `+0.0` to the bit),
+emitted only when needed. Without it C3b's coverage would have been two fixtures instead of four.
+
+### 6. Two gates re-stated, §5.2a case 3
+
+Each says what it used to assert and what moved. `RefusesAScanNamingC3b` →
+`RefusesASecondCarriedQuantity` (still refused: a recurrent non-scan domain, and a scan reading
+itself through a non-carry gather — both need two carried quantities per row). And
+`Interp.SameClassChainsSplitByLevelRunBitwise`'s last clause, which asserted the refusal just
+lifted, now asserts that the slow path changes no bits at tile 1, 7 and 256.
+
+### 7. Correction to this programme's own record
+
+D98 §3 and the C3b brief both stated, from measurement, *"two scan domains on `compare_ois`, 8
+carry-bearing rows of each"*. At `trades = 2`, which is what the test uses, it is **one** scan
+domain, 18 rows, 2 chains, **16** carry-bearing rows. The substance the stage turned on — the carry
+at position 0 in every one of them — is exactly right. The count was wrong because it was taken at a
+different trade count than the one quoted.

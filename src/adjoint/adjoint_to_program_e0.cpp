@@ -31,6 +31,7 @@
 #include <utility>
 #include <vector>
 
+#include "epykos/adjoint/adjoint.hpp"
 #include "epykos/mutation/mutation.hpp"
 
 namespace epykos::adjoint {
@@ -854,5 +855,11 @@ ir::Program adjoint_to_program(const ir::Program& p, const AdjointPlan& plan) {
 ir::Program adjoint_to_program(const ir::Program& program) {
   return adjoint_to_program(program, build_plan(program));
 }
+
+// The public face of I1 on `Adjoint` itself (M5/C4). Defined HERE rather than in
+// src/adjoint/adjoint_e0.cpp because the forward/reverse runtime is closed to this stage: it
+// needs nothing of `Adjoint::Impl`, only the two public accessors, and the plan it passes is the
+// one `run` itself uses, so `to_program()` cannot drift from `run`'s own reverse.
+ir::Program Adjoint::to_program() const { return adjoint_to_program(program(), plan()); }
 
 }  // namespace epykos::adjoint

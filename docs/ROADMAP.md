@@ -136,6 +136,46 @@ unowned by any M4 package. CI: `ci_green` = false, citing a pre-existing, unrela
 (`task_919ea449`) confirmed unfixed at both M4-gate runs; this package's own diff touches only `docs/` and
 `bench/results/`. Full account: `docs/RESUME.md` §5 "M4 result", `docs/DECISIONS.md` D47–D59.
 
+## Invariants I1–I3 (`PRINCIPLES.md` §1b; commissioned by the owner 2026-10-06, D95)
+`PRINCIPLES.md` §1b is the specification and is authoritative; this section is the schedule and its state. The
+staging is D95 §3's — dependency, not preference — and the stage names below are its own. Three concurrent builds
+make the box dirty, so **no number produced during this programme is a performance claim** (D95 §4); sizes and
+counts are not timings.
+
+- **A — I3's gate** (a ratchet, needs no capability): the pinned registry of host-computed tape inputs with a
+  justification each, failing when the list grows. **Built** (`tests/invariants/i3_host_inputs_test.cpp`); I3 still
+  does not hold, and its substantive fix — recording ‖JᵀF‖∞ — is downstream of C4 because it needs an IR that can
+  express a derivative.
+- **B — I2.** B1 re-template `Dual` to `template <int N, class S>` so it nests, existing tests bit-identical; B2
+  instantiate the pricing maths at `Dual<1, Dual<1>>`; B3 second derivatives against central differences of the
+  firsts at a **measured, then stated** tolerance; B4 report on `adjoint::Adjoint`'s `double*` interface and change
+  nothing. **B1–B3 done** (D97: I2 holds at the maths level, 2e-8 measured); the `double*` interface is the
+  remaining half and is reported, not fixed.
+- **C — I1, staged so each step verifies alone.**
+  - C0 design: the op set, and whether bitwise is reachable at all. **Done, and it refuted §1b's own stated root
+    cause** (D96): `Op::Affine` over a `Segment` IS a scatter-accumulate read backwards, and `AdjointPlan`'s four
+    reverse-adjacency CSR lists are already the transpose the pull needs — so **C1, "the op", was never built and is
+    not needed**. `Op::Gather`, `Op::SegmentSum` and `Op::Linmap` stay reserved and unused, the `Op` enum is
+    unchanged, and no `Op` dispatch site moved.
+  - C2 `adjoint_to_program` over the elementwise subset and gathers; C3a segments; C3b scans (the forward half
+    re-emitted as an `ir::Scan`, the reverse as one recurrent non-scan domain walking the rows backwards). **Done**,
+    each bitwise-gated as it landed.
+  - C4 the full gate. **Done**: `adjoint::Adjoint::to_program()` is the public face (`program()` still returns the
+    FORWARD program, deliberately unchanged), and `tests/adjoint/i1_gate_e0_test.cpp` is one named test asserting
+    §1b's clause over every fixture `tests/adjoint/` gates the adjoint on, Stage A included — see `DESIGN.md` §11.
+    It additionally measures, per fixture, whether a defect in the emitted reverse can reach a state adjoint, and
+    labels a fixture that cannot a structural check rather than counting it as coverage.
+
+**Gate:** §1b's, verbatim and unamended — `adjoint(P)` is an `ir::Program` that passes `ir::validate`, round-trips
+through `ir::serialize`/`deserialize`, and that `exec::Interpreter` run on it reproduces `adjoint::Adjoint::run`
+**bitwise**. Not a tolerance. The one question that could have stopped the programme — whether the emitted program
+can accumulate in the order the `acc_*` kernels do, since reordering `Adjoint::run` is a §5.2a case-1 question
+**reserved to the owner** — is answered yes, and no agent took that question (D96 §3).
+
+**Not in scope here, and still refused:** a recurrent domain that is not a scan, and a scan reading its own rows
+through anything but its carry. Either needs two carried quantities per row and a domain row produces exactly one
+value. Second derivatives through the adjoint remain blocked on `Adjoint`'s `double*` interface (B4), not on I1.
+
 ## M5 — Stages B and C, streaming (`PROBLEM.md` §4 Stages B, C)
 - EURUSD MtM-resetting xccy basis swaps, FX spot as input, EUR discounting under USD collateral, FX delta.
 - GBP (SONIA) and JPY (TONA) with their calendars and conventions; GBPUSD and USDJPY xccy; the ~5,000-trade book.

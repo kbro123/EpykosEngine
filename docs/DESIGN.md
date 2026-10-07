@@ -340,6 +340,25 @@ The adjoint runs a scan's forward one row per tile in row order and its reverse 
 carry's edge slot (carry, r + 1) is one of row r's readers, so the reverse scan is the ordinary pull. Bits are
 independent of B, tile and lane tile as for every other domain (the scan fixtures' E0 gates).
 
+**The adjoint is also a PROGRAM (`PRINCIPLES.md` §1b invariant I1; M5 stages C2, C3a, C3b, C4).** Everything above
+describes `adjoint::Adjoint` as a compiled artifact — a `switch` over `Op` in `src/adjoint/adjoint_e0.cpp` driven by
+`AdjointPlan`'s CSR tables — and that is still exactly what `Adjoint::run` is. It is no longer the only form the reverse
+has. `adjoint::adjoint_to_program(P)` and `adjoint::Adjoint::to_program()` (`adjoint/adjoint_to_program.hpp`,
+`adjoint/adjoint.hpp`) emit the reverse of a Program **as an `ir::Program`** Q, so differentiation is now a
+Program → Program map and every pass, cost model and search above or below the pin can see the derivative's operations.
+Q's inputs are P's inputs then one per output ordinal of P (the `out_bar` seed); its outputs are P's outputs then one
+per input ordinal of P (the state adjoint); `ir::Evaluator` or `exec::Interpreter` run on Q reproduces
+`Adjoint::run(state, B, out_bar, out, state_bar)` **bitwise**, batch layout included. **No op was added and no `Op`
+dispatch site changed**: the pull is one `Op::Affine` step over one segment whose members are the concatenated CSR
+lists, which is a scatter-accumulate read backwards, and `Op::Gather`, `Op::SegmentSum` and `Op::Linmap` stay reserved
+and unused. §1b's stated root cause — that the reverse of `SlotKind::Gather` is a scatter the IR cannot express — was
+therefore wrong (D96). Scope: elementwise ops, gathers, segments and scans; a scan's forward half re-emits as an
+`ir::Scan` of Q and its reverse as one recurrent non-scan domain walking the rows backwards, so the carry's edge slot
+stays at its true CSR position in the pull. Still refused with `std::logic_error`: a recurrent domain that is not a
+scan, and a scan reading its own rows through anything but its carry — either needs two carried quantities per row and
+a domain row produces exactly one value. `Adjoint::program()` still returns the FORWARD program and its meaning is
+unchanged; `to_program()` is the derivative. I1's gate is §11's.
+
 **As built (M4/R0, D47):** the tiled interpreter's own planning — which domain materialises, folds into a
 reduction or inlines into a consumer's tiles; which consecutive steps run as one fused-pair kernel and which
 further steps chain on as a tail; which output rows a reduction block emits directly — is no longer decided inside
@@ -590,6 +609,22 @@ Correctness gates:
   round-trip identity, the interpreter bitwise the double maths at B = 1 and B = 64 over tiles and lane tiles, the
   adjoint vs forward mode at 1e-12 and vs FD at 1e-6, the batched adjoint lane for lane; the M1 book asserted free
   of scans and unchanged;
+- **invariant I1's gate** (`PRINCIPLES.md` §1b; `tests/adjoint/i1_gate_e0_test.cpp`, M5/C4): one named test asserting
+  that `adjoint(P)` is an `ir::Program` that passes `ir::validate`, round-trips through `ir::serialize` /
+  `deserialize`, and that `exec::Interpreter` run on it reproduces `adjoint::Adjoint::run` **bitwise** — `memcmp`, not
+  a tolerance, so a signed zero is a different answer. Over every fixture `tests/adjoint/` gates the adjoint on: the
+  near-miss shapes raw and after the passes, the M1 book, `compare_ois` in both tenor sets (the short one telescopes
+  its recurrence away, the default keeps a scan), `affine_scan` in both recordings, `instrument_sample`, `rfr_book`
+  and **Stage A, the default ~2,000-trade desk problem**. The file also MEASURES, per fixture, whether a defect in the
+  emitted reverse can reach an observable at all — it computes the forward outputs' dependency cone, injures one
+  reverse-half site at a time (an accumulation step's `Add`↔`Sub`, an `Affine` pull coefficient's sign) and asks
+  whether a state adjoint moved — and labels a fixture that cannot a STRUCTURAL CHECK rather than counting it as
+  coverage. The class of every fixture is pinned, so one that goes quietly dead fails the gate. `rfr_book`'s reverse
+  scan is such a check (0 of 2 sites observable, the whole set): its scan compounds realised fixings, so no scan row
+  depends on an input. **What this gate cannot see, by construction:** both sides consume the same `AdjointPlan`, so a
+  defect in `build_plan` moves both answers identically and the comparison passes — measured, `adjoint.affine_not_
+  transposed` survives it (its catchers are the vs-`Dual` gates). I1's gate is a CLOSURE check: what says the
+  derivative is right is the next two bullets, which compare against an independently computed derivative;
 - **mutation testing** on rewrite rules (a mutated rule must fail a gate): every pass carries its mutants as one-line
   defects behind `epykos::mutant("<pass>.<defect>")` (`include/epykos/mutation/`), compiled in only by the `mutation`
   preset and selected one per process by `EPYKOS_MUTANT`; `scripts/mutation_test.sh` runs the whole gate set once

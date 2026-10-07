@@ -27,6 +27,12 @@
 // sized in the constructor for min(lane_tile, max_batch) lanes.
 //
 // Thread safety: run() is const but uses the object's own buffers; one Adjoint per thread.
+//
+// Two programs, and they are not the same program (PRINCIPLES.md §1b, invariant I1; M5/C4).
+// `program()` returns the FORWARD program this object was built from — an input. `to_program()`
+// returns the REVERSE of it as an `ir::Program` — the derivative, bitwise what `run` computes.
+// Read both declarations below before using either; §1b names `program()`'s meaning as I1's
+// symptom and it is deliberately unchanged.
 #pragma once
 
 #include <cstddef>
@@ -75,7 +81,35 @@ class Adjoint {
 
   const AdjointPlan& plan() const noexcept;
   const Options& options() const noexcept;
+
+  // THE FORWARD PROGRAM this Adjoint was constructed from. It is an INPUT, not a result: it is
+  // the P of `state -> outputs`, and nothing about the derivative is in it. PRINCIPLES.md §1b
+  // names exactly this as invariant I1's symptom -- "`Adjoint` is constructed from the FORWARD
+  // program and `program()` returns that same forward program". The meaning of this method has
+  // not changed and must not: `to_program()` below is the derivative.
   const ir::Program& program() const noexcept;
+
+  // THE REVERSE OF `program()`, AS A PROGRAM -- I1's `adjoint(P)`, and the public face of the
+  // capability (M5/C4). Not the same object as `program()` and not a view of it: a new
+  // `ir::Program` Q with
+  //
+  //   inputs   P's inputs in P's input order, then one per OUTPUT ordinal of P: the out_bar seed
+  //   outputs  P's outputs in P's output order, then one per INPUT ordinal of P: the state adjoint
+  //
+  // so Q takes (state, out_bar) flat and returns (out, state_bar) flat, and running Q through
+  // `ir::Evaluator` or `exec::Interpreter` reproduces `run(state, 1, out_bar, out, state_bar)`
+  // BITWISE -- §1b's gate, asserted by tests/adjoint/i1_gate_e0_test.cpp over every fixture the
+  // adjoint is gated on, Stage A included. Batch: Q's own layout is Interpreter's, batch
+  // innermost, so a B-lane Interpreter run of Q is the B-lane `run` above lane for lane.
+  //
+  // Derived from the plan THIS Adjoint already built, so it cannot disagree with what `run`
+  // does; `adjoint_to_program(P)` in adjoint/adjoint_to_program.hpp is the same function for a
+  // caller that has no Adjoint. O(program) work and a fresh allocation on every call -- hold the
+  // result, do not call it in a loop. Throws what `adjoint_to_program` throws (std::logic_error
+  // on a recurrence whose reverse would carry two values per row).
+  ir::Program to_program() const;
+
+
   int n_inputs() const noexcept;
   int n_outputs() const noexcept;
   int max_batch() const noexcept;

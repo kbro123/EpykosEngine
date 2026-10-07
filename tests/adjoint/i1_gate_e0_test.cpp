@@ -510,11 +510,12 @@ Program one_input_program(const std::string& name, std::vector<ir::Step> steps, 
 // `Add(Lit +0.0, ·)` washes the sign), which is why this shape and not that one.
 Program aliased_div_rounding_program() {
   const ir::Slot g0{ir::SlotKind::Gather, 0};
+  const ir::Slot lit0{ir::SlotKind::Literal, 0};
+  const ir::Slot t0{ir::SlotKind::Step, 0}, t1{ir::SlotKind::Step, 1};
   const double c = 1.0 + 0x1p-52;
   return one_input_program("div_xx_mix",
-                           {ir::Step{Op::Div, g0, g0, {}, {}},
-                            ir::Step{Op::Mul, g0, ir::Slot{ir::SlotKind::Literal, 0}, {}, {}},
-                            ir::Step{Op::Add, ir::Slot{ir::SlotKind::Step, 0}, ir::Slot{ir::SlotKind::Step, 1}, {}, {}}},
+                           {ir::Step{Op::Div, g0, g0, {}, {}}, ir::Step{Op::Mul, g0, lit0, {}, {}},
+                            ir::Step{Op::Add, t0, t1, {}, {}}},
                            {c}, 0x1p53);
 }
 
@@ -739,13 +740,14 @@ TEST(InvariantI1, AdjointOfPIsAProgramAndIsBitwiseAdjointRun) {
   std::printf(
       "\n[ I1 gate ] PRINCIPLES.md §1b: adjoint(P) is an ir::Program; validate, serialize/deserialize round trip,\n"
       "[ I1 gate ] and exec::Interpreter on it reproduces adjoint::Adjoint::run BITWISE.\n\n");
-  std::printf("%-22s %10s %7s %11s %9s %11s  %-22s  %-22s\n", "fixture", "Q values", "Q doms", "comparisons",
+  std::printf("%-22s %10s %12s %11s %9s %11s  %-22s  %-22s\n", "fixture", "Q values", "Q doms (rev)", "comparisons",
               "mismatch", "nonzero sbar", "reverse half", "reverse scan");
-  std::printf("%-22s %10s %7s %11s %9s %11s  %-22s  %-22s\n", "----------------------", "----------", "-------",
+  std::printf("%-22s %10s %12s %11s %9s %11s  %-22s  %-22s\n", "----------------------", "----------", "------------",
               "-----------", "---------", "-----------", "----------------------", "----------------------");
   for (const Row& r : rows) {
-    char rev[80], scn[80], nz[32];
+    char rev[80], scn[80], nz[32], dom[32];
     std::snprintf(nz, sizeof nz, "%lld/%lld", r.ob.nonzero_state_bar, r.ob.state_bar_total);
+    std::snprintf(dom, sizeof dom, "%zu (%lld)", r.q_domains, r.ob.reverse_domains);
     std::snprintf(rev, sizeof rev, "%lld/%lld %s %s", r.ob.observable, r.ob.sites,
                   r.ob.coverage() ? "LIVE" : "STRUCTURAL", r.ob.exhaustive() ? "(all)" : "(sampled)");
     if (!r.has_scan) {
@@ -754,7 +756,7 @@ TEST(InvariantI1, AdjointOfPIsAProgramAndIsBitwiseAdjointRun) {
       std::snprintf(scn, sizeof scn, "%lld/%lld %s %s", r.ob.scan_observable, r.ob.scan_sites,
                     r.ob.scan_observable > 0 ? "LIVE" : "STRUCTURAL", r.ob.scan_exhaustive() ? "(all)" : "(sampled)");
     }
-    std::printf("%-22s %10zu %7zu %11lld %9lld %11s  %-22s  %-22s\n", r.name.c_str(), r.q_values, r.q_domains,
+    std::printf("%-22s %10zu %12s %11lld %9lld %11s  %-22s  %-22s\n", r.name.c_str(), r.q_values, dom,
                 r.counts.comparisons, r.counts.mismatches, nz, rev, scn);
   }
   std::printf(
@@ -763,7 +765,8 @@ TEST(InvariantI1, AdjointOfPIsAProgramAndIsBitwiseAdjointRun) {
       "[ I1 gate ] point under the all-ones seed; \"(all)\" = every site the reverse half offers was injured,\n"
       "[ I1 gate ] \"(sampled)\" = a stride-sample of them. STRUCTURAL = none did, so on that fixture this gate\n"
       "[ I1 gate ] checks validity, the round trip and numbers no defect can move -- real, and not coverage.\n"
-      "[ I1 gate ] \"nonzero sbar\" = state adjoints that are not bitwise +0.0 at that same point.\n");
+      "[ I1 gate ] \"nonzero sbar\" = state adjoints that are not bitwise +0.0 at that same point; \"Q doms (rev)\"\n"
+      "[ I1 gate ] = Q's domains and how many of them only the state adjoints read.\n");
   std::printf("[ I1 gate ] %lld comparisons, %lld mismatches, over %zu fixtures.\n\n", total_comparisons,
               total_mismatches, rows.size());
 

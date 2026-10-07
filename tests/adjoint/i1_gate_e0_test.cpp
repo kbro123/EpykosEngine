@@ -68,6 +68,59 @@
 // adjoint is touched at all, and building Q moves that figure by nothing measurable. The brief's
 // worry — that Q might not fit — is not borne out: Q costs about 20 MB on a 3.8 GB fixture.
 //
+//
+// What this gate is STRUCTURALLY BLIND to, and it is not a small thing
+// --------------------------------------------------------------------
+// §1b's gate compares `adjoint_to_program(P)` against `adjoint::Adjoint::run`. Both sides consume
+// the SAME `AdjointPlan`: the emitter builds the pull out of `plan.cpp`'s four reverse-adjacency
+// CSR lists and `Adjoint::run` walks the same lists at runtime. **A defect in `build_plan` is
+// therefore invisible to this gate by construction** — it moves both answers identically. That is a
+// property of the clause §1b states, not of this implementation, and it is why the comparison is a
+// closure check and never a correctness check: what says the derivative is RIGHT is the
+// adjoint-vs-`Dual` and adjoint-vs-finite-difference gates, which compare against an independently
+// computed derivative (`DESIGN.md` §11).
+//
+// Measured, by running the registered mutants of this subsystem against this file (mutation preset,
+// `EPYKOS_MUTANT=<name>`, authoring time). "clause" is which of §1b's three the kill came from:
+//
+//   mutant                        | lives in           | verdict  | clause          | fixture
+//   ------------------------------+--------------------+----------+-----------------+--------------------
+//   a2p.scan_forward_order        | the emitter        | KILLED   | 3, bitwise      | both affine_scans,
+//                                 |                    |          |                 | compare_ois(default),
+//                                 |                    |          |                 | instrument_sample, stage_a
+//   a2p.drop_zero_start           | the emitter        | KILLED   | 1, ir::validate | nearmiss(raw)
+//   a2p.div_not_aliased           | the emitter        | KILLED   | 3, bitwise      | div_xx_mix(aliased)
+//   adjoint.scan_forward_order    | Adjoint::run       | KILLED   | 3, bitwise      | the same five
+//   adjoint.select_wrong_arm      | Adjoint::run       | KILLED   | 3, bitwise      | nearmiss, both
+//   adjoint.recip_rule_sign       | Adjoint::run       | KILLED   | 3, bitwise      | nearmiss, both
+//   adjoint.div_aliased_targets   | Adjoint::run       | KILLED   | 3, bitwise      | div_xx_mix(aliased)
+//   adjoint.drop_broadcast        | build_plan, SHARED | killed*  | 3 + round trip  | compare_ois(short), stage_a
+//   adjoint.wrong_transpose       | build_plan, SHARED | killed*  | round trip only | compare_ois(default), stage_a
+//   adjoint.affine_not_transposed | build_plan, SHARED | SURVIVES | --              | --
+//
+// The three bottom rows are the finding. `adjoint.affine_not_transposed` reads an Affine reader's
+// coefficient from the untransposed table: both sides read the same wrong coefficient, both answers
+// move together, and this gate passes. It survives, and that is correct behaviour for a closure
+// check — its real catchers are the vs-`Dual` gates (`scripts/mutation_catchers.tsv` records 14 of
+// them). The two marked `killed*` are killed for a reason that is NOT the emitter: they corrupt the
+// `AdjointPlan` that those fixtures' own RECORD-TIME SOLVES use, the solve diverges, and the
+// recording's `input_values` come back NaN — so `Program::operator==` is false against itself
+// (NaN != NaN) and the round-trip clause fires. Measured directly: under
+// `adjoint.wrong_transpose`, `q == q` is false on compare_ois(default) and the differing member is
+// `input_values`. A kill, but not evidence about `adjoint_to_program`.
+//
+// Two mutants were SURVIVORS of an earlier draft of this file that had no hand-built programs in
+// its table — `a2p.div_not_aliased` and `adjoint.div_aliased_targets`, because no fixture in the
+// tree contains an aliased `Div` at all. That is why `div_xx_mix` is in the table. With it, 9 of
+// the 10 mutants above are killed and the one survivor is the one no closure check can see.
+//
+// Also worth stating, because it is the trap the brief warned about and the matrix measures it:
+// `a2p.drop_zero_start` — elide the `+0.0` an accumulation chain starts at — is caught by
+// `ir::validate`, clause 1, and NOT by the bitwise clause. Every quantity reaching an output passes
+// through a pull whose first term is `+0.0`, so the elision changes no number that any of these
+// fixtures exposes. `neg(signed zero)` is in the table for the one place it would: a state adjoint
+// of `-x` under the zero seed is `+0.0` and not `-0.0`, which only a `memcmp` can tell apart.
+//
 // The file name carries two requirements, neither optional (the same two
 // adjoint_to_program_e0_test.cpp's header records):
 //
@@ -402,6 +455,75 @@ std::vector<std::vector<double>> ball_states(const std::vector<double>& x0, int 
   return states;
 }
 
+// ---- two programs no fixture contains, built as data -------------------------------------------
+//
+// `simplify` turns div(x, x) into 1, so no RECORDING can produce an aliased `Div` any more, while
+// `ir::validate` accepts one — the engine has to be right for what its own contract allows. Measured
+// (see the mutant matrix in this file's header): without these two entries the gate cannot catch
+// `a2p.div_not_aliased` or `adjoint.div_aliased_targets` at all, because every fixture in the table
+// above is free of the shape they mutate. tests/adjoint/adjoint_to_program_e0_test.cpp and
+// tests/adjoint/div_aliased_verify_test.cpp carry the same two programs for the same reason; they
+// are here so that I1's own gate is not parasitic on another file's choice of fixture.
+
+// A one-row Input domain, then one elementwise domain of `steps` reading it through gather 0.
+Program one_input_program(const std::string& name, std::vector<ir::Step> steps, std::vector<double> literals,
+                          double input_value) {
+  Program p;
+  {
+    ir::Domain d;
+    d.name = "in";
+    d.rows = 1;
+    d.value_base = 0;
+    p.domains.push_back(d);
+    ir::Group g;
+    g.domain = 0;
+    g.steps.push_back(ir::Step{Op::Input, ir::Slot{ir::SlotKind::Input, -1}, {}, {}, {}});
+    p.groups.push_back(g);
+  }
+  {
+    ir::Domain d;
+    d.name = name;
+    d.rows = 1;
+    d.value_base = 1;
+    d.reads = {0};
+    p.domains.push_back(d);
+    ir::Group g;
+    g.domain = 1;
+    g.steps = std::move(steps);
+    p.groups.push_back(g);
+  }
+  ir::Gather gather;
+  gather.domain = 1;
+  gather.index = {0};
+  p.gathers.push_back(gather);
+  p.literals = std::move(literals);
+  p.inputs = {0};
+  p.input_values = {input_value};
+  p.outputs = {1};
+  return p;
+}
+
+// t0 = G/G (aliased), t1 = G*C, t2 = t0 + t1. With G = 2^53, C = 1 + 2^-52 the single fused
+// (ȳ/b)·(1 − y) contribution `acc_div_aliased` makes and the two separate accumulations differ by a
+// ROUNDING and not only by the sign of a zero: 1 + 2^-52 against 1 + 2^-51. The obvious `x/x`
+// program on its own cannot see that difference (both forms reduce to ±0.0 and the chain's leading
+// `Add(Lit +0.0, ·)` washes the sign), which is why this shape and not that one.
+Program aliased_div_rounding_program() {
+  const ir::Slot g0{ir::SlotKind::Gather, 0};
+  const double c = 1.0 + 0x1p-52;
+  return one_input_program("div_xx_mix",
+                           {ir::Step{Op::Div, g0, g0, {}, {}},
+                            ir::Step{Op::Mul, g0, ir::Slot{ir::SlotKind::Literal, 0}, {}, {}},
+                            ir::Step{Op::Add, ir::Slot{ir::SlotKind::Step, 0}, ir::Slot{ir::SlotKind::Step, 1}, {}, {}}},
+                           {c}, 0x1p53);
+}
+
+// -x. Under the ZERO seed the state adjoint is `+0.0 - +0.0` pulled from `+0.0`, i.e. +0.0 -- and
+// `-(+0.0)` is -0.0, so eliding either leading zero shows up in the sign bit and nowhere else.
+Program negate_program() {
+  return one_input_program("neg", {ir::Step{Op::Neg, ir::Slot{ir::SlotKind::Gather, 0}, {}, {}, {}}}, {}, 1.5);
+}
+
 // ---- the fixture table -------------------------------------------------------------------------
 
 // `coverage`: the probe must find at least one reverse-half injury that moves a state adjoint.
@@ -474,6 +596,12 @@ const std::vector<Entry>& fixtures_under_gate() {
       {"stage_a(default)", Class::coverage, Class::coverage,
        [] { return ir::infer(fixtures::record_stage_a(fixtures::make_stage_a()).tape); },
        [](const Program& p) { return ball_states(p.input_values, 2, 1e-6); }, 2, {1, 4}},
+      // The two hand-built programs above: the aliased Div no recording can produce, and the
+      // signed zero. Their states are the record point alone -- the shapes are chosen, not sampled.
+      {"div_xx_mix(aliased)", Class::coverage, Class::coverage, [] { return aliased_div_rounding_program(); },
+       [](const Program& p) { return std::vector<std::vector<double>>{p.input_values}; }, 0, {1, 4, 5}},
+      {"neg(signed zero)", Class::coverage, Class::coverage, [] { return negate_program(); },
+       [](const Program& p) { return std::vector<std::vector<double>>{p.input_values}; }, 0, {1, 4, 5}},
   };
   return kFixtures;
 }

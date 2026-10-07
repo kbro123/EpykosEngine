@@ -190,8 +190,8 @@ not `<S, N>`, because all 150 existing call sites pass a single argument (`Dual<
 The `<S, N>` order would cost 150 mechanical edits and buy no capability. The invariant is
 unaffected: what is gated is that the scalar NESTS, not how the nesting is spelled.
 
-*Status: **HOLDS at the maths level as of 2026-10-06 (D97); the compiled path is a separate
-capability and does not.*** This paragraph previously gave three causes in one breath — `Dual` not
+*Status: **HOLDS for the recorded and the calibrated maths as of 2026-10-07 (D97, D101); the
+COMPILED path is a separate capability and does not.*** This paragraph previously gave three causes in one breath — `Dual` not
 nesting, `Adjoint`'s `double*` interface, and I1 — and that conflation is corrected here, because
 two of the three were never what I2's gate measures.
 
@@ -203,12 +203,29 @@ pricers — and the pricing maths needed **no edit at all**; four `double`-to-`S
 copy-initialisations were served by the scalar instead. Third order (`Dual<1, Dual<1, Dual<1>>>`)
 needs no further code, which is the honest test that depth 2 is not special-cased.
 
-**NOT met, and this is the gap that matters to a desk.** `include/epykos/solver/tangent.hpp` pins
-`implicit_dual<N>`, `jacobian_dual` and its local LU to `Dual<N, double>` and `std::vector<double>`,
-so the **calibrated** path has no scalar axis: there is still **no gamma of a book with respect to
-par quotes**. The fix is not pure re-templating — carrying `F_z`, the LU and the solve on the inner
-scalar makes the second-order IFT term fall out mechanically, and needs partial pivoting on a
-`Dual`, for which `select`/`DualBool` already has the vocabulary.
+**Also met, 2026-10-07 (D101): there IS now a gamma of a book with respect to par quotes.**
+`tangent.hpp`'s `F_z`, LU factorisation and both triangular solves carry the scalar `S`, and
+`implicit_dual<N, S>` remains **only the first-order rule** — the depth recursion lives in the value
+channel, so the second-order IFT term appears nowhere in the file. Measured against central
+differences of the exact first-order sensitivities at the swept floor h = 2e-6: **6.020e-9**
+(tolerance 5e-8), cross-checked by a 5-point O(h⁴) stencil reaching **4.628e-10** at fifteen times
+the step, which is only possible if the nested pass is the accurate side. Hessian symmetry
+**1.569e-15**. First order is **bitwise** unchanged, verified both in-tree and by an out-of-band
+byte-comparison against the pre-nesting header. Third order through the calibration needs no
+further code.
+
+**Correction to this section's own text (D101).** It said the fix *"needs partial pivoting on a
+`Dual`, for which `select`/`DualBool` already has the vocabulary."* **Neither is correct.**
+`structural_if` would **throw** `DualError`, because it asserts the predicate provably does not
+depend on the inputs and here every entry of `F_z` carries a nonzero tangent. `select` is the
+vocabulary for a *value*, but a permutation is one decision for the whole elimination rather than n
+decisions about n values, and `select` cannot resolve the predicate at all. (`DualBool`'s
+`unchecked_value()` is documented *debugging and tests only*, so routing a pivot through it would
+put a debug accessor on an engine path.) The pivot reads the **value channel** explicitly, and the
+reason is not economy: `x = A⁻¹b` does not depend on the pivot order, so neither does its
+derivative — but the **rounding** does. Deciding on the value channel pins the elimination to the
+one the plain-`double` factorisation would take, which is exactly what keeps first order bitwise. A
+pivot allowed to see a tangent would be a different elimination of the same matrix.
 
 **A different capability, tracked separately: second order on the COMPILED path.** `Adjoint` is not
 a `Scalar`-templated component, so I2's gate never reached it. Blocking it, in order: `ir::Program`

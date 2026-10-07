@@ -8015,3 +8015,101 @@ and it fast-forwarded before starting. Worth checking when dispatching against a
 | **I1** | fails, believed representational | **HOLDS** (D100); never was representational (D96) |
 | **I2** | fails | **holds at the maths level** (D97); calibrated path in flight, compiled path separated out |
 | **I3** | fails, **no gate** | fails, gate built and verified to bite (D97); its blind side stated |
+
+---
+
+## D101 — Gamma of a book with respect to par quotes, and the pivot channel §1b got wrong (2026-10-07)
+
+D97 §2 found the gap §1b never named: `tangent.hpp` pinned the calibrated path to `Dual<N, double>`,
+so I2's gate was satisfiable while the second-order number a desk actually wants stayed absent.
+**It is now present.**
+
+`F_z`, the LU factorisation and both triangular solves carry the scalar `S`. **`implicit_dual<N, S>`
+is still only the first-order rule** — the depth recursion lives in the *value channel*
+(`double` → `solve_newton`, `Dual<M,T>` → `implicit_dual<M,T>`), one Newton iteration however deep,
+and **the second-order IFT term appears nowhere in the file.** That is the test of whether this was
+done mechanically or by hand: the term `−F_z⁻¹(F_zz z'z' + 2F_zp z' + F_pp)` is never written down.
+
+### 1. Measured
+
+Step swept over six decades, 2-point central differences of the **exact first-order sensitivities**.
+Clean 100× per decade, floor at h = 2e-6:
+
+| h | 1e-3 | 1e-4 | 1e-5 | 3e-6 | **2e-6** | 1e-6 | 3e-7 |
+|---|---|---|---|---|---|---|---|
+| book | 1.139e-3 | 1.137e-5 | 1.137e-7 | 1.023e-8 | **4.546e-9** | 1.243e-8 | 2.490e-8 |
+| knots | 1.507e-3 | 1.505e-5 | 1.505e-7 | 1.354e-8 | **6.020e-9** | 4.409e-9 | 2.379e-8 |
+
+*"The floor is the reference's, not the dual's"* is the kind of claim this ledger has been burned by
+asserting, so it was tested two ways. A **5-point O(h⁴) stencil at h = 3e-5 — fifteen times the step
+— reaches 4.628e-10**, which is only possible if the nested pass is the accurate side. And driving
+every Newton to stagnation (tol = 0, 8 steps, ‖F‖∞ 6.9e-18 against 4 steps and 7.6e-17) **moves no
+figure at all**, so the floor is not the solver's either.
+
+Tolerances concluded at ~10× measured per §5.2a case 2: cd3 5e-8 / 2e-7, cd5 5e-9, symmetry 2e-14.
+Symmetry residual **1.569e-15** over 1,001 book outputs. **First order bitwise unchanged**, two ways:
+the in-tree E0 gate holds the nested pass's value channel to the plain `double` pass and both
+first-derivative channels to the plain `Dual<N>` pass, and an out-of-band byte-comparison of the
+first-order IFT answer compiled against the pre-nesting header and the final one is identical under
+both flag sets. Third order through the calibration needs no further code: permutation symmetry
+4.533e-17 over all six orderings.
+
+### 2. The pivot channel, and the error §1b contained
+
+§1b said the fix *"needs partial pivoting on a `Dual`, for which `select`/`DualBool` already has the
+vocabulary."* **Neither is correct, and the sentence was repeated verbatim into the implementer's
+brief** — so the contract propagated its own error into the work it commissioned.
+
+- **`structural_if` would throw.** It asserts the predicate provably does not depend on the inputs;
+  here every entry of `F_z` carries a nonzero tangent, so it raises `DualError` on the first nested
+  solve.
+- **`select` is the vocabulary for a value.** Element by element it would express the interchange
+  and give bit-identical results, but a permutation is **one** decision for the whole elimination,
+  not n decisions about n values — and `select` cannot resolve the predicate at all.
+- `DualBool::unchecked_value()` is documented *"debugging and tests only"*, so routing a pivot
+  through it would have put a debug-only accessor on an engine path.
+
+The pivot reads the **value channel** explicitly. The reason is not economy, and it is the part
+worth keeping: **`x = A⁻¹b` does not depend on the pivot order, so neither does its derivative — but
+the rounding does.** Deciding on the value channel pins the elimination to the one the plain-`double`
+factorisation would take, which is precisely what keeps first order bitwise. A pivot allowed to see
+a tangent would be a different elimination of the same matrix. The E0 gate checks the pivot
+permutation and the LU/solve value channels at depths 0, 1 and 2, and that a singular matrix still
+throws at every depth.
+
+### 3. Reachability, and a defect no first-order gate could catch
+
+The one plausible defect — `F_z` factorised on its value channel, so it does not carry `dF_z/dw` —
+was **injected and measured** rather than reasoned about:
+
+    pivot sequence unchanged;  dz unchanged by 0.000e+00;  book delta unchanged by 0.000e+00
+    d2z changed by 100.0%;     book gamma changed by 218.1%
+
+**Exactly zero change at first order, total change at second.** No first-order gate in this
+repository could have caught it, which is the clearest justification yet for why second order needed
+its own gate rather than an extension of an existing one. This is D100 §2's injure-and-measure
+discipline applied in a second subsystem, now by default rather than after being caught out.
+
+Per-fixture reachability is stated in the output: the M1 calibration is live (`d²z/dq²` = 6.356e+1
+against `dz/dq` of order 1); the two-curve chain is live and adds the cross-block chain rule (the
+proj state's gamma w.r.t. the disc quotes is 8.682, **nonzero only because the second block's
+parameters carry the first block's second derivative**); and the basis quotes against the disc-only
+trades are **exactly zero by construction**, printed as `STRUCTURAL CHECK ONLY — not counted as
+coverage`, with the outputs' Hessians asserted nonzero so the check cannot pass on a fixture that
+computes nothing.
+
+### 4. Two things that could not be done, reported rather than worked around
+
+**No mutant is registrable.** `registry_test.cpp` requires exactly one use site **under `src/`** and
+`tangent.hpp` is header-only under `include/`. Moving the templated LU into `src/` to satisfy the
+harness would contradict D14 and the `Scalar`-templated design. So no mutant was registered and no
+`WORKLOADS.md` row added; the honest substitute is §3's injected defect, which lives **inside the
+gate set** rather than in the harness. This is the second instance tonight of the framework
+limitation D97 §5(b) raised, and it now has a concrete workaround worth generalising: **where a
+mutant cannot be registered, inject the defect inside the gate and measure it.**
+
+**M1 has no exact zero.** Through that calibration every quote reaches every knot — already recorded
+in `tests/solver/m1_implicit_vs_dual_test.cpp` as *"the Jacobian has no exact zeros"* — so the
+exact-zero clause needed a second, two-block fixture, which then turned out to carry the better
+reachability story as well. A reminder that one fixture carrying every clause of a gate is usually
+a sign the clauses have not been thought about separately.

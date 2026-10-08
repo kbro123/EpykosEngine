@@ -8391,3 +8391,123 @@ ladder number is plausibly refill**, against D91's ~40% for the calibration.
   **wrong for the number this project quotes**; §1's rule about always stating the row count is why.
 - The IFT contraction, the solve at realistic R, and marshalling are **not** cost centres: 0.3–0.8%,
   1–5%, 0.4–0.6%.
+
+---
+
+## D104 — The lane-width holes closed: B=2 −17.3%, R=5 −20.3%, ordinary widths unmoved — and D103's exposure was narrower than stated (2026-10-08)
+
+D103 §6 reported the lane-width specialisation holes and did not build the fix. This is the fix, and
+it corrects two things about how the defect was described.
+
+`src/exec/plan.hpp` instantiates kernels for widths {1,4,8,16,32,64} and `lane_variant(L)` returns
+the **generic** variant 0 for anything else. Both chunk loops strode by the lane tile and gave the
+last chunk `B mod Lt`, so a remainder of 2,3,5,6,7 took the generic path. **The fix is a cursor that
+tiles `[0, B)` greedily into specialised widths** — a chunk need not start on a multiple of `Lt`,
+because every buffer is addressed by the chunk's own `b0`/`L`. New `include/epykos/exec/lanes.hpp`
+and `src/exec/lanes.cpp`, shared by both runtimes so they cannot drift.
+
+### 1. Bitwise, and the hazard the brief flagged does not apply as stated
+
+New gate `tests/exec/lane_chunking_e0_test.cpp`: **345 (B, lane_tile) configurations** — 230
+interpreter, 115 adjoint — bit-for-bit against the old chunking, **0 mismatches**, and it asserts
+**mechanically that every chunk is a specialised width** (re-run by the orchestrator: *"4461 split
+chunks over 23 batch widths × 10 lane tiles, generic 0"*), so a future change to `lane_variants`
+fails the gate rather than silently regressing. `ctest --preset release` **142/142** on this box,
+117/117 on the preset default; reference 117/117; `i1_gate_e0_test` passes unedited.
+
+The orchestrator's stated hazard — that `acc_rows_in_flight_for(L)` would reorder a reduction when a
+40-lane chunk became 32+8 — **is wrong twice**:
+
+1. `src/exec/interpreter.cpp:465` reads it with the **plan-time `Lt`**, not a chunk's `L`. Segment
+   blocking is fixed in the constructor and does not move when a group is split at all.
+2. The kernels' compile-time `RJ` does vary per variant, but `acc_rows1`/`acc_rowsL` give each of
+   their `RJ` rows **its own accumulator** and loop member positions on the inside: row *i*'s fold is
+   in recorded position order at every `RJ`, and a position run cut into `kc` chunks carries the
+   partial sum through `accbuf` exactly. **It tiles rows, never reorders a row's members.** The
+   adjoint has no L-dependent blocking at all.
+
+**Padding to the next width is not available, structurally** — kernels read `state[ordinal·B + b0 + l]`
+and write `out[...]`, so widening past `B − b0` reads and writes outside the caller's buffers. That
+closes by construction a question the brief had left for measurement.
+
+### 2. The exposure is narrower than D103 and the brief described
+
+**`lane_tile` defaults to 8, not 64**, in both `exec::Options` and `adjoint::Options`, and nothing in
+`src/`, `tests/` or the ladder harness overrides it. So at shipped defaults `B = 1000` is 125 chunks
+of 8 with remainder **zero** — there is **no generic chunk**, and the brief's worked example
+(*"15×64 plus a final chunk of 40, generic"*) does not occur. `40 → 8×5`, `65 → 8×8+1`,
+`100 → 8×12+4` and `1000 → 8×125` were all specialised already.
+
+The real exposure is just two cases: **`max_batch ∈ {2,3,5,6,7}`**, where every chunk is generic
+(D103's B=2), and a **trailing group of 2,3,5,6,7 lanes**, one chunk out of B.
+
+The orchestrator's prediction — *"small for large B, large for B=2"* — held in direction but was
+**right by accident**: its arithmetic claimed 40 of 1000 lanes were on the slow path when the true
+figure is 0 of 1000, and it did not anticipate that R=3 and R=7 would not improve at all.
+
+### 3. Measured — paired, alternating binaries, load 2.1–3.3 (threshold 8.0)
+
+Fingerprint `d448afd70180`, release, `-O3 -march=x86-64-v3 -fno-math-errno`. 1,000 trades / 256 rows,
+µs per row:
+
+| max_batch | before | after | | awkward R (batch 64) | before | after |
+|---|---|---|---|---|---|---|
+| 1 | 339.1 | 316.6 † | | 2 → 1+1 | 368.7 | **298.8 (−18.9%)** |
+| **2** | **363.8** | **300.8 (−17.3%)** | | 3 → 1+1+1 | 290.2 | 292.2 (**no gain**) |
+| 4 | 157.3 | 159.2 | | 5 → 4+1 | 236.8 | **188.8 (−20.3%)** |
+| 8 | 146.0 | 144.7 | | 6 → 4+1+1 | 218.4 | **204.3 (−6.5%)** |
+| 16–64 | 142.0–143.4 | 142.7–143.1 | | 7 → 4+1+1+1 | 211.2 | 216.3 (**no gain**) |
+
+**Ordinary widths do not regress**: R = 4, 8, 12, 16, 63, 64, 65, 100 move by at most **1.4%**. The
+256-trade book confirms the headline generalises — B=2 **106.2 → 84.6 (−20.3%)**, B=4…64 within 1.6%.
+
+† **B=1's 6.6% is not the decomposition** and is not claimed as this change's win: at B=1, Lt=1,
+split and generic produce the identical single chunk of one. It reproduces across replicates and is
+an **incidental codegen effect** of restructuring the hot loop. Labelled, not banked.
+
+**Splitting does not uniformly win.** The gain tracks how few pieces a width needs — each piece is
+another full pass over the program — and `1+1+1` and `4+1+1+1` sit at the crossover. **No
+piece-count cap was added**: it would be a constant fitted to one fixture to chase 2.4%, which is
+inside R=7's own 3.5% before-spread, and R=7 only matters when B is exactly 7 (as a trailing group
+it measures flat — R=63 is +0.6%).
+
+### 4. D103's B=16 ladder optimum does not reproduce, and there is no single best default
+
+At 1,000 trades B=16 is nominally lowest both before (142.0) and after (142.7), but the margin over
+B=64 is **1.0% before / 0.3% after**, inside the ~1.5% within-condition spread. More decisively, **at
+256 trades the optimum is B=64 (34.3) not B=16 (35.5)** — it moves with book size.
+
+This does not contradict D103's measurement: absolute cost here is ~23% lower because `b294efc` made
+the diagnostic optional, so it is a different commit. But D103's 3.9% is **absent on this base**, and
+the case for changing the `max_batch` default is now **weaker, not stronger**. Nothing changed.
+
+### 5. Three things the work turned up that nobody was looking for
+
+**(a) A latent hazard in the tests, now fixed.** Adding a field to `exec::Options` silently
+re-assigned every member after it in `tests/exec/interp_e0_test.cpp`, which used **positional**
+aggregate initialisation. Converted to designated initialisers — and that is how the problem
+surfaced, which means any future field addition would have done the same thing quietly.
+
+**(b) Without an option, the generic kernels would have become dead code.** `split_lane_chunks`
+(default true) is on both `Options`, required by the gate — comparing against the old chunking needs
+the old chunking runnable — but also because **`1` is a variant, so every width now decomposes**, and
+variant 0's existing coverage came entirely from odd B. Two gates whose names claimed they exercised
+the runtime-L kernels are restated per §5.2a case 3 and now run both chunkings.
+
+**(c) The mutation registry's one-use-site rule shaped the design.**
+`tests/mutation/registry_test.cpp` requires exactly one `mutant()` site under `src/`, so covering
+both runtimes forced the shared helper to be a non-inline function in a single `src/` file rather
+than header-inline. A harness constraint determining where code lives is worth noting; it is the
+third time this programme has run into that rule (D97 §5(b), D101 §4).
+
+Also: `src/exec/plan.hpp` is `src/exec`-private and there are **zero** cross-`src/` private includes
+in the tree, so the shared cursor had to go to `include/epykos/exec/lanes.hpp`.
+
+### 6. The mutant
+
+`lanes.drop_split_remainder` — after a group is split, the cursor advances past the whole group
+instead of past the chunk just produced; a no-op where the width is already a variant. **Caught by 24
+of 74 gates**, including `adjoint_i1_gate_e0_test` and `stage_a_roundtrip_test`, and it reaches a
+**value** observable rather than only the structural assertion: at B=2 every odd lane goes unwritten
+and reads back the sentinel (`element 1 split -1.23e+300 generic 1209760.22`). Verified dead by the
+orchestrator in both the new gate and the I1 gate.

@@ -26,6 +26,7 @@
 #include "epykos/catalogue/kernel.hpp"
 #include "epykos/catalogue/registry.hpp"
 #include "epykos/catalogue/signature.hpp"
+#include "epykos/exec/lanes.hpp"
 #include "epykos/mutation/mutation.hpp"
 
 namespace epykos::adjoint {
@@ -703,9 +704,9 @@ void Adjoint::run(const double* state, int B, const double* out_bar, double* out
   c.cat_ns = &m.cat_ns;
   c.total_ns = &m.total_ns;
 #endif
-  for (int b0 = 0; b0 < B; b0 += im.Lt) {
-    c.b0 = b0;
-    c.L = std::min(im.Lt, B - b0);
+  for (exec::LaneChunk chunk{}; exec::next_lane_chunk(B, im.Lt, im.opt.split_lane_chunks, &chunk);) {
+    c.b0 = chunk.b0;
+    c.L = chunk.L;
     switch (c.L) {
       case 1: Lanes<1>::run_chunk(c); break;
       case 4: Lanes<4>::run_chunk(c); break;

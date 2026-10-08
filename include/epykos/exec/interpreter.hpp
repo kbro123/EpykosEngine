@@ -80,6 +80,13 @@ struct Options {
   int tile = 256;                    // rows per tile of an elementwise group / rows per segment bucket
   int max_batch = 64;                // lanes the buffers are sized for; run(B > max_batch) throws
   int lane_tile = 8;                 // lanes per chunk (B is split into chunks of at most this many)
+  // Run a chunk group whose lane count has no kernel of its own as a sequence of specialised
+  // widths (2 -> 1+1, 5 -> 4+1, 7 -> 4+1+1+1) instead of as one generic runtime-L chunk — see
+  // exec/lanes.hpp, which holds the rule and why the split is bitwise. true by default; false is
+  // the pre-D103 chunking, which is the reference side of
+  // tests/exec/lane_chunking_e0_test.cpp and the only thing that still exercises the runtime-L
+  // kernels (with 1 among the variants every width decomposes).
+  bool split_lane_chunks = true;
   ExpMode exp = ExpMode::std_exp;    // std_exp: E0; poly: E1 (exp_poly), timing only
   bool fuse_reductions = true;       // evaluate reduction-only elementwise domains inside the reductions (E0); false: materialise every domain
   bool fuse_pairs = true;            // evaluate two consecutive chained steps in one kernel with the middle value in registers (E0); false: one kernel per step

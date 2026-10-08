@@ -191,21 +191,34 @@ TEST(M1InterpE0, EveryTileAndLaneTileIsBitIdentical) {
   std::cout << "[  sweep   ] " << runs << " (tile, lane_tile) configurations, mismatches " << mismatches << '\n';
 }
 
-TEST(M1InterpE0, OddBatchWidthsUseTheRuntimeLaneKernelsBitIdentically) {
+// This test used to be called OddBatchWidthsUseTheRuntimeLaneKernelsBitIdentically, and at
+// lane_tile 64 each of these batch widths was indeed one generic runtime-L chunk. D103 §6's
+// lane-width holes are closed, so by default such a width is now run as a sequence of
+// specialised chunks instead (exec/lanes.hpp) and the old name no longer describes what the
+// default exercises. The bitwise assertion is untouched and holds either way; what moved is
+// which kernels it reaches, so the sweep runs BOTH chunkings — which keeps the runtime-L
+// kernels covered here and makes the two paths' agreement part of this gate as well
+// (PRINCIPLES.md §5.2a case 3: restate against what is true now, and say what moved).
+TEST(M1InterpE0, OddBatchWidthsAgreeWithReplayUnderBothLaneChunkings) {
   const Fixture& f = fixture();
-  exec::Options o;
-  o.lane_tile = 64;
-  exec::Interpreter in(f.program, o);
   std::size_t mismatches = 0;
-  for (int B : {2, 3, 5, 7, 13, 31, 63}) {
-    const std::vector<std::vector<double>> states(f.states.begin() + 1, f.states.begin() + 1 + B);
-    const std::vector<double> batched = run_batched(in, states);
-    const std::size_t n_out = static_cast<std::size_t>(in.n_outputs());
-    for (std::size_t b = 0; b < static_cast<std::size_t>(B); ++b) {
-      for (std::size_t o = 0; o < n_out; ++o) {
-        if (bits(batched[o * static_cast<std::size_t>(B) + b]) != bits(f.replay[b + 1][o])) {
-          if (mismatches < 5) ADD_FAILURE() << "B " << B << ", state " << b << ", output " << o;
-          ++mismatches;
+  for (const bool split : {false, true}) {
+    exec::Options o;
+    o.lane_tile = 64;
+    o.split_lane_chunks = split;
+    exec::Interpreter in(f.program, o);
+    for (int B : {2, 3, 5, 7, 13, 31, 63}) {
+      const std::vector<std::vector<double>> states(f.states.begin() + 1, f.states.begin() + 1 + B);
+      const std::vector<double> batched = run_batched(in, states);
+      const std::size_t n_out = static_cast<std::size_t>(in.n_outputs());
+      for (std::size_t b = 0; b < static_cast<std::size_t>(B); ++b) {
+        for (std::size_t o = 0; o < n_out; ++o) {
+          if (bits(batched[o * static_cast<std::size_t>(B) + b]) != bits(f.replay[b + 1][o])) {
+            if (mismatches < 5) {
+              ADD_FAILURE() << "split " << split << ", B " << B << ", state " << b << ", output " << o;
+            }
+            ++mismatches;
+          }
         }
       }
     }

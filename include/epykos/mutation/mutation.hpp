@@ -39,6 +39,7 @@ inline constexpr std::string_view registry[] = {
     "expander.segment_off_by_one",   // expand: every segment loses its last member
     "signature.merge_classes",       // infer: the const-slot pattern is not part of the signature (a constant slot is a reference)
     "interpreter.tile_boundary",     // Interpreter::run: the last row of every elementwise tile is skipped
+    "lanes.drop_split_remainder",    // exec::next_lane_chunk: after a chunk group is split into specialised lane widths, the cursor advances past the whole GROUP instead of past the chunk it just produced, so every lane the split left for a later chunk is never evaluated and the caller reads back whatever its output buffer held. Drives BOTH runtimes' chunk loops, so it is one defect in the interpreter and the adjoint at once; a no-op on a group whose width is already a variant, so it bites at B = 2, 3, 5, 6, 7 and at any B whose last group is one of those (tests/exec/lane_chunking_e0_test.cpp, and the odd-B batches of tests/exec/m1_interp_e0_test.cpp and tests/adjoint/m1_adjoint_e0_test.cpp)
     "adjoint.wrong_transpose",       // build_plan: gather 0's pull reads the slot of row index[r] (the forward index array) instead of row r
     "adjoint.drop_broadcast",        // build_plan: the last member of every Sum row gets no reader entry (the broadcast skips it)
     "adjoint.affine_not_transposed", // build_plan: Affine reader coefficients read from the forward table at the transposed position (W, not W^T)

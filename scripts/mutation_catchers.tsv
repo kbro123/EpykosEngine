@@ -21,6 +21,7 @@ expander.drop_gather	ir_nearmiss_roundtrip_e0_test	11
 expander.segment_off_by_one	ir_nearmiss_roundtrip_e0_test	11
 signature.merge_classes	curve_composite_vs_dual_test	7
 interpreter.tile_boundary	exec_nearmiss_interp_e0_test	32
+lanes.drop_split_remainder	exec_lane_chunking_e0_test	24
 adjoint.wrong_transpose	adjoint_nearmiss_adjoint_test	13
 adjoint.drop_broadcast	curve_composite_vs_dual_test	19
 adjoint.affine_not_transposed	curve_composite_vs_dual_test	16

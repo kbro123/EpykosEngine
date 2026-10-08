@@ -1129,8 +1129,9 @@ void Interpreter::run(const double* state, int B, double* out) const {
   // keeps whatever the value buffer held). Constexpr 0 outside the mutation build.
   const int trim = im.trim_mutant ? 1 : 0;
   const int drop_last_wave = mutant("interpreter.scan_drop_last_wave") ? 1 : 0;
-  for (int b0 = 0; b0 < B; b0 += im.Lt) {
-    const int L = std::min(im.Lt, B - b0);
+  for (LaneChunk chunk{}; next_lane_chunk(B, im.Lt, im.opt.split_lane_chunks, &chunk);) {
+    const int b0 = chunk.b0;
+    const int L = chunk.L;
     RunCtx ctx;
     ctx.values = values;
     ctx.state = state;

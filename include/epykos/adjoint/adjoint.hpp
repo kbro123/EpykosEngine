@@ -49,6 +49,11 @@ struct Options {
   int tile = 256;      // rows per tile of a group's forward / reverse pass
   int max_batch = 64;  // lanes the buffers are sized for; run(B > max_batch) throws
   int lane_tile = 8;   // lanes per chunk (B is split into chunks of at most this many)
+  // Run a chunk group whose lane count has no kernel of its own as a sequence of specialised
+  // widths (2 -> 1+1, 5 -> 4+1, 7 -> 4+1+1+1) instead of as one generic runtime-L chunk — see
+  // exec/lanes.hpp, which holds the rule, and `exec::Options::split_lane_chunks`, which is the
+  // same switch on the forward runtime. true by default; false is the pre-D103 chunking.
+  bool split_lane_chunks = true;
   // M4/C1 (PROBLEM.md §7, DESIGN.md §7 "As built (M4/R0...)": "the reverse of a fused group is
   // rewrite / catalogue work (M4)"): the forward pass below materialises every domain's rows
   // unconditionally (unlike exec::Interpreter, Adjoint applies none of the fuse/inline

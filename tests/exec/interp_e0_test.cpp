@@ -324,10 +324,17 @@ TEST(Interp, OptionsAndBatchWidthAreValidated) {
   const fixtures::Book book = fixtures::make_m1_book();
   const Tape tape = fixtures::record_m1(book);
   const ir::Program program = ir::infer(tape);
-  EXPECT_THROW(exec::Interpreter(program, exec::Options{0, 64, 8, exec::ExpMode::std_exp}), std::invalid_argument);
-  EXPECT_THROW(exec::Interpreter(program, exec::Options{256, 0, 8, exec::ExpMode::std_exp}), std::invalid_argument);
-  EXPECT_THROW(exec::Interpreter(program, exec::Options{256, 64, 0, exec::ExpMode::std_exp}), std::invalid_argument);
-  exec::Interpreter in(program, exec::Options{256, 4, 8, exec::ExpMode::std_exp});
+  // Designated rather than positional: `exec::Options` grows, and a positional list silently
+  // re-assigns every field after the one inserted (D103 §6's `split_lane_chunks` landed between
+  // `lane_tile` and `exp` and this is where it showed).
+  using O = exec::Options;
+  EXPECT_THROW(exec::Interpreter(program, O{.tile = 0, .max_batch = 64, .lane_tile = 8, .exp = exec::ExpMode::std_exp}),
+               std::invalid_argument);
+  EXPECT_THROW(exec::Interpreter(program, O{.tile = 256, .max_batch = 0, .lane_tile = 8, .exp = exec::ExpMode::std_exp}),
+               std::invalid_argument);
+  EXPECT_THROW(exec::Interpreter(program, O{.tile = 256, .max_batch = 64, .lane_tile = 0, .exp = exec::ExpMode::std_exp}),
+               std::invalid_argument);
+  exec::Interpreter in(program, O{.tile = 256, .max_batch = 4, .lane_tile = 8, .exp = exec::ExpMode::std_exp});
   EXPECT_EQ(in.max_batch(), 4);
   std::vector<double> state(12 * 5, 0.04), out(1001 * 5);
   EXPECT_THROW(in.run(state.data(), 5, out.data()), std::invalid_argument);

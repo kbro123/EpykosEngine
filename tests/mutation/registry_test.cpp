@@ -48,6 +48,7 @@ const std::vector<std::string> documented = {
     "expander.segment_off_by_one",
     "signature.merge_classes",
     "interpreter.tile_boundary",
+    "lanes.drop_split_remainder",
     "adjoint.wrong_transpose",
     "adjoint.drop_broadcast",
     "adjoint.affine_not_transposed",

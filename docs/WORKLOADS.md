@@ -91,7 +91,13 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   the curve gates `curve_*_e0_test`), `expander.drop_gather` (gather 0 reads the identity index),
   `expander.segment_off_by_one` (every segment loses its last member), `signature.merge_classes` (the const-slot
   pattern is not part of the signature), `interpreter.tile_boundary` (the last row of every elementwise tile is
-  skipped); then the adjoint mutants (M2/Q4b, D33), caught by the adjoint gates — `tests/adjoint/m1_adjoint_test.cpp`
+  skipped), `lanes.drop_split_remainder` (after a chunk group is split into specialised lane widths, the cursor
+  advances past the whole group instead of past the chunk just produced, so the lanes the split left for a later
+  chunk are never evaluated — one guarded line in `src/exec/lanes.cpp`, which drives the chunk loop of BOTH
+  `exec::Interpreter` and `adjoint::Adjoint`, so it is a defect in the forward and reverse runtimes at once; a no-op
+  on a group whose width is already a variant, so it bites at B = 2, 3, 5, 6, 7 and at any B whose last group is one
+  of those, and is caught by `tests/exec/lane_chunking_e0_test.cpp` and by the odd-B batches of
+  `exec_m1_interp_e0_test` / `adjoint_m1_adjoint_e0_test`); then the adjoint mutants (M2/Q4b, D33), caught by the adjoint gates — `tests/adjoint/m1_adjoint_test.cpp`
   (vs central FD, linearity) and `m1_adjoint_vs_dual_test.cpp` (vs forward mode) on the M1 book, and
   `tests/adjoint/nearmiss_adjoint_test.cpp` (vs `Dual<6>` and FD on the near-miss shapes below) — never by a test
   written for them:

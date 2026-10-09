@@ -63,10 +63,80 @@ force `colours = n_r` and column 0 will be in nearly every row regardless.
 
 ## 2. Measured
 
-Filled by `tools/sparsity/`. Counts and patterns only: nothing here is a timing, so no reserved box
-and no load gate (`tools/coverage/`'s position, for the same reason).
+`./build/release/tools/sparsity/sparsity all`, fingerprint `d448afd70180`, flags
+`-O3 -march=x86-64-v3 -fno-math-errno`. Counts and patterns only: nothing here is a timing, so no
+reserved box and no load gate (`tools/coverage/`'s position, for the same reason). Every structural
+count below was cross-checked against the **numerical** nonzero count of ∂F/∂z at the record point,
+through the engine's own batched adjoint: **TIGHT on every block of every fixture**, so the
+conservative superset is exact here and the shape claims are claims about the derivative.
 
-<!-- MEASURED -->
+| fixture / block | n_r | n_z | nonzeros | density | shape | greedy colours | lane reduction |
+|---|---|---|---|---|---|---|---|
+| `compare_ois`, 16 tenors (default) | 16 | 16 | 136 | 53.12% | lower triangular, 1 component | **16** | **1.000x** |
+| `compare_ois`, 25 tenors (the head-to-head's) | 25 | 25 | 325 | 52.00% | lower triangular, 1 component | **25** | **1.000x** |
+| `stage_a_h2h` seq. — `USD-SOFR-LOGDF` | 22 | 22 | 142 | 29.34% | lower triangular, 1 component | 14 | 1.571x |
+| `stage_a_h2h` seq. — `EUR-ESTR-LOGDF` | 18 | 18 | 133 | 41.05% | lower triangular, 1 component | 18 | 1.000x |
+| `stage_a_h2h` seq. — `EUR-EURIBOR-3M-LOGDF` | 18 | 18 | 146 | 45.06% | lower triangular, 1 component | 12 | 1.500x |
+| `stage_a_h2h` seq. — `EUR-EURIBOR-6M-LOGDF` | 12 | 12 | 78 | 54.17% | lower triangular, 1 component | 12 | 1.000x |
+| **`stage_a_h2h`, `Mode::sequential` — all four blocks** | **70** | **70** | 499 | — | four independent blocks | **56** | **1.250x** |
+| `stage_a_h2h`, `Mode::joint` — one block | 70 | 70 | 788 | 16.08% | banded (44 below, 12 above), **block diagonal in 2 components of 22 and 48** | **35** | **2.000x** |
+| `stage_a` (default, linear-**zero**), `Mode::sequential` | 70 | 70 | 499 | — | identical to `stage_a_h2h`, block for block | **56** | **1.250x** |
+
+### 2a. Both pre-registered predictions were wrong, and the real mechanism was in neither
+
+**The orchestrator's single-curve prediction is confirmed exactly**, including its reasoning:
+`compare_ois` is a perfect dense lower triangle at both 16 and 25 tenors, density `(n+1)/2n`, column
+0 present in every row, **colours = n_r and lane reduction 1.000x — not approximately, exactly.**
+The same holds for `EUR-ESTR`, which is also a pure OIS strip.
+
+**The orchestrator's multi-curve prediction attributes the prize to the wrong thing.** It expected
+colours ≈ the largest per-curve block, bounding the prize near 4x on four curves. Measured: in
+`Mode::sequential` — the mode everything ships in — there is **no cross-curve prize to win at all**,
+because `CurveSet::calibrate` already records one `ImplicitBlock` per strongly connected component
+and a later block reads an earlier block's unknowns as **parameters p, never as unknowns z**. Each
+block's ∂F/∂z is confined to its own curve by construction. The per-curve block diagonality a
+colouring would have to discover was extracted at recording time, by the dependency analysis.
+`Mode::joint` is the only object where the question even arises, and there the answer is **2.000x,
+not 4x** — and the two connected components (22 and 48) are exactly the coupling the orchestrator
+named: USD stands alone, and the three EUR curves fuse into one component because the EURIBOR
+curves discount off ESTR.
+
+**This agent's prediction — 1.00x on every sequential block — is wrong on two of the four.**
+`USD-SOFR` gives 1.571x and `EUR-EURIBOR-3M` gives 1.500x, for a reason neither prediction
+contained: **instrument heterogeneity within a single curve**, not curve separation. The USD
+pattern shows it directly:
+
+```
+    0 |#.....................| 1     rows 0-3   deposits: knots 0..i, a small dense triangle
+    1 |##....................| 2
+    2 |###...................| 3
+    3 |####..................| 4
+    4 |..###.................| 3     rows 4-11  the SR3 FUTURES STRIP: two bracketing knots each,
+    5 |....##................| 2               pairwise DISJOINT -- this is the whole prize
+    6 |.....##...............| 2
+   ...
+   11 |..........##..........| 2
+   12 |##....##..###.........| 7     rows 12-21 the OIS swaps: the annuity touches the annual
+   13 |##....##..####........| 8               payment dates, which land on a SUBSET of knots
+   ...
+   21 |##....##..############| 16
+```
+
+A futures residual depends only on the knots bracketing its own accrual period, so rows 5 and 7 are
+structurally orthogonal and can share a seed lane. `compare_ois` has no such rows — every one of
+its instruments is a par-quoted OIS whose annuity starts at the valuation date — which is why it
+measures 1.000x and Stage A does not. **The colouring prize on this engine is a futures-strip
+phenomenon.** `EUR-ESTR` (pure OIS) and `EUR-EURIBOR-6M` (12 instruments, no strip) both measure
+1.000x, which is the control.
+
+Secondary prediction, also wrong in detail: this agent expected "a near-triangle with a little fill
+above the diagonal" from the futures. There is **no fill above the diagonal anywhere** — every block
+of every fixture is exactly lower triangular. The futures rows are sparser *below* it, not wider
+above it.
+
+**And the pattern is a property of the instruments, not of the interpolation variable.**
+`stage_a` (linear-**zero**) and `stage_a_h2h` (log-DF-**linear**) give byte-identical counts, block
+for block, because both are local two-knot interpolants.
 
 ---
 
@@ -87,9 +157,60 @@ at zero or negative (D105's was the wrong sign).
 
 ---
 
-## 4. Verdict
+### 3a. The decisive arithmetic
 
-See §2's measured table. The honest direction is built into the method: `colour_rows` is **greedy**,
-so its answer is an upper bound on the chromatic number and therefore a **lower** bound on the
-saving — a "no" from a greedy colouring is weaker evidence than a "yes" would be, and is reported
-as such.
+D92 priced the Jacobian **on `compare_ois` at 25 knots** — 25 batched reverse lanes, 229 us of a
+262.7 us cold calibration, saving 2.0% of one 256-row ladder if it were *free*. And `compare_ois` at
+25 knots is measured above at **1.000x: colouring removes exactly zero lanes from the workload D92
+priced.** That is a measurement, not an estimate.
+
+On Stage A's shipped `Mode::sequential` the reduction is 1.250x, which removes
+`1 − 1/1.25 = 20%` of the Jacobian build. Carrying D92's 87% share across:
+
+- ≈ **17.4% of cold calibration**, once per session;
+- **0% of the warm path** — `JacobianPolicy::chord` builds no Jacobian at all;
+- **0.1% of a 256-row risk ladder** — 20% of D92's 229 us is ~46 us against 11,250 us, so **0.41%**
+  of one ladder, decaying as 1/N in the ladders a session runs.
+
+Both of those are **estimates**, derived from D92's measured shares and this file's measured colour
+counts, not measurements of a built colouring. The only figure here that is a measurement is the
+zero.
+
+---
+
+## 4. Verdict: NO. Do not build the colouring.
+
+Five reasons, in descending weight.
+
+1. **On the workload the prize was priced against, the reduction is exactly 1.000x.** D92's 229 us
+   is a `compare_ois` 25-knot number and that configuration is a perfect dense lower triangle.
+   Colouring saves zero there, measured.
+2. **Where it is non-trivial it is worth ~0.4% of one ladder, once, decaying as 1/N.** Stage A's
+   1.250x lands on cold calibration and nowhere else, because the chord builds no Jacobian on the
+   warm path and `Factors` is built once per solve and reused across every ladder seed.
+3. **The 2.000x exists only in `Mode::joint`, which nothing ships** — and joint mode solves one
+   70x70 system in place of four smaller ones, so the mode a colouring would most reward is the
+   mode you would not choose for other reasons.
+4. **The cost side is a new seeding path through `adjoint::Adjoint`, and it is the hazard class this
+   repository keeps paying for.** Several residuals per lane means each Jacobian entry becomes an
+   accumulation rather than a single write, and `0.0 + (−0.0)` is `+0.0` while `−0.0` is not:
+   `a2p.drop_zero_start` and `adjoint.seed_input_pull` are both registered mutants that exist
+   because of exactly that. It would need a bitwise gate and is therefore a §5.2 question for the
+   owner, not a local optimisation.
+5. **The prior is bad and it is measured, not felt.** D92 (87% share, built nothing), D104 and D105
+   each looked like a win from an operation count; D105's measured with the **wrong sign**
+   (+11–13% where 26% was expected).
+
+The honest direction is built into the method: `colour_rows` is **greedy**, so its answer is an
+upper bound on the chromatic number and therefore a **lower** bound on the saving. A better
+colouring exists in principle. But the binding constraint is not the colour count — it is that
+the Jacobian build is 0% of the warm path and 0.5% of a ladder, so even a perfect colouring on a
+perfectly block-diagonal problem would be arguing over a few tenths of a percent of one ladder,
+once per session.
+
+**What the measurement is worth keeping for** is not the colouring. It is `§2a`'s mechanism: the
+engine's calibration Jacobian is a **lower triangle with a sparse futures strip in the middle**, the
+structural pattern is **exactly** the numerical one on every shipped block, and the per-curve block
+decomposition a sparse-AD paper would recommend discovering was already done at recording time by
+`CurveSet`'s dependency analysis. If a future piece of work wants sparsity, that is the ground
+truth it should start from, and `solver::structural_pattern` is where it now lives.

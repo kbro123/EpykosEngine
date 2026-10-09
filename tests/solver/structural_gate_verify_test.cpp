@@ -20,6 +20,15 @@
 // Not an _e0_test: nothing here compares bits. The pattern is integer reachability and the one
 // floating-point comparison (structural against numerical nonzeros) is an exact-zero test, which
 // contraction cannot move off zero.
+//
+// NAMED *_verify_test FOR THE MUTATION HARNESS, and the name is load-bearing (D70).
+// `scripts/mutation_test.sh` selects its gate set by a regex on the ctest entry name --
+// `roundtrip|differential|verify|_adjoint_test$|_vs_dual_test$|_e0_test$` -- so this file was
+// `structural_gate_test.cpp` for exactly one mutation run, in which `sparsity.gate_never_fires`
+// SURVIVED the full 76-gate set while failing this very test when run by hand. The gate existed,
+// caught its mutant, and was invisible to the harness that decides whether mutants are caught.
+// `interpreter.duplicate_output_unwritten` is in the registry because the same thing happened to
+// `variants_test.cpp`; this is the second instance, found the same way.
 #include <gtest/gtest.h>
 
 #include <cmath>

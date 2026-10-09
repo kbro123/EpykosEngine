@@ -396,6 +396,40 @@ the including TU's contraction setting governs the arithmetic.
 
 ---
 
+## CM — the coverage matrix (`tools/coverage/`, artefact `bench/compare/COVERAGE.md`)
+
+Not a workload: an **inventory**. It takes no timings, defends no baseline and refuses no box. It exists so that
+*"what can we not compare?"* is a number this repository maintains rather than a guess someone makes in a review.
+
+- **Three axes.** (1) Calibration instruments — the other engine's 9 `QuoteKind` enumerators against our
+  `instrument::Kind`. (2) Problem families — rates, multi-curve, cross-currency, inflation, credit, bonds, FX,
+  volatility, XVA, scenario grids, VaR. (3) Capabilities around the problem — stacked multi-curve state,
+  forecast ≠ discount, seasoned fixings, netting sets, CSA, turns, regularisation, P&L explain, the risk ladder and
+  its cross-basis transform, an external oracle, interpolation schemes, soft-quote bands, streaming recalibration.
+- **Three levels per row, not two.** `compared` (the head-to-head exercises it today) / `supported, not compared`
+  (the engine has it; `fixtures::compare_ois` does not reach it) / `theirs only` (no path here at all). The middle
+  level is the point: collapsing it into "both" overstates what we can measure, and into "theirs only" understates
+  what is built. It separates a **fixture** gap from a **capability** gap.
+- **Our side is generated, theirs is a dated snapshot**, and the artefact says so in its own header. Ours:
+  `instrument::Kind`, `instrument::CouponKind`, `curve::SchemeKind` and `curve::Variable` are discovered from the
+  shipped enums at run time (each answers `"?"` for an unknown value, so a 0..255 scan finds the live set);
+  `blueprints/` is loaded through the engine's own loaders; the head-to-head's reach is read off
+  `fixtures::compare_ois` by **building it**. Theirs: a checked-in table citing a file and a symbol per row so a
+  human can re-verify it in seconds. D11 as relaxed by the owner (2026-10-09) permits reading that checkout;
+  nothing is copied, and `tools/coverage/` links `epykos` only — `tools/h2h/` remains the only target that compiles
+  against their facade.
+- **It fails loudly rather than going stale.** A `Kind` with no quote-form row, or a live cardinality that has
+  moved past what the matrix reasons about, exits 2 and names what changed; an unresolvable blueprint or curve
+  definition exits 1 through `Blueprints::validate`. Both paths were exercised when the tool landed.
+- **Stage A against the head-to-head** is generated in the same run, because it is the cheapest gap in the
+  document: the head-to-head reaches one curve, one currency and one instrument type, while Stage A's calibration
+  set already covers all five of our instrument kinds. The artefact also separates the head-to-head's *deliberate*
+  restrictions — the `logdf` curve that removes interpolation from the comparison, the square Jacobian that avoids
+  a regulariser neither engine shares, and the stub-free book that exists because the two engines are **measured**
+  to disagree on front stubs — from the ones nothing defends.
+
+---
+
 ## MX — G4 multi-currency bundle (stretch)
 - **Currencies:** USD, EUR, GBP, JPY. Collateral/discounting: each currency's OIS; USD SOFR as the cross-currency base.
 - **Curves per currency** (researched, sources in `docs/G4_BUNDLE.md`): the OIS curve from deposits/OIS swaps (and

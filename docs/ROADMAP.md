@@ -217,6 +217,20 @@ conventions.
 Payoff scripting language targeting the op set; vol surfaces/cubes; SIMM and marginal (pre-trade) analytics; portable
 kernel serialisation; GPU backend for the batch axis.
 
+### The reverse pass's per-row dispatch (owner, 2026-10-09; D105 §7)
+
+**Stated with its measured reason, and not yet authorised.** D105 measured the cost of `pull()`'s
+per-row work and found the **dispatch**, not the zero fill, is what it is made of: one four-way
+branch plus eight CSR offset loads per row, independent of lane count. Meanwhile **79.3% of
+`stage_a`'s non-empty pulls and 93.6% of `compare_ois`(256)'s are a single reader at unit
+coefficient** — the entire pull is a copy.
+
+A precomputed per-value classification byte in `AdjointPlan` would turn the four-way branch into one
+indexed dispatch. It is a new plan table, so it needs its own measurement before anything is built,
+and D105's own result is the reason: the previous lead on this code path looked like 26% of the
+arithmetic and measured **negative**, because an op count treats a store and a branch as
+commensurable and they are not.
+
 ### Lane widths and chunk tiling (owner, 2026-10-09; D104, and measurements in this section)
 
 Three items from the lane-width work, in descending measured value. **The first two apply to EVERY run; the third

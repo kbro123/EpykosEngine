@@ -8511,3 +8511,123 @@ of 74 gates**, including `adjoint_i1_gate_e0_test` and `stage_a_roundtrip_test`,
 **value** observable rather than only the structural assertion: at B=2 every odd lane goes unwritten
 and reads back the sentinel (`element 1 split -1.23e+300 generic 1209760.22`). Verified dead by the
 orchestrator in both the new gate and the I1 gate.
+
+---
+
+## D105 — Seeding the reverse accumulator is a REGRESSION: +11–13% at B=1. D102's 26% was not a ceiling, it had the wrong sign (2026-10-09)
+
+D102 identified `pull()`'s zero start as 26% of the reverse pass's arithmetic and closed by saying a
+paired before/after was the only thing that would settle it. It settled it: **the change is slower.**
+`seed_pull` ships **`false`**; shipped behaviour is byte-for-byte unchanged. What landed is the
+option, a gate, a tool and a mutant.
+
+### 1. Measured, both arms behind one option in one process
+
+`tools/pullprobe/`, interleaved A,B,B,A, fingerprint `d448afd70180`, shipped `lane_tile = 8`, load
+2.43–2.95 (agent) and 3.86→3.52 (orchestrator's independent re-run):
+
+| | share of the call | share of the reverse bound (A−F0) |
+|---|---|---|
+| `stage_a` B=1 | **+10.6% / +11.19%** | +14.7% / +15.74% |
+| `compare_ois`(256) B=1 | **+12.6% / +12.96%** | +17.5% / +18.18% |
+| `stage_a` B=8 | +0.8% / +0.05% | +1.0% / +0.06% |
+| `compare_ois` B=8 | +2.2% / +3.07% | +2.6% / +3.73% |
+| B=64 | +1.4–2.4% / −1.04% | — |
+
+Both figures are given where they differ; the B=1 rows agree closely and are the conclusion. The
+agent additionally confirmed the result survives **swapping which arm's buffers are allocated
+first** (+12.5/+13.2% and +10.0/+10.5%), which is the two-binary confound wearing a different hat.
+
+**B=1 is D90's ladder configuration** (`h2h_main.cpp:334` passes one ordinal, D103 §1), so the
+regression is worst exactly where this project's flagship number is taken.
+
+### 2. Why an op count could not have predicted this
+
+The two costs have **different shapes**, and that is the generalisable lesson:
+
+- the saving is **L stores per row** — proportional to lane count;
+- the new cost is **one four-way branch plus eight CSR offset loads per row** — *independent of L*.
+
+Net scales as 1/L, which the `lane_tile` sweep at B=64 shows directly (share of the reverse bound):
+
+| `lane_tile` | 1 | 8 | 16 | 32 | 64 |
+|---|---|---|---|---|---|
+| `compare_ois`(256) | +20.8% | +5.4% | ~0 | **−9.6%** | ~0 |
+| `stage_a` | — | +1.4% | −1.4% | **−7.8%** | +0.2% |
+
+So D103's rule — that an op count does not convert to a time — understates it here. **An operation
+count treats a store and a branch as commensurable, and they are not**, so the count did not merely
+overstate the magnitude: it had the wrong sign.
+
+**Both mechanisms the orchestrator offered were wrong.** The brief said the zero fill was a store
+pass that in a memory-bound loop might pay *better* than the op count, or nothing if write-combining
+absorbed it. Neither: it is an **L1-resident store pass that costs very little**, and the dispatch
+that replaces it costs more. (The change *is* a win at `lane_tile = 32` — but that setting is itself
+a ~22% penalty, see `ROADMAP.md`'s lane section, so it is two bad things partly cancelling and is
+not actionable.)
+
+### 3. The signed-zero analysis: right conclusion, wrong mechanism, two missing cases
+
+The carve-out — keep the zero start on the Input domain's pull, seed elsewhere — is correct, and
+**bitwise over 515,652 `memcmp` comparisons, 0 mismatches** (12 programs including `stage_a`, 6 seeds,
+B ∈ {1,4,5,7}). But the orchestrator's reasoning for *why* was wrong in three ways:
+
+- **Wrong mechanism.** *"Fed into an outer pull that starts at `+0.0` → washed"* does not hold under
+  seeding, because the outer pull no longer starts at `+0.0`. What actually washes it: `sbar`, `gbar`
+  and `segbar` are memset to `+0.0` and only ever `+=`/`-=` accumulated, and **neither reaches
+  `-0.0` from a `+0.0` base**, so the chain cannot compound. Same answer, different reason.
+- **Missing: subtraction.** `Op::Sub`'s second operand, `Op::Neg`, `acc_recip` and `acc_div`'s
+  denominator all *subtract*. `0.0 − (−0.0)` and `0.0 − (+0.0)` are both `+0.0`, so they wash too —
+  a distinct arithmetic case the trace never considered.
+- **Missing: signalling NaN.** `0.0 + sNaN` quiets it; a seeded store copies bit-exactly. Closed by
+  the same carve-out, but not by the stated argument.
+- The divisor claim **was** right and was verified: `acc_div`, `acc_div_aliased`, `acc_plus_div` and
+  `acc_sqrt` all divide ȳ by a **forward** value, never by an adjoint.
+- **The carve-out is more necessary than the brief said.** `Op::Input`'s rule is `dst[l] = src[l]` —
+  a **copy, not an accumulate** (`adjoint_e0.cpp:376`). So the natural assumption, that `reverse()`'s
+  initial `state_bar` zeroing washes the sign, is **false**.
+
+### 4. Fifth instance of the same failure, this time in the orchestrator's own description of a gate
+
+The brief nominated `tests/adjoint/i1_gate_e0_test.cpp` as the primary gate, *"with zero and
+mixed-signed-zero `out_bar` seeds that exist precisely to catch this."* **It has no `-0.0` anywhere**
+— its seeds are all-ones, all-`+0.0`, `e_{n−1}` and `(o % 3) − 1`; the only two `-0.0` tokens in the
+file are in comments (lines 122 and 523, verified by the orchestrator). The mixed `-0.0` seed belongs
+to `tools/revcollapse` (D102 §1).
+
+So the gate nominated to catch the mutant **could not catch it**, which is why
+`tests/adjoint/seed_pull_e0_test.cpp` exists. That is the fifth instance in this programme of *a gate
+binds only what it can observe* (D98 §2(c), D99 §4, D100 §1, D101 §4) — and the first where the
+mistake was in the orchestrator's **description of a gate it had cited as authoritative** in D100 and
+in three briefs. The lesson is narrower than the earlier four: **citing a gate is not checking it.**
+
+### 5. The mutant, with observability counted rather than argued
+
+`adjoint.seed_input_pull` — seed the Input pull too. **Killed: 210 mismatches, every one in
+`state_bar`, none in `out`** (60 on `stage_a`, 60 on each `compare_ois`, 30 on a hand-built cover).
+Whole-gate-set run: **1 catcher.** The gate *counts* its live Input rows — 13, of which 8 on
+`stage_a` — via two distinct routes (an input that is also an output, needing a `-0.0` seed; and an
+input whose only readers are `Affine` at negative coefficients, which fires under the all-`+0.0`
+seed) and **asserts both routes are non-empty**, so it cannot go quietly blind. The second test sets
+`seed_pull = true` explicitly, because with the default now `false` a gate that did not would have
+nothing for the mutant to perturb.
+
+### 6. A dead loop, noted not fixed
+
+`reverse()`'s initial `state_bar` zero-fill is **dead**: `ir::validate` guarantees every input
+ordinal has exactly one Input row, and that row's rule overwrites `state_bar` by copy. O(n_inputs × L)
+and harmless as a guard. Out of scope here.
+
+### 7. What this does to the programme's performance ledger
+
+Three of the four optimisation leads this programme generated have now measured at **zero or
+negative**: D92's closed-form Jacobian (0.5% of a real ladder, declined), D104's lane decomposition
+(0% on every measured workload, and a regression at B ≡ 3,7 mod 8), and this one (negative). Only
+the `lane_tile` default survives, at ~3–4% of the ladder.
+
+That is the measure-before-fitting discipline (D68, D92, D86) earning its keep rather than failing:
+each was cheap to measure and expensive to build. **The next lead is stated with its measured
+reason** — the per-row dispatch is the whole cost and 79.3% of `stage_a`'s pulls (93.6% of
+`compare_ois`'s) are a single unit-coefficient reader, so a precomputed per-value classification byte
+in `AdjointPlan` would replace the four-way branch with one indexed dispatch. That is a new plan
+table and needs its own measurement; it is **not** authorised by this entry.

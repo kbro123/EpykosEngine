@@ -51,7 +51,7 @@ The outputs compared are `PROBLEM.md` §2's
 
 | output | quantity |
 |---|---|
-| O1 | the calibrated curves (discount factors at 200 sample times, every curve) |
+| O1 | the calibrated curves — discount factors at 200 sample times **per curve, on that curve's own grid** (§5) |
 | O2 | book NPV, per product family and in total |
 | O3 | the bucketed delta ladder d(PV)/d(quote), through the adjoint and the IFT |
 
@@ -314,9 +314,23 @@ the old Python route, so the bundle `compare_ois` is handed is unchanged.
     of 70 quotes — so D90's figure is not invalidated by it, but it was not the same question asked
     twice. `calibrate_hot` never had the problem.
 
-11. **Not attempted at all.** Cross-currency and FX (Stage A has no FX: the EUR→USD conversion is a
-    recorded placeholder of 1.0), scenario grids (O4), the G10 desk, any curve whose scheme is not
-    piecewise-constant forward, and second-order risk. Those are the rest of `PROBLEM.md`; none of
+11. **The two-currency book NPV compares only because Stage A has no FX.** Their `MultiCurveBook`
+    sums each position's value "in the discount curve's currency" with no conversion, and its
+    positions carry no currency tag at all. Our book total is Σ `pv_usd`, and `pv_usd` of a EUR
+    trade is `pv ×` the blueprint's placeholder **1.0** (a recorded product Stage B replaces with an
+    FX spot input). The two sums are therefore the same number — but only because the placeholder
+    is 1.0. The moment Stage B gives FX a real input, this clause stops holding and the book NPV
+    comparison needs a per-currency split or their `fx_spot` on each foreign position.
+
+12. **Three of our outputs have no counterpart in their book schema and are not compared.**
+    Per-netting-set aggregates (40 of them), per-currency aggregates, and per-leg PVs are all
+    recorded outputs of our tape (`StageALayout`) and simply are not quantities their
+    `MultiCurveBook` produces. They are not part of the agreement gate and no claim here covers
+    them; the per-trade PVs they are folded from **are** gated, via the per-family NPVs.
+
+13. **Not attempted at all.** Cross-currency and FX as live inputs, scenario grids (O4), the G10
+    desk, any curve whose scheme is not piecewise-constant forward, and second-order risk (which
+    this engine cannot compute by any route — D93). Those are the rest of `PROBLEM.md`; none of
     them is in this comparison and no claim here extends to them.
 
 ## 5. The gate

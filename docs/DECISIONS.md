@@ -8992,3 +8992,105 @@ scheme name* is not *same function* when the two engines parameterise on differe
 
 `ctest --preset release`: **120/120** on the implementer's base; 144 on this box's configuration
 after the merge.
+
+---
+
+## D110 — Curve identity: where it can be tested it HOLDS exactly; three of six shared scheme names are the same construction; and our own (forward, flat) calibration is structurally singular (2026-10-09)
+
+The owner's claim: *"if we are interpolating the same things, with the same interpolation scheme,
+then we should see our curves are identical given the same calibration instruments."* Correct — and
+testing it found that the surface on which it can be stated is far smaller than either engine's
+scheme list suggests, and that our own side has a hole in it.
+
+`tools/curveid/`, behind `-DEPYKOS_H2H=ON`, OFF by default, never in CI. Expectations pre-registered
+in commit `4931efb` **before the binary existed** and verified byte-identical afterwards. Every
+verdict re-run under `-ffp-contract=off` with no word changed.
+
+### 1. The matrix is mostly empty, and that is the headline
+
+**Their interpolation variable is not configurable.** x is always knot forwards
+(`curve_module.hpp:224`), and all eight of their schemes run on it. **Our `Variable::forward` is
+Flat and Linear only** — `curve.hpp:91` is a hard `static_assert`, because the closed-form integral
+is written for those two alone.
+
+| our variable | flat | linear | hermite | natural_cubic | monotone_cubic | bspline |
+|---|---|---|---|---|---|---|
+| `zero` | no counterpart — ×6 | | | | | |
+| `logdf` | no counterpart — ×6 | | | | | |
+| `forward` | **deviates** | **IDENTICAL** | not constructible | not constructible | not constructible | not constructible |
+
+Of 18 cells: **12 have no counterpart there, 4 are not constructible here, 1 is structurally
+singular here, and exactly one runs the full test.** It passes: **(forward, linear) is identical to
+roundoff** — the interpolant, the DF and the instantaneous forward, *including both extrapolations*
+— with calibrated knots agreeing to **1.42e-14**, tightening to **1.97e-15** under reference flags.
+
+So the claim is confirmed wherever it is expressible. The finding is how rarely that is.
+
+### 2. Three of the six shared names are the same construction; three are not
+
+**Same construction**, at the roundoff floor on every profile and both grids: `linear` 2.2e-16,
+`hermite` 4.3e-16, `natural_cubic` 4.2e-16. Each verified by reading both constructions, not
+inferred from agreement — e.g. our natural-cubic interior system is theirs divided by 6, and both
+impose `M_0 = M_{n-1} = 0`.
+
+**Name only:**
+
+- **`flat` — an off-by-one in anchoring.** Ours puts `v_k` on `[t_k, t_{k+1})`, right-continuous;
+  theirs puts `x_k` on `(t_{k-1}, t_k]`, left-continuous. Value *k* is anchored to the interval
+  *starting* at knot k on our side and *ending* at it on theirs. **1.43e-01 … 6.00e-01 relative.**
+- **`monotone_cubic` — two independent differences, and the brief anticipated the wrong one.** The
+  limiter is the *smaller* one. Ours takes Bessel three-point tangents then a plain Hyman clip;
+  theirs takes **the C2 spline's own first derivatives** then QuantLib's full filter with the
+  `pd`/`pu` 1.5x widening. **The tangent source is the bigger difference.** Counter-intuitively they
+  agree exactly *where the limiter saturates* — a step profile zeroes every secant but one, so every
+  tangent is 0 on both sides — and differ where it does not. **1.2e-02 … 3.4e-01.**
+- **`bspline` — a different spline space.** Theirs is ours refined by one front knot with the first
+  control point duplicated: **n+1 control points and n−3 interior knots against our n and n−4**, at
+  different positions. Deviates on every profile *including the linear one*, which is the tell that
+  it is not a limit of a shared object. Corroborated by location rather than by reading alone: all
+  seven deviating rows peak in the **front** spans.
+
+### 3. The sharpest finding, which was NOT pre-registered: our (forward, flat) calibration is singular
+
+The brief asserted *"the system is square and non-singular (one knot per instrument), so the root is
+unique and both engines must land on it."* **False, on our side.**
+
+Our `(forward, flat)` Jacobian has an **exact zero column at the last knot**. Our Flat makes the
+last knot's value govern only `t >= t_last`, which is invisible to every instrument maturing at or
+before it — and since the knots sit *at* the maturities, that is all of them. **Square by count,
+singular in substance.** Theirs converges in 3 iterations, because their anchoring puts the last
+value on the interval *ending* at the last knot, where the instruments can see it.
+
+**And we do not detect it.** Their `calibrate()` returns `rank_deficiency`, documented as *"the
+instrument set under-determines the curve (null states sit at the seed; add an instrument or enable
+smoothing)"*. Our only singularity check is `solver::lu_factor: singular Jacobian` in
+`include/epykos/solver/tangent.hpp` — the **oracle** path, which its own header calls *"not a hot
+path"*. The production solver reports nothing. So an under-determined calibration returns a curve
+whose unconstrained knots sit wherever the solve left them, with no diagnostic: **the
+plausible-number failure shape this ledger keeps meeting** (D81 §6(a), D89 §3, D94). Recorded as the
+actionable item from this work.
+
+It misses the shipped path — `fixtures::compare_ois` is `(logdf, linear)`, whose state carries the
+level at every knot — so nothing in the suite is wrong today. It is a hole in a configuration we
+offer.
+
+### 4. A second identity, across the variable gap
+
+**Our `logdf`-linear curve IS their `Flat` on the derived forwards** — 3.1e-16 on the knot range on
+every profile, with instantaneous forwards bitwise equal, parting company only beyond the last knot
+(ours flat in log DF, so zero forward; theirs flat in the forward).
+
+That is precisely the correspondence `fixtures::compare_ois` has relied on since D71, and it is now
+**measured rather than assumed**. The probe prints its own caveat that this row establishes the
+interval correspondence, not independent arithmetic — the DF rows are the independent ones.
+
+### 5. Four errors in the orchestrator's brief
+
+1. **"Square and non-singular, so both must land on the same root"** — §3. The sharpest thing the
+   task found, and the brief asserted its opposite as a premise.
+2. **"Sweep the interpolation variable… establish the correspondence"** presumes both sides have a
+   variable to sweep. **Neither does**, in opposite ways: theirs is fixed at knot forwards, ours is
+   restricted to two schemes on `forward`.
+3. **"Differences at ~1e-15 are the solve"** — the interpolant and DF layers have no solve at all;
+   their floor is ~4e-16.
+4. **`monotone_cubic` framed as a limiter question.** The limiter is where the two engines *agree*.

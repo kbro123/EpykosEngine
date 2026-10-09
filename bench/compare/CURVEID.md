@@ -134,8 +134,9 @@ timings are taken and none are claimed, so the box load (14.3 at the time of the
 only for completeness; nothing below is a performance number.
 
 Knot sets: `nonuniform` = {0.25, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30}; `uniform` = {1 … 8}. Profiles
-as in §2. Max relative deviation over a dense grid of ~190 points covering below the first knot,
-16 interior points per knot interval, the knots themselves, and out to 3x the last knot.
+as in §2. Max relative deviation over a dense grid — 202 points for the 11-knot set: 9 below the
+first knot, each knot, 16 strictly inside every knot interval, the point just below each knot
+(`nextafter`), and 12 beyond the last knot out to 3x it (t = 90).
 
 ### 6.1 Layer A — which of the six shared names share a construction
 

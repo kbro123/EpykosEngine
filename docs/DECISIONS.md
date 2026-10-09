@@ -8822,3 +8822,52 @@ count and book size is not a measurement**, and from here both are stated.
 
 **`max_batch` and `lane_tile` move results materially** (D104; a ~22% cliff at `lane_tile = 32`) and
 were never quoted. Both are stated from here too.
+
+---
+
+## D108 — Their TESTS may be lifted, for alignment and head-to-head only. The line is cases, not implementations (2026-10-09)
+
+Extends D107 the same day, at the owner's direction: *"I don't want to copy any code — but I want
+to be able to copy the tests for the purpose of alignment and h2h comparison."*
+
+### 1. What is granted
+
+Their test **cases** may be lifted into this repository: the inputs, the conventions, the schedules,
+the market data shapes, and above all **the expected numbers**. A test that says *"for this bundle,
+the calibrated curve is these values and the par rate of this instrument is this"* is an
+**independent oracle**, and this repository has wanted one since D2 deferred it — the external
+review that commissioned D106 put it as *"everything to date is self-verified against your own
+templated `double` path."* Their expected values were produced by a different implementation, so
+agreeing with them is real evidence in a way agreeing with ourselves is not.
+
+This also reaches the oracle gap without a dependency. D2 said cross-checks against SwapEngine and
+QuantLib would arrive "later as test-only dependencies"; a lifted expectation needs no dependency at
+all, and D12 is untouched.
+
+### 2. Where the line is, and why it is not pedantry
+
+**A test case is their answer. A test helper that recomputes the answer is their implementation
+wearing test clothing.** Porting their residual, their curve build or their W-cache into
+`tests/` and comparing against it would reintroduce exactly what D107 §1 prohibits, with the
+prohibition's purpose defeated and its letter arguably intact.
+
+So:
+
+- **Lift**: inputs, conventions, fixtures, and expected outputs as literal numbers.
+- **Do not lift**: any routine that *computes* an expected output. Express the case in our own
+  vocabulary and compare our number against their recorded number.
+- A lifted case that cannot be stated without one of their types is a signal that it is testing
+  their internals rather than a shared quantity. Leave it.
+
+The reason is the one D107 §1 gives: **an engine that has absorbed the other's implementation is not
+an independent comparison.** That holds whether the absorption happens in `src/` or in `tests/`, and
+the benchmark is the thing it would destroy.
+
+### 3. Scope and bookkeeping
+
+Test-only, under `tests/`, never compiled into the library and never a build dependency of
+`include/epykos/` or `src/`. Lifted cases say in the file where they came from, so a later reader
+can tell an independent oracle from a self-check — which is the entire value of having one.
+
+D92 §5's laundering guard still applies and is sharper here: having read their tests, a case we
+"independently arrive at" that matches one of theirs is not evidence of independence.

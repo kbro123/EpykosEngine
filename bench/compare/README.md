@@ -240,6 +240,18 @@ the old Python route, so the bundle `compare_ois` is handed is unchanged.
    honest column. Our `price` excludes tape recording and `ImplicitProgram` construction; theirs
    excludes its own session build.
 
+4a. **Which of THEIR entry points is timed, which D78 got wrong.** Their facade has two reprice
+   routes and its own header separates them: `price_portfolio` is the **one-shot** path
+   (*"building the W-cache does NOT pay off on a single cold reprice ... so the compiled twin is
+   reserved for THIS cached path"*) and `bind_portfolio` + `reprice_bound` is the **amortised**
+   one (*"the AMORTIZED path for a live book repriced every streaming tick"*). D78's harness called
+   `price_portfolio` in a loop of 20 repetitions, so **D90's "price ~48x ours" measured their cold
+   entry point against our warm one.** Both are now timed and both reported; `bound x` is the
+   headline. Measured 2026-10-09: their bound path is **2.74x** faster than their one-shot path on
+   `stage_a_h2h` at 200 trades, which takes that shape's price ratio from 32.41x to 11.84x.
+   Their facade has **no bound risk path** — `price_portfolio_risk` is the only risk entry point —
+   so the ladder comparison was already on their best route and does not move.
+
 5. **Extrapolation beyond the last knot differs, and is kept out of reach.** Inside
    `[0, last knot]` the two curves are the same function of the knot values. Beyond it they are not:
    this engine holds the variable flat, so log DF is constant and the forward is zero, while the
@@ -295,6 +307,12 @@ the old Python route, so the bundle `compare_ois` is handed is unchanged.
     §5's gate measures that they do — but the cold-calibration *iteration counts* are not
     comparable row for row, and neither are the starting points (ours is a flat 3% in each knot's
     variable, theirs is `flat_x0`, the mean outright quote).
+    One further asymmetry existed in `calibrate_cold` and is **fixed**: D78's harness re-ran their
+    `calibrate(x0)` at the **base** market while ours ran at the repetition's **moved** market, so
+    the row compared two different inputs. `set_market` (which writes the quote RHS with no solve,
+    outside the clock) now puts both at the same market. The difference is immaterial — 1 bp on one
+    of 70 quotes — so D90's figure is not invalidated by it, but it was not the same question asked
+    twice. `calibrate_hot` never had the problem.
 
 11. **Not attempted at all.** Cross-currency and FX (Stage A has no FX: the EUR→USD conversion is a
     recorded placeholder of 1.0), scenario grids (O4), the G10 desk, any curve whose scheme is not

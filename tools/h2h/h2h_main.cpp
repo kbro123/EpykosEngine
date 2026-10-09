@@ -384,6 +384,7 @@ int main(int argc, char** argv) {
     set_state(q);
     cal_only.cal_cold().run(st.data(), 1, out_cal.data());
     cal_only.cal_hot().run(st.data(), 1, out_cal.data());
+    sess_cal.set_market(their_market(q));
     sess_cal.calibrate(x0);
     sess_cal_hot.recalibrate(their_market(q));
   }
@@ -401,6 +402,11 @@ int main(int argc, char** argv) {
     set_state(q);
     const Eigen::VectorXd m = their_market(q);
 
+    // Both cold solves are at the SAME market. D78's harness re-ran `calibrate(x0)` at the BASE
+    // market while ours ran at the moved one, so `calibrate_cold` compared two different inputs --
+    // immaterially (1 bp on one of n quotes), but it was not the same question asked twice.
+    // `set_market` writes the quote RHS with no solve and is outside the clock.
+    sess_cal.set_market(m);
     clock_type::time_point t = clock_type::now();
     cal_only.cal_cold().run(st.data(), 1, out_cal.data());
     o_cold.add(us_since(t));

@@ -217,6 +217,47 @@ conventions.
 Payoff scripting language targeting the op set; vol surfaces/cubes; SIMM and marginal (pre-trade) analytics; portable
 kernel serialisation; GPU backend for the batch axis.
 
+### Lane widths and chunk tiling (owner, 2026-10-09; D104, and measurements in this section)
+
+Three items from the lane-width work, in descending measured value. **The first two apply to EVERY run; the third
+applies to nothing we benchmark**, which is the order they should be done in and the opposite of the order they were
+found in.
+
+1. **A `bench/` sweep over `lane_tile` x `max_batch` x fixture, gated.** Not a `tools/` probe: it needs a baseline so
+   `scripts/perf_gate.py` catches regressions, and per D34 only the default invocation is gated, so the default sweep
+   must be the one that matters. It should cover `compare_ois` AND `stage_a`, because every figure below is one
+   fixture on one box — the same objection the orchestrator raised against an agent's measurement and then committed
+   itself.
+
+2. **`lane_tile = 32` is a reproducible ~22% penalty, and it is a published option.** Measured on `compare_ois` 64
+   trades, B=256, adjoint us/lane, three replicates at 1-minute load 2.3-2.7, fingerprint `d448afd70180`:
+
+   | `lane_tile` | 8 (shipped) | 16 | 32 | 64 |
+   |---|---|---|---|---|
+   | us/lane at B=256 | 7.507-7.537 | **7.152-7.230** | **9.138-9.239** | 7.223-7.234 |
+
+   So **16 beats the shipped 8 by ~4.8%** at B=256 and 2.3-3.0% at B=64/100 — diluted through the ladder (the reverse
+   pass is 62-79% of it, D103) that is ~3-4% on the workloads this project quotes, from a one-line default. And 32,
+   which anyone may set, costs ~22% against both its neighbours with nothing in the tree to warn them.
+
+   **The mechanism is NOT established and should not be guessed.** `acc_rows_in_flight_for(L)` drops rows in flight
+   from 2 to 1 exactly at L=32 — but L=64 also gets 1 and is fine, so that does not explain it alone. Investigate
+   before fixing. Changing the default needs its own decision entry and a second fixture.
+
+3. **A known regression shipped on `integrate/invariants`, and it must be fixed or reverted before that branch
+   merges.** D104's chunk tiling regresses **B = 3, 7, 11, 15 by 4-13%** (adjoint and interpreter independently,
+   three replicates) — D104 reported these as "+0.7% / +2.4%, no gain, inside spread" because it measured through the
+   whole ladder, which dilutes the component. One condition fixes all of them: **3 is the only tail that ever needs
+   three width-1 chunks**, and 7, 11 and 15 all end in a tail of 3, so emitting a tail of exactly 3 as one generic
+   chunk removes every regression and keeps every win (B=2 -18.9%, B=5 -24.2%, B=6 -6.9%, B=10 -7.1%, B=13 -11.1%).
+
+   **But it is worth ~0% on anything we measure**, and that is the point of listing it third. `compare_ois_ladder`
+   chunks rows by `max_batch` = 64 and each chunk is split by `lane_tile` = 8, so D90's h2h ladder (R=1, B=1), the
+   256-row ladder (4x64), the 1000-trade book (15x64 + 40, and 40 mod 8 = 0) and the warm calibration (B=1) are all
+   **unaffected**. It is a correctness-of-performance fix for a pathology — `B=2` costing more than `B=1` — not a
+   speedup. Do NOT build a cost model or a DP optimiser over decomposition choices: that is D86's retired cost model
+   again, fitted to a lever measured at zero.
+
 ### Interpolation schemes (owner, 2026-10-06)
 
 `curve::SchemeKind` has six: `flat, linear, hermite, natural_cubic, monotone_cubic, bspline`. Two items, and they are

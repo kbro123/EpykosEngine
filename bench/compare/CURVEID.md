@@ -249,9 +249,15 @@ knot value is inside some instrument's integral and the system is genuinely squa
 
 That is a defect-class result for the (forward, flat) cell, not a tolerance question, and it is not
 reachable from Layer A: Layer A says the two Flats differ, Layer C says ours cannot be calibrated on
-a knots-at-maturities set at all. It does not touch the shipped path —
-`fixtures/compare_ois.hpp` calibrates `linear` on `logdf`, which §6.3 shows is the *same curve* as
-their `Flat` and which Layer C shows calibrates cleanly.
+a knots-at-maturities set at all.
+
+**It does not touch the shipped path**, and the reason is worth stating precisely rather than
+waved at. `fixtures/compare_ois.hpp` calibrates `linear` on `logdf`, which is **not** the cell that
+is singular: Layer C's own cells are (forward, flat) and (forward, linear), so it does not calibrate
+the shipped cell at all. What rules the shipped cell out is §6.3 — our `logdf`-linear curve *is*
+their `Flat` curve on the knot range, and a `logdf` state carries the level at every knot including
+the last, so no knot can be invisible to an instrument maturing at it. The singularity is a property
+of putting a *start-anchored step* on the *forward* variable, and nothing shipped does that.
 
 ### 6.5 The headline
 

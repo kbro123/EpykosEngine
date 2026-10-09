@@ -444,3 +444,103 @@ Not a workload: an **inventory**. It takes no timings, defends no baseline and r
   a portfolio of 5,000 swaps across the four currencies (seeded) under 1,000 scenarios (parallel and twist shocks).
 - **Comparison:** the same bundle, instruments, portfolio and scenarios on SwapEngine as a black box (D21); one
   fingerprint; each engine's own timing harness; the report states precisely what each engine computed.
+
+---
+
+## MX-H2H — the head-to-head problems (`tools/h2h`, D78/D90; `bench/compare/README.md`)
+
+The two problems `tools/h2h --problem` takes. Both are **generated from a seed** like every other fixture here;
+neither adds a data file. The problem SHAPE is a parameter of the harness, not a constant of it — which it was until
+2026-10-09, and that is the whole reason this section exists: the comparison carried one USD SOFR curve and a book of
+plain OIS, so every number this project quoted against the other engine covered roughly a quarter of what the engine
+can already price.
+
+| `--problem` | definition | curves | currencies | calibration instruments | book |
+|---|---|---|---|---|---|
+| `compare_ois` | `fixtures::CompareOisOptions` (built in code) | 1, USD SOFR | 1 | `--tenors` fixed-vs-compounded-SOFR OIS, par-rate quoted | `--trades` plain spot-starting OIS |
+| `stage_a_h2h` | `blueprints/problems/stage_a_h2h.json` | **4** | **2** | **70** | **2,000 over 8 blueprints** |
+
+`compare_ois` is D90's and D81 §7's shape and is retained unchanged, so those numbers stay reproducible.
+`stage_a_h2h` is `blueprints/problems/stage_a.json` with each curve naming its `-LOGDF` definition and **nothing else
+changed** — same seed `20260923`, same valuation date, same quote noise, same synthetic fixings, same mix, same tenor
+and notional draws, same 20% seasoned fraction, same 40 netting sets. `tests/compare/h2h_problem_test.cpp` gates that
+clause by clause, in CI, with no second engine.
+
+Why `-LOGDF`: log DF piecewise linear on `{0, knots...}` — equivalently a piecewise-constant instantaneous forward —
+is the **only interpolation family the second engine's curve shares** (D71 measured it to 0.000e+00 relative).
+`stage_a.json`'s linear-zero parameterisation has no counterpart there, because that engine's free variables are its
+curves' own forwards. Comparing the two directly would measure the schemes rather than the engines, so the matched
+problem exists for correctness, not for speed.
+
+### `stage_a_h2h`'s calibration side — 70 quotes, 70 knots, four square blocks
+
+| slot | curve | instruments | quotes |
+|---|---|---|---|
+| 0 | `USD-SOFR-LOGDF` | 1 ON deposit, 3 OIS (1M–3M), 8 SR3 futures, 10 OIS (3Y–30Y) | 22 |
+| 1 | `EUR-ESTR-LOGDF` | 1 ON deposit, 17 €STR OIS (1M–30Y) | 18 |
+| 2 | `EUR-EURIBOR-3M-LOGDF` | 1 3M deposit, 8 FEU3 futures, 9 3s6s basis (3Y–30Y) | 18 |
+| 3 | `EUR-EURIBOR-6M-LOGDF` | 1 6M deposit, 11 fixed-vs-6M IRS (1Y–30Y) | 12 |
+
+Knots are at the instruments' own maturities, so **every block is square** and neither engine needs a pseudo-inverse
+or a regulariser. 16 of the 70 quotes are futures **prices**; the other engine quotes those rows in **rate** units,
+which is the one unit conversion in the comparison (`d(their market)/d(our quote) = −1/100`, applied to our ladder;
+`bench/compare/README.md` §4 item 7). Our solve is **sequential** — one implicit block per curve in the dependency
+order the maths discovers (€STR → 6M → 3M; SOFR alone); theirs is **simultaneous** over one stacked 70-vector. Both
+land on the same curves, and the gate measures that they do rather than assuming it.
+
+### `stage_a_h2h`'s book — 8 blueprints, 5 families
+
+| blueprint | weight | coupon mechanics exercised |
+|---|---|---|
+| `USD-SOFR-OIS` | 25 | compounded in arrears, 2-day payment delay — **telescopes** |
+| `USD-SOFR-OIS-SHIFT2` | 10 | observation shift 2 — **telescopes** |
+| `USD-SOFR-OIS-SHIFT2-LOCKOUT2` | 10 | shift + lockout — **does NOT telescope**, on either side |
+| `USD-SOFR-AVG-SWAP` | 10 | arithmetic daily average — does not telescope |
+| `EUR-ESTR-OIS` | 15 | compounded in arrears |
+| `EUR-EURIBOR-6M-IRS` | 12 | term rate fixed in advance |
+| `EUR-EURIBOR-3M-IRS` | 8 | term rate fixed in advance |
+| `EUR-3S6S-BASIS` | 10 | float vs float, spread on the 3M leg, **two curves per trade** |
+
+~20% of trades are **seasoned** (age uniform in 30–1500 days), so their realised fixings fold into a realised factor
+(compounded), a realised day-weighted sum (averaged) or a known fixing (term). Trades draw 12 tenors from 1Y to 30Y,
+so the book is **not** on one annual grid — the structural-sharing caveat `compare_ois` carries and this problem does
+not (README §4 item 6).
+
+A run may be restricted to ONE family (`--family`), or sweep all of them (`--per-family`). A per-family run is its own
+problem — its own tape, its own agreement gate, its own timings — never a slice of an aggregate, because an aggregate
+hides exactly the thing the sweep exists to show.
+
+### What is measured, and the three parameters that must be quoted with it
+
+Four phases on one `steady_clock`, interleaved round-robin: `calibrate_cold`, `calibrate_hot` (both
+family-independent — the bundle never carries the book), `price`, `risk_ladder`. Agreement on the calibrated curves,
+the book NPV per family and the risk ladder gates all of it (README §5), and a family that disagrees is reported and
+**not timed**.
+
+**Always quoted with a ladder figure, because a figure without them is not a measurement:** `--ladder-rows` (D103 §1:
+D90's flagship number is a ONE-ROW ladder), the **book size** (D92's Jacobian-share decay is a 16-trade book
+throughout), and **`max_batch` / `lane_tile`** (D104 — and `lane_tile` defaults to **8**, not 64).
+
+### Outputs compared
+
+O1 the calibrated curves — discount factors at 200 sample times **per curve, on that curve's own grid**, because one
+shared grid would sample the shorter curves past their last knot, where the two engines extrapolate differently by
+construction; O2 book NPV per family and in total; O3 the 70-bucket ladder d(PV)/d(quote). O4 (the scenario grid),
+cross-currency, FX and second-order risk are **not** compared and no claim here extends to them.
+
+### Measured once, 2026-10-09, fingerprint `d448afd70180`
+
+The whole table is in `bench/compare/README.md` §8 (agreement, four phases, eight families, the
+`max_batch` / `lane_tile` sweep, and D90's shape reproduced in the same session). The shape of the
+result, so this file is not silent on it:
+
+- **Every one of the eight families agrees**, worst 4.023e-14 on book NPV and 6.012e-15 on the ladder;
+  the curves agree to 6.717e-15 over 4 curves and 800 sample times. Nothing went untimed.
+- The **book-level** risk ladder is 5.79x–506.62x in our favour across the families and **297x** on the
+  whole 2,000-trade book; plain OIS (10.35x) is **not** where the advantage is largest.
+- The **per-trade** risk ladder is a different object: 1.83x in our favour at 500 trades / R = 64 and
+  **0.77x — slower** at 2,000 trades / R = 256. The ratio moves by 385x between R = 1 and R = 256 and
+  crosses 1, so a ladder number without its row count is not a number.
+- Cold calibration **reverses with the curve count**: 1.5x slower on one curve, **2.41x faster** on four.
+  Warm calibration does not: 2.6x and 3.6x slower respectively.
+- `lane_tile = 32` costs **22.5%** per ladder row at `max_batch` 64. The shipped default of 8 is right.

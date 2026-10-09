@@ -13,6 +13,7 @@
 
 #include "epykos/fixtures/compare_ois.hpp"
 #include "epykos/fixtures/stage_a.hpp"
+#include "epykos/ir/sharing.hpp"
 #include "epykos/solver/residual.hpp"
 #include "epykos/solver/sparsity.hpp"
 
@@ -59,6 +60,39 @@ int numerical_nonzeros(const epykos::Tape& tape, const solver::ImplicitBlock& bl
   }
 }
 
+// The SECOND route the brief offered — `ir::sharing::reach(p, groups)` with the residuals as
+// groups — measured rather than reasoned about. `ir/program.hpp`: "inputs: value id of every Input
+// ordinal (they are rows of the Input domain)", so every unknown is a ROW of ONE domain and a
+// per-domain mask cannot separate unknown j from unknown k. This prints what that route would
+// actually return, so the rejection is a measurement.
+void report_reach_route(const epykos::Tape& tape, const solver::ImplicitBlock& block) {
+  try {
+    solver::ResidualProgram rp(tape, block, /*passes=*/true);
+    const epykos::ir::Program& p = rp.program();
+    std::vector<std::vector<int>> groups;
+    for (int i = 0; i < rp.n_residuals(); ++i) groups.push_back({i});
+    const std::vector<std::uint32_t> mask = epykos::ir::reach(p, groups);
+    // How many distinct domains do the unknowns occupy?
+    std::vector<epykos::ir::domain_id> doms;
+    for (std::size_t k = 0; k < p.inputs.size(); ++k) doms.push_back(p.domain_of(p.inputs[k]));
+    std::sort(doms.begin(), doms.end());
+    doms.erase(std::unique(doms.begin(), doms.end()), doms.end());
+    std::printf("      ir::reach route: %zu slice inputs occupy %zu domain(s)", p.inputs.size(), doms.size());
+    if (doms.size() == 1 && !p.inputs.empty()) {
+      const std::uint32_t m = mask[static_cast<std::size_t>(doms[0])];
+      int bits = 0;
+      for (int i = 0; i < 32; ++i) bits += (m >> i) & 1u;
+      std::printf("; that one domain's mask has %d of %d residual bits set, so the route reports a"
+                  " DENSE pattern and cannot separate one unknown from another: UNSOUND here\n",
+                  bits, rp.n_residuals());
+    } else {
+      std::printf("; per-unknown separation may be possible -- check before using this route\n");
+    }
+  } catch (const std::exception& e) {
+    std::printf("      ir::reach route: unavailable (%s)\n", e.what());
+  }
+}
+
 void report_block(const epykos::Tape& tape, const solver::ImplicitBlock& block, bool picture) {
   const solver::SparsityPattern pat = solver::structural_pattern(tape, block);
   const solver::Colouring col = solver::colour_rows(pat);
@@ -80,6 +114,7 @@ void report_block(const epykos::Tape& tape, const solver::ImplicitBlock& block, 
                     ? "TIGHT"
                     : "structural is a strict superset (sound, loose)");
   }
+  report_reach_route(tape, block);
   if (picture) print_pattern(pat);
 }
 

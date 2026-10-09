@@ -82,7 +82,35 @@ conservative superset is exact here and the shape claims are claims about the de
 | `stage_a_h2h`, `Mode::joint` — one block | 70 | 70 | 788 | 16.08% | banded (44 below, 12 above), **block diagonal in 2 components of 22 and 48** | **35** | **2.000x** |
 | `stage_a` (default, linear-**zero**), `Mode::sequential` | 70 | 70 | 499 | — | identical to `stage_a_h2h`, block for block | **56** | **1.250x** |
 
-### 2a. Both pre-registered predictions were wrong, and the real mechanism was in neither
+### 2a. The two offered routes, measured rather than reasoned about
+
+The brief offered two routes to the relation and asked for both to be verified.
+
+**`dce`'s live-marking (`src/tape/passes.cpp`) — the reading is correct and the route is sound**, but
+it is not the one to use: `dce` seeds from **all** of `old.outputs()`, so using it would mean
+changing it, and inputs must keep their ordinals. The same backward closure already exists per-root
+in `slice()` (`src/tape/slice.cpp`), which is why `ResidualProgram`'s bind failure has always caught
+a dead column. `structural_pattern` does the equivalent walk with one bitset per residual, which
+gives the full bipartite pattern instead of a single live/dead bit.
+
+**`ir::sharing::reach(p, groups)` — UNSOUND for this question, measured.** `ir/program.hpp` says
+"inputs: value id of every Input ordinal (**they are rows of the Input domain**)", so every unknown
+is a row of one domain and a per-**domain** mask cannot separate unknown *j* from unknown *k*.
+The tool prints what the route actually returns:
+
+```
+ir::reach route: 50 slice inputs occupy 1 domain(s); that one domain's mask has 25 of 25
+residual bits set, so the route reports a DENSE pattern and cannot separate one unknown
+from another: UNSOUND here
+```
+
+A dense pattern is a sound *superset*, so nothing would crash — the gate would simply never fire
+and a colouring would report `colours = n_r` and look like an honest negative result. That is the
+worst available failure for this analysis. `reach` is not wrong; it answers a per-domain question
+correctly, and this is a per-ordinal question. It also caps at 32 groups, where `stage_a`'s joint
+block has 70 residuals.
+
+### 2b. Both pre-registered predictions were wrong, and the real mechanism was in neither
 
 **The orchestrator's single-curve prediction is confirmed exactly**, including its reasoning:
 `compare_ois` is a perfect dense lower triangle at both 16 and 25 tenors, density `(n+1)/2n`, column
@@ -208,7 +236,7 @@ the Jacobian build is 0% of the warm path and 0.5% of a ladder, so even a perfec
 perfectly block-diagonal problem would be arguing over a few tenths of a percent of one ladder,
 once per session.
 
-**What the measurement is worth keeping for** is not the colouring. It is `§2a`'s mechanism: the
+**What the measurement is worth keeping for** is not the colouring. It is §2b's mechanism: the
 engine's calibration Jacobian is a **lower triangle with a sparse futures strip in the middle**, the
 structural pattern is **exactly** the numerical one on every shipped block, and the per-curve block
 decomposition a sparse-AD paper would recommend discovering was already done at recording time by

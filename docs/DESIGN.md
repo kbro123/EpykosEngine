@@ -134,6 +134,33 @@ Batch lanes recalibrate independently (bitwise the single-lane runs), identical 
 record-point factorisation may drive every lane's steps (`chord`) with a per-lane refresh on a stall. `ir/sharing.hpp`
 asserts the cross-stage sharing: every DF domain feeds both the residuals and the book, and no DF is computed twice.
 
+**The structural gate on a declared block (`solver/sparsity.hpp`).** Which unknowns reach which residuals is a
+reachability property of the **recorded forward program** — a question about F, not about ∂F — so it is answerable with
+no I1, no I3 and no new op, and it escapes §1's limit that a derivative cannot be a tape node (D87).
+`structural_pattern(tape, block)` computes the bipartite pattern by one reverse pass over the operand edges from the
+residual output nodes; `check_structure` is the gate, run **once at block registration** in `detail::implicit_end`
+before any market data exists, and it **throws**: every unknown must reach at least one residual (an exact zero
+Jacobian column) and every residual must be reached by at least one unknown (an exact zero row). The pattern is a
+conservative superset of the nonzero pattern of ∂F/∂z and is **measured TIGHT on every shipped block**, because
+`curve/scheme.hpp`'s `flat_masses` and `linear_masses` omit zero-mass knots from the term list rather than emitting
+them with weight 0. That is what lets a structural analysis see D110 §3's `(forward, flat)` defect — the last knot
+governs only `t >= t_last`, invisible to every instrument maturing at or before it, so the system is square by count
+and singular in substance. `SolveOptions::require_structural_coupling` is the per-block opt-out for a deliberately
+under-determined solve; it is honoured for a dead **row** and cannot be honoured for a dead **column**, because
+`ResidualProgram` binds each unknown to a sub-input ordinal of the slice and an unreached unknown has none — an
+under-determined calibration is not merely undetected in this engine, it is unrepresentable. There is **no numerical
+rank information** here and none is implied: `Factors` uses `PartialPivLU`, which is not rank-revealing.
+
+**Colouring the Jacobian seeds: measured and NOT built.** `ResidualProgram::jacobian` seeds one lane per residual, so
+structurally orthogonal rows could share a lane. `tools/sparsity/` measures the greedy colour count before anything is
+built (`bench/compare/SPARSITY.md`): `compare_ois` at 16 and at 25 tenors is a perfect dense lower triangle and gives
+**1.000x — exactly no reduction**, and that is the configuration D92's 229 us Jacobian figure was measured on. Stage A
+gives **1.250x** in the shipped `Mode::sequential` and 2.000x in `Mode::joint`, and the prize comes from the SR3
+futures strip (rows reading two bracketing knots each), not from curve separation — the per-curve block diagonality was
+already extracted at recording time, since a later block reads an earlier block's unknowns as parameters and never as
+unknowns. Carried across D92's shares that is ~17% of cold calibration once per session, 0% of the warm path and ~0.4%
+of one 256-row ladder (estimates). Verdict: no.
+
 **As built, Stage A scale (M3/G5, D44):** `CurveSet` is Composite-aware (`CurveSpec::regions`; a spec without
 regions keeps the exact M1 linear path unchanged, bitwise) — four curves (SOFR, ESTR, EURIBOR 3M/6M) solved in
 dependency order inside one tape, 4 blocks, 70 free knots, optimality `‖Jᵀr‖∞` worst 1.235e-13 (gate 1e-12) at the

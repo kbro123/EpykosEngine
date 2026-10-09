@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "epykos/solver/residual.hpp"
+#include "epykos/solver/sparsity.hpp"
 
 namespace epykos::solver {
 
@@ -86,6 +87,12 @@ void implicit_end(Tape& tape, ImplicitRegistry& registry, ImplicitResult& result
     }
     block.residuals.push_back(register_output(tape, f));
   }
+  // The structural gate (solver/sparsity.hpp). It runs HERE, before the record-time solve, because
+  // it is a question about the recorded F and not about ∂F or about any market: the answer is the
+  // same on every quote, so the right moment to ask it is the one moment the maths is declared.
+  // `tainted` above is a weaker statement in the row direction -- it is satisfied by a residual
+  // that reads a quote and no unknown -- and says nothing at all in the column direction.
+  check_structure(structural_pattern(tape, block), block);
   // The record-time solve on the recorded residual sub-program, the other inputs at their
   // record-point values (quotes as recorded; earlier blocks' unknowns as solved).
   ResidualProgram rp(tape, block, /*passes=*/true);

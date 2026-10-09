@@ -129,9 +129,19 @@ the same, the root must be the same.
 
 ## 6. Measured
 
-Run: `tools/curveid/curveid` at the commit that adds it, release preset, `-DEPYKOS_H2H=ON`. No
-timings are taken and none are claimed, so the box load (14.3 at the time of the run) is recorded
-only for completeness; nothing below is a performance number.
+Run: `tools/curveid/curveid` at the commit that adds it, release preset, `-DEPYKOS_H2H=ON`.
+Fingerprint `d448afd70180` — Intel Xeon W-3223, Apple clang 21.0.0,
+`-O3 -march=x86-64-v3 -fno-math-errno`. No timings are taken and none are claimed, so the box load
+(14.3 at the time of the run) is recorded only for completeness; nothing below is a performance
+number.
+
+**On flags, because the roundoff-floor numbers depend on them.** Both engines' code compiles in the
+*same translation unit* under the *same* flags here — their headers are marked SYSTEM, which
+suppresses our warnings and changes no optimisation — so the comparison is like-for-like by
+construction, with neither side built under kinder flags. The release preset permits FMA
+contraction, so the absolute size of a roundoff-floor figure is flag-dependent. §6.6 re-runs the
+whole probe under the `reference` preset (`-ffp-contract=off`) and reports whether any **verdict**
+moves.
 
 Knot sets: `nonuniform` = {0.25, 0.5, 1, 2, 3, 5, 7, 10, 15, 20, 30}; `uniform` = {1 … 8}. Profiles
 as in §2. Max relative deviation over a dense grid — 202 points for the 11-knot set: 9 below the
@@ -235,7 +245,7 @@ damped Newton on both sides from the same flat 3% start, `||F||inf <= 1e-15`.
 | scheme | ours | theirs | calibrated knots | curve at the two roots |
 |---|---|---|---|---|
 | `flat` | **DID NOT CONVERGE — structurally singular** | CONVERGED, 1.32e-16, 3 iters | 3.13e-01 rel | DEVIATES |
-| `linear` | CONVERGED, 6.24e-17, 4 iters | CONVERGED, 1.39e-17, 4 iters | **1.42e-14 rel — IDENTICAL** | DF 1.21e-14, f 1.42e-14 — **IDENTICAL** |
+| `linear` | CONVERGED, 6.24e-17, 4 iters | CONVERGED, 1.39e-17, 4 iters | **1.42e-14 rel — IDENTICAL** (1.97e-15 under the reference flags, §6.6) | DF 1.21e-14, f 1.42e-14 — **IDENTICAL** |
 | `hermite`, `natural_cubic`, `monotone_cubic`, `bspline` | **cannot calibrate this cell at all** | — | — | — |
 
 **The finding that was NOT pre-registered, and is the sharpest thing the probe found.** On our side
@@ -272,3 +282,38 @@ The bridge adds a second genuine identity across the variable gap.
 Nothing here was made to pass: no tolerance was relaxed, the roundoff floor stayed at 1e-13
 throughout, and the two results that exceeded the pre-registration were both the pre-registration
 being under-specific, not wrong.
+
+**One thing in §1's own reasoning turned out to be false, and it is worth recording because it came
+from the brief that commissioned the probe.** §1 says "the system is square and non-singular (one
+knot per instrument), so the root is unique and both engines must land on it". Squareness by count
+does not give non-singularity: §6.4 found the (forward, flat) Jacobian singular on our side on
+exactly that square, one-knot-per-instrument set. Which side of its knot a step is anchored to
+decides whether a square system is solvable, and no amount of counting sees it.
+
+### 6.6 Does any verdict move under `-ffp-contract=off`?
+
+The release preset permits FMA contraction, so the roundoff-floor *magnitudes* in §6.1–§6.4 are
+flag-dependent even though both engines compile under the same flags in the same translation unit.
+Re-run under the `reference` preset
+(`-O3 -march=x86-64-v3 -fno-math-errno -ffp-contract=off`, fingerprint `d448afd70180`):
+
+**No. Every verdict is identical.** Diffing the two runs' verdict words — every `IDENTICAL`,
+`BITWISE EQUAL`, `DEVIATES: <cause>`, `NOT COMPARABLE`, `SINGULAR`, `CONVERGED` and
+`DID NOT CONVERGE`, in order — gives an empty diff. What moves is only roundoff noise: the *t* at
+which a 1e-16-scale maximum happens to land, and that magnitude itself (e.g. `natural_cubic` /
+`oscillate` 4.20e-16 -> 6.04e-16). Every O(1) deviation is unchanged to all printed digits, which is
+what you want: a real construction difference is not a floating-point artefact.
+
+Two specifics worth recording:
+
+* **The structural singularity is bit-identical** — same `||F||inf` of 1.339e-02, same 0 iterations,
+  same single dead column at knot 10 (t = 30). It is a property of the curve's addressing, so no
+  flag could have moved it, and now that is measured rather than asserted.
+* **The (forward, linear) calibration agreement gets 7x TIGHTER with contraction off**: the
+  calibrated knot values go from 1.42e-14 to **1.97e-15** relative (6.04e-16 absolute to 8.33e-17).
+  That is the expected direction and it is the strongest form of the headline result — with the
+  reference flags the two engines' roots agree essentially at the solve floor. The release figure
+  was not wrong; the contraction-free one is simply the cleaner number, and both are reported.
+
+The probe is therefore flag-robust in its conclusions and flag-sensitive only in its noise floor,
+which is the right way round.

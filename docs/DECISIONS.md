@@ -6824,6 +6824,11 @@ found by a person for exactly that reason.
 
 ## D90 — The head-to-head after the lazy Jacobian: the warm calibration gap is 7.4x → 2.24x, and D89's estimate was optimistic (2026-10-04)
 
+> **Its pricing figure is WITHDRAWN by D109 (2026-10-09).** `price_all 47.9x` timed their
+> `price_portfolio` — the entry point their own header calls deliberately cold — in a 20-repetition
+> loop, against our warm pass. Their amortised `reprice_bound` path is 2.74x faster, and the honest
+> figure on this entry's own shape is **2.92x**. The calibration and ladder figures stand.
+
 D89 closed by saying the gap "roughly 7.4x behind becomes roughly 1.6x behind … a ratio of two
 numbers measured in different harnesses, so it is an indication and not a head-to-head", and that a
 fresh `tools/h2h` run was what would settle it. Done. **The measured answer is 2.24x, not 1.6x.**
@@ -8871,3 +8876,119 @@ can tell an independent oracle from a self-check — which is the entire value o
 
 D92 §5's laundering guard still applies and is sharper here: having read their tests, a case we
 "independently arrive at" that matches one of theirs is not evidence of independence.
+
+---
+
+## D109 — The head-to-head lifted to Stage A: the advantage HOLDS outside OIS, the ladder ratio CROSSES ONE, and D90's 48x pricing was our warm pass against their cold one (2026-10-09)
+
+D107 §3 found the head-to-head compared about a quarter of what Epykos already prices. This is the
+lift: `tools/h2h --problem`, `blueprints/problems/stage_a_h2h.json` — **4 curves, 2 currencies, 70
+calibration instruments** (4 deposits, 16 money-market futures, 41 par rates, 9 3s6s par spreads),
+**2,000 trades over 8 blueprints in 5 families**, ~20% seasoned — with `--per-family`,
+`--ladder-rows`, `--max-batch` and `--lane-tile` as parameters printed with every figure. The
+exchange is now typed C++ (`tools/h2h/h2h_bridge.cpp`) serialised through **their own
+`bundle_to_json`**; `--bundle`/`--book` and the Python step are gone.
+
+Fingerprint `d448afd70180`, flags re-verified identical on both sides, load 5.79 → 4.99 against a
+bar of 8.0. The orchestrator verified the §1 mechanism directly from their header but **could not
+re-run the timings** — the box was at load 23.85 — so the numbers below are the implementer's,
+and §1's conclusion does not depend on them.
+
+### 1. A harness defect that flattered us by ~16x
+
+`BundleSession` separates two pricing entry points, and their own header says why:
+
+> `price_portfolio()` *"deliberately stays on the templated path — building the W-cache does NOT pay
+> off on a single cold reprice (that was an earlier net regression), so the compiled twin is reserved
+> for THIS cached path"*, against `bind_portfolio()` + `reprice_bound()`, *"the AMORTIZED path for a
+> live book repriced every streaming tick"*.
+
+**D78's harness timed `price_portfolio` — their deliberately cold path — in a 20-repetition loop,
+against our warm pass.** Their bound path is **2.74x** faster than the one we timed.
+
+**So D90's "price_all 47.9x ours" is not a like-for-like comparison. On D90's own shape the honest
+figure is 2.92x.** No ladder equivalent exists on their side, so O3 was already on their best route
+and D90's 6.12x there stands.
+
+A second, smaller fault: `calibrate_cold` asked two different questions — ours at the moved market,
+theirs at the base one. Immaterial (1 bp on 1 of 70) but it was not the same input twice. Fixed with
+`set_market` outside the clock.
+
+### 2. The advantage holds outside plain OIS — and plain OIS is the WEAKEST family
+
+Every family favours us on the book-level ladder, and the spread is enormous. R=1, `max_batch` 64,
+`lane_tile` 8; `bound x` is against their amortised path:
+
+| family | trades | bound x | risk x |
+|---|---|---|---|
+| SHIFT2-LOCKOUT2 | 209 | 553.13x | **506.62x** |
+| AVG-SWAP | 199 | 13.30x | 272.51x |
+| 3S6S-BASIS | 212 | 1.27x | 17.08x |
+| EURIBOR-3M-IRS | 167 | 1.59x | 11.69x |
+| **SOFR-OIS (plain)** | 481 | 4.17x | **10.35x** |
+| EURIBOR-6M-IRS | 237 | 1.47x | 9.60x |
+| ESTR-OIS | 300 | 3.27x | 7.26x |
+| SOFR-OIS-SHIFT2 | 195 | 1.91x | 5.79x |
+| ALL | 2000 | 109.36x | 297.02x |
+
+The mechanism is clean and reads directly off their design: their W-cache **compiles** telescoping
+and term-rate coupons (0.24–0.43 us per position on `reprice_bound`) and **does not compile**
+averaged or lockout ones (14.0 and 216.8 us — their header says a compounded or seasoned position
+"rides the AAD block"). **On what they compile we are at parity; on what they do not we are
+13x–553x.** This is the answer to the question D107 §3 said was unknown.
+
+### 3. The ladder ratio crosses one, which is bigger than D103 §1 said
+
+On the 2,000-trade book: **297.02x ours at R=1, and 0.77x — 1.29x SLOWER — at R=256.** The ratio
+moves by **385x and changes sign of advantage.**
+
+The cause is structural, not a tuning artefact: **our adjoint carries the whole book's forward pass
+in every row** (one program, no subsetting), while their R calls touch R trades. Per row, 929.3 us
+against 718.3. The per-trade ratio also decays with book size (1.83x at 500 trades, R=64).
+
+**A book-level ladder is ~300x ours. A per-trade ladder is parity or worse.** D103 §1 established
+that a ladder figure is meaningless without its row count; this establishes that the row count can
+reverse the result. Both are now printed with every figure.
+
+Independently confirms D104's lane finding from a different harness: `lane_tile = 32` costs
+**22.5%** per row at `max_batch` 64; `max_batch` 64 against 16 moves 1.6%, inside D104's spread.
+
+### 4. Agreement gated everything, and no product disagrees
+
+The harness refuses to time anything until both engines agree. All eight families passed: **curves
+6.717e-15** (4 curves, 800 sample times), **whole-book NPV 7.829e-15** against a gross of 9.33e8,
+**70-bucket ladder 5.969e-15**. Worst family 4.023e-14 (lockout NPV). The 37 MB exchange file was
+also fed to their *stateless CLI* and accepted — 2,212 positions, NPV agreeing to 4.5e-7 absolute on
+6.88e7.
+
+A defect caught before it bit: sampling all curves on the longest curve's grid would have read the
+shorter ones **past their last knot**, where extrapolation differs, and reported it as an engine
+disagreement. The grid is now per curve and every run asserts `max t read / last knot`.
+
+### 5. The orchestrator's brief was wrong about the headline problem
+
+**"Lift the full Stage A" is not achievable as stated, and the reason is a correctness prerequisite
+the brief missed.** Stage A's curves are linear in the **zero rate**. Their free variables are their
+curves' own **instantaneous forwards**, so their `Scheme::Linear` interpolates the forward — *a
+different function space*. **There is no linear-zero family on their side at all.** Hence
+`stage_a_h2h.json` uses `-LOGDF` curves (three EUR definitions added), the one family D71 measured
+the two engines share, with `tests/compare/h2h_problem_test.cpp` gating field-by-field that nothing
+else differs from `stage_a.json`.
+
+This is the same fact the owner's curve-identity question turns on, arrived at independently: *same
+scheme name* is not *same function* when the two engines parameterise on different variables.
+
+### 6. What the exchange cannot express
+
+- **A futures position.** Ours is undiscounted variation margin; their `MultiCurveBook` has only
+  `Swap`/`Xccy` and no undiscounted flow. Stage A's book has no futures — they appear only as
+  calibration rows, where `QuoteKind::Rate` carries them exactly — and the bridge throws rather than
+  price something else.
+- **Float-vs-float needs two of their positions**, which is exact but makes their count 2,212
+  against our 2,000.
+- **Per-netting-set (40), per-currency and per-leg outputs** have no counterpart and are not gated.
+- The two-currency NPV compares **only because Stage A's FX is a placeholder of 1.0**. Stage B
+  breaks that clause.
+
+`ctest --preset release`: **120/120** on the implementer's base; 144 on this box's configuration
+after the merge.

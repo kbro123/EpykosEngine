@@ -3,6 +3,12 @@
 Append-only. Superseding a decision adds a new entry that names the one it replaces.
 
 ## D1 — No JIT (2026-09-22)
+
+> **Revisit clause FIRED 2026-10-09 (D106).** The exotics kill test measured the catalogue +
+> interpreter at **0.45-0.78x the engine's own naive templated `double`** on a path-dependent payoff,
+> FAIL at all nine swept points against a criterion committed before the fixture existed. This entry's
+> own condition -- "revisit only if M1/M3 show the catalogue + interpreter cannot reach the gates" --
+> is met, in a domain M1/M3 never covered. The decision itself is the owner's and is not taken here.
 Kernels are pre-compiled engine code driven by data: a build-time catalogue (AOT code generation) plus a tiled
 interpreter. Rationale: portability (x86 + ARM), no runtime compiler dependency, deterministic builds.
 Revisit only if M1/M3 show the catalogue + interpreter cannot reach the gates.
@@ -8631,3 +8637,115 @@ reason** — the per-row dispatch is the whole cost and 79.3% of `stage_a`'s pul
 `compare_ois`'s) are a single unit-coefficient reader, so a precomputed per-value classification byte
 in `AdjointPlan` would replace the four-way branch with one indexed dispatch. That is a new plan
 table and needs its own measurement; it is **not** authorised by this entry.
+
+---
+
+## D106 — The exotics kill test: D1's revisit clause has FIRED. The engine is 0.45–0.78x its own naive `double` on a path-dependent payoff (2026-10-09)
+
+Commissioned by an external repository review whose blunt summary was: *"you have solved the hard,
+generic problems on the easiest asset class."* This is the cheapest experiment against that, in the
+same spirit as M1 — and it comes back negative.
+
+### 1. The criterion was pre-registered, and that is verifiable
+
+`docs/EXOTICS_KILL_TEST.md` was committed in `6e3a68a` **before the fixture existed**. The
+orchestrator verified this from git rather than taking it on trust: that commit touches **only**
+`docs/EXOTICS_KILL_TEST.md`; the fixture, tool and test first appear in `c1d3503`.
+
+| engine / `double` at B = 1, every swept point | verdict |
+|---|---|
+| ≥ 1.00x everywhere | PASS — D1 holds for this domain |
+| 0.80x–1.00x anywhere | MARGINAL — parity with naive scalar C++, not a validation |
+| **< 0.80x anywhere** | **FAIL — D1's revisit clause has fired** |
+
+### 2. The result: FAIL at all nine points, re-run by the orchestrator
+
+Release preset, fingerprint `d448afd70180`, load 2.11 before / 2.35 after (threshold 8.0):
+
+| paths | steps | `double` us | engine B=1 us | **ratio** | B=64 per state | ratio |
+|---|---|---|---|---|---|---|
+| 64 | 12 | 12.7 | 16.4 | **0.776x** | 10.608 | 1.196x |
+| 64 | 252 | 255.1 | 374.7 | **0.681x** | 243.5 | 1.048x |
+| 256 | 252 | 969.4 | 1625.0 | **0.597x** | 1078.4 | 0.899x |
+| 1024 | 52 | 741.0 | 1267.0 | **0.585x** | 858.7 | 0.863x |
+| 1024 | 252 | 3379.1 | 7487.6 | **0.451x** | 5605.1 | 0.603x |
+
+Agreement 0.00e+00–4.03e-16 — **the right answer, computed slowly.** Degrades monotonically in both
+path and step count. No `exec::Options` configuration clears 1.00x (best of 14 is 0.588x). The
+amortised B=64 column, which is *not* the criterion, also falls below parity on the larger grids.
+
+### 3. The mechanism is NOT the one D1 names, and that is the more useful half
+
+The excess is a **fixed 2.6–6.0 ns per path-step**, and the ratio is simply that against the
+payoff's own per-step arithmetic — predicted to within 0.001x across five leg combinations.
+
+**A path grid has one row per path-step and almost no sharing, so there is nothing to amortise a
+per-row interpretive cost against.** On the rates book, 1,000 trades share one curve. That is
+precisely why M1 and M3 never saw this, and it is the measured form of the review's claim that the
+generic problems were solved on the easiest asset class.
+
+**Catalogue coverage is anti-correlated with the verdict.** 99.6% row coverage scores 0.568x; 66.7%
+scores 0.844x. The pre-registered coverage diagnostic also fails decisively (`time_fraction`
+0.2–4.6% against `m1_book`'s 34.6% in the same binary) — but it **does not predict the deciding
+number**, and reading one from the other would have been wrong. Recorded because the diagnostic was
+registered in advance and must be reported as it came out.
+
+### 4. D81's collapse is a rates-only phenomenon, measured for the first time
+
+**1.22–1.25x**, constant in path count, against **2,565x** on `compare_ois`. Predicted in advance by
+the implementer and confirmed: the telescope needs consecutive ratios, and a product of independent
+factors cannot match. Every claim this project makes about the front half's power is a claim about
+interest-rate curves.
+
+### 5. The sharpest structural finding: a `Select` inside a recurrence destroys the scan layout
+
+Three coupled recurrences scan fine at 75% coverage. Add a running extremum — **every barrier,
+lookback and cliquet** — and the program gets **zero** scan rows, coverage falls to 1–4%, and the
+failure **cascades** onto the spot's own `mul` chain. Domain count goes from constant in the step
+count to linear in it (41 → 105 over 16 → 48 steps); the signature pass reports
+`scan_classes 0, scan_rounds 2` with 503 scan-class domains at 252 steps.
+
+**Nothing in the op set has to change to fix this** — it is a layout/inference gap, not a
+representational one. Gated as a scaling assertion. But note it is **not an alibi for the FAIL**:
+the pure-scanning legs also lose (0.568x–0.844x).
+
+### 6. The independent check held; the default seed did not
+
+The geometric Asian has a closed form, so the test carries a real external-maths check **with no new
+dependency** (standard library only — no D12 entry needed, and D2's "QuantLib later" is untouched).
+On the fixed seed it trips the 3-SE criterion at two points — but that is **the stream, not the
+machinery**: 8 independent seeds give mean z **+0.082** against a standard error of 0.354, and the
+default sub-stream's own draws sit 2.0–3.3 SE below zero with variance correct at 0.991–1.014. The
+seed was **not** changed to make the check pass. The barrier is stated to have **no** external
+oracle rather than being given a continuous-monitoring formula it does not satisfy.
+
+### 7. Two methodological corrections
+
+**(a) `EPYKOS_EXEC_PROFILE` is `PRIVATE` to the `epykos` target**, so no consumer TU can see it. The
+orchestrator's brief told the implementer to guard itself on that macro; its first build printed
+*"build: release"* while linked against a profile `libepykos` — exactly the mix-up the brief warned
+against. Now a runtime probe on `Coverage::time_fraction`. **Any other tool guarding itself that way
+has the same trap waiting.**
+
+**(b) `max_batch` makes the comparison unfair if left at its default.** Charging the B=1 arm for a
+64-lane buffer costs it **41%** (9,861 → 6,979 us). The honest comparison right-sizes each arm; the
+brief did not mention it, and it would have **inflated** the FAIL.
+
+### 8. What this decides, and what it does not
+
+**It does not say "build a JIT".** It says D1's stated revisit condition is met, for the first time,
+and that the back half reaches roughly **half the speed of naive scalar C++** on the domain a payoff
+language would target. Building a payoff language (the review's item 5) on top of that would be
+building the front half on a back half that cannot carry it.
+
+What is now measured rather than assumed:
+- the engine's strengths — recording, domain inference, mechanical adjoints, closure under
+  differentiation, algebra above the pin — are **real and remain real**; nothing here touches them;
+- their *measured* benefit is confined to workloads with **high structural sharing**, and the
+  collapse ratio (2,565x against 1.24x) is the cleanest statement of that boundary this ledger has;
+- the per-row interpretive cost, invisible at 1,000-trades-one-curve, is the whole story at
+  one-row-per-path-step.
+
+The decision — JIT below the pin, a different execution strategy for low-sharing programs, or
+narrowing the engine's claimed domain to match where it wins — is the owner's. This entry records
+only that the question D1 deferred in 2026-09-22 now has a measurement attached.

@@ -91,6 +91,18 @@ SparsityPattern structural_pattern(const Tape& tape, const ImplicitBlock& block)
   const int r_words = (pat.n_residuals + 63) / 64;
   const std::size_t n_nodes = tape.size();
   std::vector<std::uint64_t> mark(n_nodes * idx(r_words), 0);
+  // The sweep starts at the LAST residual node rather than at the end of the tape: nothing after a
+  // residual output can be an ancestor of it, so those nodes can never carry a mark. It matters for
+  // a multi-block problem recorded on one tape -- block 0's residuals sit near the front of a tape
+  // that later holds three more calibrations and a 2,000-trade book, and without this bound every
+  // block would sweep the whole of it.
+  //
+  // The walk has to run over the TAPE and not over the slice `ResidualProgram` builds immediately
+  // afterwards, even though the slice is far smaller: the slice copies only the Inputs the
+  // residuals reach, so a dead unknown is absent from it and the dead-column question cannot be
+  // asked there at all. That absence is exactly what the old backstop detects, and it is why this
+  // analysis cannot be folded into the cheaper object.
+  std::size_t last = 0;
   for (int i = 0; i < pat.n_residuals; ++i) {
     const int o = block.residuals[idx(i)];
     if (o < 0 || static_cast<std::size_t>(o) >= tape.num_outputs()) {
@@ -99,6 +111,7 @@ SparsityPattern structural_pattern(const Tape& tape, const ImplicitBlock& block)
     }
     const node_id id = tape.outputs()[idx(o)];
     mark[idx(static_cast<int>(id)) * idx(r_words) + idx(i / 64)] |= (std::uint64_t{1} << (i % 64));
+    last = std::max(last, static_cast<std::size_t>(id));
   }
   const std::vector<Node>& nodes = tape.nodes();
   auto propagate = [&](const std::uint64_t* from, node_id to) {
@@ -114,8 +127,9 @@ SparsityPattern structural_pattern(const Tape& tape, const ImplicitBlock& block)
   // Rec operators never emit Sum or Affine (only the passes do, and the gate runs before them),
   // so a variadic mutant would be unreachable here and could not be caught.
   const bool forward = mutant("sparsity.closure_forward_order");
-  for (std::size_t k = 0; k < n_nodes; ++k) {
-    const std::size_t n = forward ? k : n_nodes - 1 - k;
+  const std::size_t span = last + 1;
+  for (std::size_t k = 0; k < span; ++k) {
+    const std::size_t n = forward ? k : last - k;
     const std::uint64_t* row = mark.data() + n * idx(r_words);
     bool any = false;
     for (int w = 0; w < r_words && !any; ++w) any = row[idx(w)] != 0;

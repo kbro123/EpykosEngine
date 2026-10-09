@@ -558,7 +558,7 @@ int main(int argc, char** argv) {
                       at >= 0 ? ours.view().family[static_cast<std::size_t>(at)].c_str() : "?");
         }
         results.push_back(fr);
-        continue;   // a disagreement means no timing from this product (the brief's rule)
+        continue;   // a disagreement means no timing from this product (README section 5)
       }
     }
 

@@ -430,6 +430,48 @@ Not a workload: an **inventory**. It takes no timings, defends no baseline and r
 
 ---
 
+## CI — the curve-identity probe (`tools/curveid/`, pre-registration + result `bench/compare/CURVEID.md`)
+
+Not a workload: an **alignment probe**, and the sharpest one available, because it has no tolerance to hide in.
+Same interpolation variable, same scheme, same knots, same instruments => the **same curve**, to solver tolerance.
+It takes no timings, defends no baseline and refuses no box. Behind `-DEPYKOS_H2H=ON`, OFF by default, never in CI;
+unlike `tools/h2h/` it needs only the other engine's **headers** (its curve module is header-only), not a
+configured build of it. D107 (2026-10-09) permits reading that checkout; nothing is copied, and no test case of
+theirs is lifted, so D108's cases-yes/implementations-no line is not exercised.
+
+- **Expectations are pre-registered in a separate, earlier commit** (the D106 standard), cell by cell, derived by
+  reading both engines' curve code. The measurement writes §6 of that file and nothing else in it.
+- **Fixture, generated in the tool, no data files.** Two knot sets — `nonuniform` {0.25, 0.5, 1, 2, 3, 5, 7, 10,
+  15, 20, 30} (the desk-shaped grid; spacing ratios 2:1 to 10:1 are what separate the end-tangent and
+  interior-knot rules) and `uniform` {1 … 8} (the control that tells a spacing-driven difference from a
+  construction-driven one). Four knot-value profiles — `linear` (affine in t, the profile on which several schemes
+  must coincide), `hump`, `step`, `oscillate` (the two that trip a monotonicity limiter). Dense evaluation grid:
+  below the first knot, 16 interior points per knot interval, the knots themselves, and out to 3x the last knot,
+  so knots test the solve while the grid tests the interpolation and the extrapolation.
+- **Three layers, because they localise differently.** (A) scheme-interpolant identity, variable-free — answers
+  whether six shared scheme *names* share a *construction*. (B) whole-curve identity, DF and the instantaneous
+  forward — where the interpolation variable enters and where most of the matrix turns out not to exist.
+  (C) calibration identity — one instrument per knot, maturities at the knots, square, unique root.
+- **The Layer C instrument set is convention-free on purpose**, because a curve-identity probe must not be able to
+  blame a calendar: fixed-vs-OIS par swaps on pure year fractions, annual pays, no calendar, no business-day rule,
+  no day-count fraction, so the time measure on both sides is the knot year fraction and nothing else. The
+  residual *and* the damped Newton are written once in the tool and run against each engine's own curve object, so
+  the solver is a **control**: a differing root is a differing curve.
+- **Every deviation is localised, not just counted.** The shape of the deviation over t decides between units
+  (constant), time measure (grows with t), scheme construction (confined to the knot range) and extrapolation
+  (confined outside it). The roundoff floor is 1e-13 relative and is never widened to make a cell pass.
+- **What it found.** Three of the six shared names are the same construction (`linear`, `hermite`,
+  `natural_cubic`, all at <= 4.3e-16); three share a name only (`flat`, `monotone_cubic`, `bspline`). Their
+  interpolation variable is **not configurable** (always knot forwards) and ours restricts `Variable::forward` to
+  Flat/Linear, so of eighteen cells twelve have no counterpart there, four are not constructible here, and exactly
+  **one** — (forward, linear) — runs the sharpest test end to end and passes it (calibrated knots identical to
+  1.4e-14). A second identity crosses the variable gap: our `logdf`-linear curve and their `Flat` are the same
+  curve on the knot range to 3.1e-16, parting company only in the extrapolation. And the (forward, flat) cell is
+  **structurally singular on our side** — an exact zero column at the last knot, because our Flat anchors a value
+  to the segment that *starts* at its knot while theirs anchors it to the segment that *ends* there.
+
+---
+
 ## MX — G4 multi-currency bundle (stretch)
 - **Currencies:** USD, EUR, GBP, JPY. Collateral/discounting: each currency's OIS; USD SOFR as the cross-currency base.
 - **Curves per currency** (researched, sources in `docs/G4_BUNDLE.md`): the OIS curve from deposits/OIS swaps (and

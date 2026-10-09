@@ -6,7 +6,9 @@ end. `docs/PRIOR_ART.md` holds the measured evidence the design rests on; `docs/
 
 ## What this is
 A financial computation engine that records pricing maths written once (templated on `Scalar`) and compiles it into a
-domain-typed array program executed by pre-compiled fused kernels, with mechanically derived adjoints. **No JIT.**
+domain-typed array program executed by pre-compiled fused kernels, with mechanically derived adjoints. **No JIT
+(D1) — whose revisit clause FIRED on 2026-10-09 (D106): on a path-dependent payoff the back half measures 0.45–0.78x
+the engine's own naive templated `double`. The decision is the owner's and is not taken.**
 
 ## Status
 **The front half of the compiler exists and the engine derives telescoping.** `docs/PRINCIPLES.md`
@@ -128,6 +130,24 @@ release / reference / mutation, macos release) at `b294efc`, which is what `main
 rebuild was merged with the owner on 2026-09-29 (`e85734f`) and **`main` is now the line of
 development**. `origin/integrate/rebuild` is retained at `fb5f0ed`, 20 commits behind `main` and
 ahead by none — history, not a branch to push to. `v1.0-m4` tags the pre-rebuild engine.
+
+**D106, 2026-10-09: the exotics kill test — D1's revisit clause has FIRED, and D81's collapse is
+rates-only.** Commissioned by an external review whose summary was *"you have solved the hard,
+generic problems on the easiest asset class."* Criterion committed **before the fixture existed**
+(verified from git: `6e3a68a` touches only the criterion doc). On a scripted path-dependent payoff
+the engine measures **0.45–0.78x its own naive templated `double`** — FAIL at all nine swept points,
+degrading in both path and step count, with agreement 0.00e+00–4.03e-16: the right answer, computed
+slowly. The mechanism is not the one D1 names: a fixed **2.6–6.0 ns per path-step**, because a path
+grid has one row per path-step and almost no sharing, where the rates book has 1,000 trades sharing
+one curve. **D81's 2,565x collapse measures 1.22–1.25x here** — it is an interest-rate phenomenon,
+and that pair of numbers is the cleanest statement of where this engine wins. Catalogue coverage is
+**anti-correlated** with the verdict (99.6% row coverage scores 0.568x), so the pre-registered
+diagnostic fails but does not predict. Structural finding: **a `Select` inside a recurrence destroys
+the scan layout** — zero scan rows, coverage 1–4%, domain count linear in step count — which every
+barrier, lookback and cliquet hits, and which needs no op-set change. The engine's strengths are
+untouched and remain real; what is now measured is that their benefit is confined to workloads with
+high structural sharing. **The decision — JIT below the pin, a different execution strategy for
+low-sharing programs, or narrowing the claimed domain — is the owner's.**
 
 **D93, 2026-10-06: the architecture is now specified as INVARIANTS WITH GATES (§1b), because goals
 do not bind.** Asked whether these capabilities should have driven the design from day one: partly —

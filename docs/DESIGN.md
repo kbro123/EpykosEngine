@@ -23,7 +23,9 @@ A financial calculation is a function of inputs that change at three different r
 
 Recording the pricing maths against a fixed structure yields a straight-line program over state. EpykosEngine turns that
 program into a **domain-typed array program** (a few array ops over index spaces such as *times*, *coupons*, *legs*), fuses it
-into a small number of pre-compiled kernels, and derives the adjoint mechanically. No JIT.
+into a small number of pre-compiled kernels, and derives the adjoint mechanically. No JIT (D1) — a decision whose
+revisit clause fired on 2026-10-09: D106 measures the catalogue + interpreter at 0.45-0.78x the engine's own naive
+templated `double` on a path-dependent payoff. D1 stands until the owner decides otherwise; it is no longer unexamined.
 
 What that buys, generically (no per-product code):
 - value, gradient (reverse), Hessian-vector (forward-over-reverse);

@@ -64,11 +64,13 @@ struct Ctx {
   int B = 0;
   int b0 = 0;
   int L = 0;
+  bool seed_pull = false;  // Options::seed_pull: see pull() below. Off by default: MEASURED SLOWER
   // Mutants (D32; M2/Q4b), queried once per run() and read by the rules only in the mutation
   // build (mutation::compiled_in is a constexpr false elsewhere, so the checks fold away).
   bool select_wrong_arm = false;  // adjoint.select_wrong_arm: the adjoint goes to the other arm
   bool recip_rule_sign = false;   // adjoint.recip_rule_sign: abar += (ybar*y)*y instead of -=
   bool scan_forward_order = false;  // adjoint.scan_forward_order: the reverse scan runs forwards
+  bool seed_input_pull = false;  // adjoint.seed_input_pull: the Input pull is seeded too
   // M4/C1: per domain, the catalogued kernel for its signature (registry.hpp), or nullptr — both
   // arrays sized p->domains.size(), owned by Impl, built once at construction (nullptr
   // everywhere when Options::use_catalogue is false). forward() below calls the kernel directly
@@ -516,29 +518,114 @@ struct Lanes {
   }
 
   // The pull of rows r0 .. r0 + n of domain d: v̄ from the readers' edge slots (plan.hpp order).
+  //
+  // `Seed` (adjoint::Options::seed_pull, D102 §4 item 1, OFF by default): the first contribution
+  // in plan order is a STORE and the rest `+=`, instead of a zero fill that every contribution
+  // then adds to. The zero fill is an explicit store pass over L lanes per row that
+  // `Adjoint::run` pays for real — not an encoding artefact — and for a value with ONE reader at
+  // unit coefficient, 79.3% of Stage A's pulls, the whole pull becomes a single copy pass. The
+  // fold ORDER is untouched: plan.hpp's four lists in plan.hpp's order, every contribution still
+  // landing in the same position of the same running sum; what goes is the `+ 0.0` that opened it.
+  //
+  // IT IS SLOWER AT THE SHIPPED `lane_tile = 8`, which is why the option is off. The cost below is
+  // PER ROW — a four-way branch and eight CSR offset loads to find the first contribution — and
+  // the saving is PER LANE, L stores, so the net scales as 1/L: measured at B = 64, as a share of
+  // the reverse-pass bound, +20.8% at lane_tile 1, +5.4% at 8, ~0 at 16, -9.6% at 32 on
+  // `compare_ois`(256) and -7.8% on `stage_a`. `Options::seed_pull` in adjoint.hpp carries the
+  // whole table and the fingerprint. D102's 26% of operations was a ceiling and this is what
+  // D103 §3 meant by an op count not converting to a time: here it does not even keep the sign.
+  //
+  // THE ONE CASE THE TWO FORMS DIFFER IN, and why the caller decides. `0.0 + x == x` bitwise for
+  // every finite non-zero x, for every infinity and (payload aside) for every quiet NaN, so the
+  // elision is exact except when the accumulated result is a ZERO and some contribution is
+  // `-0.0`: zero-then-add gives `+0.0`, seeding gives `-0.0`. That is reachable, and not only
+  // through a `-0.0` seed — an `affine_coefs` entry is negative wherever the forward had a `Sub`
+  // or a negative weight, and `-1.0 * (+0.0)` is `-0.0`. So `reverse()` passes Seed = false for a
+  // domain whose group is an `Op::Input` step, whose rule copies v̄ straight into `state_bar`, and
+  // Seed = true for every other domain, where the sign cannot be observed:
+  //
+  //   * every other consumer of a pulled v̄ accumulates it into a step / gather / segment adjoint
+  //     that reverse() has just memset to +0.0, and `(+0.0) + (-0.0)` is `+0.0`. Those buffers
+  //     therefore never hold `-0.0` themselves, which is also what keeps an OUTER pull's first
+  //     contribution unable to carry a sign in (the chain does not compound);
+  //   * `acc_minus` reaches `+0.0` from either sign (`0.0 - (-0.0)` and `0.0 - (+0.0)` are both
+  //     `+0.0`), and multiplying a zero by anything leaves a zero;
+  //   * an adjoint is never a DIVISOR. `acc_div` / `acc_div_aliased` / `acc_plus_div` / `acc_sqrt`
+  //     all divide ȳ by a FORWARD value, so no `±0.0` of an adjoint becomes a `±inf`.
+  //
+  // A value with NO readers still needs the zero fill (its adjoint is zero and `reverse_step`
+  // reads it), which is the last branch of the seeded arm below.
+  //
+  // The two arms are written out separately under `if constexpr` rather than sharing one loop
+  // nest with a peeled first iteration, so that the Seed = false arm is LITERALLY the code it
+  // replaces — same loop bounds, same re-read of the CSR end offsets — and a paired measurement of
+  // the option is measuring the change and not an incidental restructuring of its own reference.
+  template <bool Seed>
   static void pull(const Ctx& c, const Domain& dom, int r0, int n) {
     const AdjointPlan& plan = *c.plan;
     const int L = lanes(c);
     for (int i = 0; i < n; ++i) {
       const size_t v = idx(dom.value_base) + static_cast<size_t>(r0 + i);
       double* dst = c.vbar + v * static_cast<size_t>(L);
-      for (int l = 0; l < L; ++l) dst[l] = 0.0;
-      for (std::int32_t e = plan.output_offsets[v]; e < plan.output_offsets[v + 1]; ++e) {
-        const double* src = c.out_bar + idx(plan.output_readers[idx(e)]) * static_cast<size_t>(c.B) + static_cast<size_t>(c.b0);
-        for (int l = 0; l < L; ++l) dst[l] += src[l];
-      }
-      for (std::int32_t e = plan.gather_offsets[v]; e < plan.gather_offsets[v + 1]; ++e) {
-        const double* src = c.gbar + idx(plan.gather_readers[idx(e)]) * static_cast<size_t>(L);
-        for (int l = 0; l < L; ++l) dst[l] += src[l];
-      }
-      for (std::int32_t e = plan.sum_offsets[v]; e < plan.sum_offsets[v + 1]; ++e) {
-        const double* src = c.segbar + idx(plan.sum_readers[idx(e)]) * static_cast<size_t>(L);
-        for (int l = 0; l < L; ++l) dst[l] += src[l];
-      }
-      for (std::int32_t e = plan.affine_offsets[v]; e < plan.affine_offsets[v + 1]; ++e) {
-        const double coef = plan.affine_coefs[idx(e)];
-        const double* src = c.segbar + idx(plan.affine_readers[idx(e)]) * static_cast<size_t>(L);
-        for (int l = 0; l < L; ++l) dst[l] += coef * src[l];
+      if constexpr (!Seed) {
+        for (int l = 0; l < L; ++l) dst[l] = 0.0;
+        for (std::int32_t e = plan.output_offsets[v]; e < plan.output_offsets[v + 1]; ++e) {
+          const double* src = c.out_bar + idx(plan.output_readers[idx(e)]) * static_cast<size_t>(c.B) + static_cast<size_t>(c.b0);
+          for (int l = 0; l < L; ++l) dst[l] += src[l];
+        }
+        for (std::int32_t e = plan.gather_offsets[v]; e < plan.gather_offsets[v + 1]; ++e) {
+          const double* src = c.gbar + idx(plan.gather_readers[idx(e)]) * static_cast<size_t>(L);
+          for (int l = 0; l < L; ++l) dst[l] += src[l];
+        }
+        for (std::int32_t e = plan.sum_offsets[v]; e < plan.sum_offsets[v + 1]; ++e) {
+          const double* src = c.segbar + idx(plan.sum_readers[idx(e)]) * static_cast<size_t>(L);
+          for (int l = 0; l < L; ++l) dst[l] += src[l];
+        }
+        for (std::int32_t e = plan.affine_offsets[v]; e < plan.affine_offsets[v + 1]; ++e) {
+          const double coef = plan.affine_coefs[idx(e)];
+          const double* src = c.segbar + idx(plan.affine_readers[idx(e)]) * static_cast<size_t>(L);
+          for (int l = 0; l < L; ++l) dst[l] += coef * src[l];
+        }
+      } else {
+        // The four reader ranges, and where each `+=` loop starts: one past the range that
+        // supplied the store, so no `+=` loop carries a per-entry branch of its own.
+        std::int32_t o = plan.output_offsets[v], g = plan.gather_offsets[v];
+        std::int32_t s = plan.sum_offsets[v], a = plan.affine_offsets[v];
+        const std::int32_t o1 = plan.output_offsets[v + 1], g1 = plan.gather_offsets[v + 1];
+        const std::int32_t s1 = plan.sum_offsets[v + 1], a1 = plan.affine_offsets[v + 1];
+        if (o < o1) {
+          const double* src = c.out_bar + idx(plan.output_readers[idx(o++)]) * static_cast<size_t>(c.B) + static_cast<size_t>(c.b0);
+          for (int l = 0; l < L; ++l) dst[l] = src[l];
+        } else if (g < g1) {
+          const double* src = c.gbar + idx(plan.gather_readers[idx(g++)]) * static_cast<size_t>(L);
+          for (int l = 0; l < L; ++l) dst[l] = src[l];
+        } else if (s < s1) {
+          const double* src = c.segbar + idx(plan.sum_readers[idx(s++)]) * static_cast<size_t>(L);
+          for (int l = 0; l < L; ++l) dst[l] = src[l];
+        } else if (a < a1) {
+          const double coef = plan.affine_coefs[idx(a)];
+          const double* src = c.segbar + idx(plan.affine_readers[idx(a++)]) * static_cast<size_t>(L);
+          for (int l = 0; l < L; ++l) dst[l] = coef * src[l];
+        } else {
+          for (int l = 0; l < L; ++l) dst[l] = 0.0;  // no readers: the adjoint is zero
+        }
+        for (; o < o1; ++o) {
+          const double* src = c.out_bar + idx(plan.output_readers[idx(o)]) * static_cast<size_t>(c.B) + static_cast<size_t>(c.b0);
+          for (int l = 0; l < L; ++l) dst[l] += src[l];
+        }
+        for (; g < g1; ++g) {
+          const double* src = c.gbar + idx(plan.gather_readers[idx(g)]) * static_cast<size_t>(L);
+          for (int l = 0; l < L; ++l) dst[l] += src[l];
+        }
+        for (; s < s1; ++s) {
+          const double* src = c.segbar + idx(plan.sum_readers[idx(s)]) * static_cast<size_t>(L);
+          for (int l = 0; l < L; ++l) dst[l] += src[l];
+        }
+        for (; a < a1; ++a) {
+          const double coef = plan.affine_coefs[idx(a)];
+          const double* src = c.segbar + idx(plan.affine_readers[idx(a)]) * static_cast<size_t>(L);
+          for (int l = 0; l < L; ++l) dst[l] += coef * src[l];
+        }
       }
     }
   }
@@ -565,11 +652,18 @@ struct Lanes {
       // Mutant adjoint.scan_forward_order: the scan's rows are reversed in row order, so the
       // carried adjoint arrives after it was pulled.
       const int n_tiles = dp.is_scan ? dom.rows : (dom.rows + c.tile - 1) / c.tile;
+      // Options::seed_pull, and its carve-out: an Input group's rule copies v̄ into `state_bar`
+      // (`dst[l] = src[l]`, not `+=`), so the sign of a zero in THAT pull is an output of the
+      // engine and the pull keeps its zero start. `ir::validate` guarantees an `Op::Input` step is
+      // the only step of its group, so `dp.is_input` is exactly "this domain's v̄ is copied out".
+      // Mutant adjoint.seed_input_pull: the carve-out is dropped and the Input pull is seeded too.
+      const bool seed = c.seed_pull && (!dp.is_input || (mutation::compiled_in && c.seed_input_pull));
       for (int ti = 0; ti < n_tiles; ++ti) {
         const int r0 = dp.is_scan ? ((mutation::compiled_in && c.scan_forward_order) ? ti : dom.rows - 1 - ti) : ti * c.tile;
         const int n = dp.is_scan ? 1 : std::min(c.tile, dom.rows - r0);
         const size_t N = static_cast<size_t>(n) * static_cast<size_t>(L);
-        pull(c, dom, r0, n);
+        if (seed) pull<true>(c, dom, r0, n);
+        else pull<false>(c, dom, r0, n);
         if (dp.is_const) continue;
         // Recompute steps 0 .. last-1 (their operands stay loaded); load the last step's operands.
         for (int k = 0; k < last; ++k) {
@@ -695,9 +789,11 @@ void Adjoint::run(const double* state, int B, const double* out_bar, double* out
   c.out = out;
   c.state_bar = state_bar;
   c.B = B;
+  c.seed_pull = im.opt.seed_pull;
   c.select_wrong_arm = mutant("adjoint.select_wrong_arm");
   c.recip_rule_sign = mutant("adjoint.recip_rule_sign");
   c.scan_forward_order = mutant("adjoint.scan_forward_order");
+  c.seed_input_pull = mutant("adjoint.seed_input_pull");
   c.cat_kernels = m.cat_kernels.empty() ? nullptr : m.cat_kernels.data();
   c.cat_bindings = m.cat_bindings.empty() ? nullptr : m.cat_bindings.data();
 #ifdef EPYKOS_EXEC_PROFILE
@@ -723,7 +819,8 @@ std::string Adjoint::describe() const {
   const Impl& im = *impl_;
   std::ostringstream os;
   os << "adjoint: tile " << im.opt.tile << " rows, lane_tile " << im.opt.lane_tile << " (buffers hold " << im.Lt
-     << " lanes), max_batch " << im.opt.max_batch << "; value buffers " << value_bytes() << " bytes, edge buffers "
+     << " lanes), max_batch " << im.opt.max_batch << ", seed_pull " << (im.opt.seed_pull ? "on" : "off")
+     << "; value buffers " << value_bytes() << " bytes, edge buffers "
      << edge_bytes() << " bytes, scratch " << scratch_bytes() << " bytes, tables " << table_bytes() << " bytes\n";
   os << adjoint::describe(im.plan, *im.p);
   return os.str();

@@ -57,8 +57,11 @@ struct LaneChunk {
 // 125 of 4+1+1+1.
 //
 // WHY THE SPLIT IS SAFE. Lanes are independent: the interpreter evaluates one scenario per lane,
-// and the adjoint's pull() is `dst[l] += src[l]` per lane, over readers held in a plan order that
-// does not depend on L. So cutting a group into disjoint lane ranges reorders nothing and is
+// and the adjoint's pull() is a per-lane zero fill then `dst[l] += src[l]` per reader (and, under
+// `adjoint::Options::seed_pull`, a `dst[l] = src[l]` for the first contribution then `+=` for the
+// rest), over readers held in a plan order that does not depend on L and a choice of first
+// contribution that does not either. So cutting a group into disjoint lane
+// ranges reorders nothing and is
 // bitwise identical to running it whole — PRINCIPLES.md §5.2a case 1 ("one lane width against
 // another ... it stays bitwise"), and the gate above is that test. The one L-dependent quantity
 // in either runtime is `acc_rows_in_flight_for` (src/exec/plan.hpp), which blocks a reduction

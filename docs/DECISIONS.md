@@ -8997,6 +8997,11 @@ after the merge.
 
 ## D110 — Curve identity: where it can be tested it HOLDS exactly; three of six shared scheme names are the same construction; and our own (forward, flat) calibration is structurally singular (2026-10-09)
 
+> **§3 is corrected by D111 §1.** "We do not detect it" is wrong in the COLUMN direction:
+> `src/solver/residual.cpp:68` has always thrown on an unknown no residual reads. `tools/curveid/`
+> found the singularity with its own finite-difference solver and never put that configuration to
+> the engine's recorder, so the existing guard never ran. The ROW direction was genuinely missing.
+
 The owner's claim: *"if we are interpolating the same things, with the same interpolation scheme,
 then we should see our curves are identical given the same calibration instruments."* Correct — and
 testing it found that the surface on which it can be stated is far smaller than either engine's
@@ -9094,3 +9099,127 @@ interval correspondence, not independent arithmetic — the DF rows are the inde
 3. **"Differences at ~1e-15 are the solve"** — the interpolant and DF layers have no solve at all;
    their floor is ~4e-16.
 4. **`monotone_cubic` framed as a limiter question.** The limiter is where the two engines *agree*.
+
+---
+
+## D111 — The structural solve gate: half of it already existed, the colouring is worth nothing, and the mutation harness selects gates by FILENAME (2026-10-10)
+
+The owner asked whether rank deficiency is something the engine can find rather than something we
+hand-code a check for. It is, it needs no new rule, and building it found three things worth more
+than the gate.
+
+`include/epykos/solver/sparsity.hpp` + `src/solver/sparsity.cpp`: `structural_pattern(tape, block)`
+computes the bipartite unknown↔residual pattern by one reverse sweep over operand edges from the
+residual nodes. `check_structure` runs once in `detail::implicit_end` — at block registration,
+before any market data — and throws. Test: `tests/solver/structural_gate_verify_test.cpp`, 7 cases;
+`(forward, flat)` with knots at maturities fires naming `z[4]`, while `(forward, linear)`,
+`(logdf, linear)` and `compare_ois`'s family are admitted.
+
+**No field was added to `SolveReport`**: the pattern is a property of the *block*, not of a solve,
+so D94's NaN trap is avoided rather than navigated. `dce` unchanged, `PartialPivLU` unchanged.
+
+### 1. Correction to D110 §3: half the gate already existed
+
+D110 §3 said *"we do not detect it"*. **Wrong in the column direction.** `src/solver/residual.cpp:68`
+has always thrown — *"unknown j (tape input k) is read by no residual: a zero Jacobian column"* —
+not as a reachability pass but because `slice()` copies only reached Inputs, so an unreached unknown
+has no ordinal to bind to. `tools/curveid/` found the `(forward, flat)` singularity with **its own
+finite-difference solver** and never put that configuration to the engine's recorder, so the
+existing guard never ran.
+
+What genuinely did not exist is the **row** direction, and a false claim covered for it:
+`implicit.hpp` said `implicit_end` *"checks every unknown is read by some residual"* — it checked
+`tainted`, which a residual reading only a quote satisfies.
+
+### 2. `ir::sharing::reach` is unsound for this, and fails in the worst available way
+
+The orchestrator's brief offered it as one of two routes. It cannot work: `ir/program.hpp` makes
+every input a row of **one** Input domain, so a domain-level mask is dense by construction — the
+tool prints *"50 slice inputs occupy 1 domain(s); that one domain's mask has 25 of 25 residual bits
+set"*. It also caps at 32 groups against Stage A's 70 residuals.
+
+The failure mode is the one to remember: a dense pattern is a **sound superset**, so nothing throws
+and nothing crashes. The gate simply never fires, and a colouring built on it reports
+`colours = n_r` — **which looks exactly like an honest negative result.** A wrong analysis that
+produces a plausible "no win here" is worse than one that crashes.
+
+### 3. An under-determined calibration is not merely undetected — it is unrepresentable
+
+The opt-out the brief asked for is **half-implementable**, for a representation reason. For a dead
+**row** it is honoured: a constant row rides the over-determined path, records, and returns
+not-converged at ‖F‖∞ = 1e-3. For a dead **column** it cannot be: an unknown no residual reads has
+no slot. So below this gate there is no under-determined calibration to opt into. Throw-by-default
+stands and the asymmetry is documented, rather than shipping a flag that promises what it cannot
+deliver.
+
+A structural analysis suffices for a numerically-stated defect only because `flat_masses` omits
+zero-mass knots from the term list — the knot is *absent* from the tape, not present at weight 0.
+Measured TIGHT (structural nonzeros == numerical nonzeros) on every block of every fixture.
+
+### 4. The finding that outranks the gate: `mutation_test.sh` selects gates by FILENAME
+
+As `structural_gate_test.cpp`, the mutant `sparsity.gate_never_fires` **survived the full 76-gate
+run** while failing that very test by hand. `scripts/mutation_test.sh:81` selects gates with
+`GATE_REGEX = roundtrip|differential|verify|_adjoint_test$|_vs_dual_test$|_e0_test$` against the
+**ctest name**. Verified by the orchestrator:
+
+    solver_structural_gate_test          *** EXCLUDED ***
+    solver_structural_gate_verify_test   SELECTED
+    exec_variants_test                   *** EXCLUDED ***
+    stage_a_variants_verify_test         SELECTED
+
+**A correctly-written catcher is invisible to the harness unless its name happens to match**, and
+the harness then reports the mutant as surviving. This is the **second** instance:
+`interpreter.duplicate_output_unwritten` is in the registry because the same thing happened to
+`variants_test.cpp`.
+
+It is the session's recurring finding — *a gate binds only what it can observe* (D98 §2(c), D99 §4,
+D100 §1, D101 §4, D105 §4) — raised one level, and it is the most serious of them because it
+applies to **every** gate rather than one. A naming convention is silently load-bearing for
+correctness coverage. Renamed; both mutants now die and **every mutant is caught** across all 64.
+
+### 5. Colour counts: the prediction was right about the answer and wrong about the mechanism
+
+| object | colours | lane reduction |
+|---|---|---|
+| `compare_ois`, 25 tenors (D92's workload) | **25 of 25** | **1.000x** |
+| Stage A `Mode::sequential` (shipped) | 56 of 70 | 1.250x |
+| Stage A `Mode::joint` | 35 of 70 | 2.000x |
+
+**The single-curve prediction is confirmed exactly, reasoning included**: a perfect dense lower
+triangle at 52% density, column 0 in every row, so no two columns are ever orthogonal and
+`colours = n_r`.
+
+**The multi-curve prediction attributed the prize to the wrong thing.** There is no cross-curve
+prize in the shipped mode, because **`CurveSet::calibrate` already records one block per SCC** and a
+later block reads an earlier block's unknowns as *parameters*, never unknowns. The per-curve block
+diagonality was extracted at **recording time** — the engine had already done the decomposition the
+colouring was hoping to discover. Only `Mode::joint` leaves the question open, and there it is
+2.000x with components of 22 and 48, exactly the ESTR coupling.
+
+The implementer's own prediction (1.00x everywhere) was also wrong, by a mechanism in neither:
+**instrument heterogeneity within one curve.** The SR3 futures strip reads two bracketing knots per
+row, so rows 5 and 7 are pairwise orthogonal. `compare_ois` has no such rows, which is why it is
+exactly 1.000x. Also measured: no fill above the diagonal anywhere, and `stage_a` (linear-zero) and
+`stage_a_h2h` (logdf-linear) give identical counts — **the pattern is a property of the instruments,
+not of the interpolation variable.**
+
+### 6. Verdict: do not build the colouring
+
+The decisive number is a measurement, not an estimate: **D92's 229 us was measured on `compare_ois`
+at 25 knots, where colouring removes exactly zero lanes.** Stage A's 1.250x removes 20% of the
+build — ≈17% of cold calibration once per session, **0% of the warm path** (the chord builds no
+Jacobian), ~0.4% of one 256-row ladder decaying as 1/N (estimates, labelled).
+
+Against that: a multi-seed lane path through `adjoint::Adjoint` turns each Jacobian entry into an
+accumulation, and `0.0 + (−0.0) ≠ −0.0` is precisely why `a2p.drop_zero_start` and
+`adjoint.seed_input_pull` exist. A bitwise gate and a §5.2 question for roughly nothing.
+
+**Fourth lead in this session to look like a win from an operation count and measure at or near
+zero**, after D92's closed-form Jacobian, D104's lane decomposition and D105's `pull()` seeding.
+
+### 7. Loose end
+
+The two new mutants have no line in `scripts/mutation_catchers.tsv`, so they take the full-gate
+fallback. That file's header states a missing line *"can never turn a survivor into a pass"* — it
+costs time, never correctness — so this is safe; a `--full` run on an idle box would tidy it.

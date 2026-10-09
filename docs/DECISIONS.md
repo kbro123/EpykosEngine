@@ -8749,3 +8749,76 @@ What is now measured rather than assumed:
 The decision — JIT below the pin, a different execution strategy for low-sharing programs, or
 narrowing the engine's claimed domain to match where it wins — is the owner's. This entry records
 only that the question D1 deferred in 2026-09-22 now has a measurement attached.
+
+---
+
+## D107 — D11's reading prohibition is lifted; the copying prohibition is not. And the head-to-head covers a quarter of what we already price (2026-10-09)
+
+### 1. The grant
+
+**The owner lifted D11's prohibition on reading the SwapEngine checkout on 2026-10-09**, in full and
+without a file list. D78's narrow grant (`tools/h2h/` alone, public facade only, every file
+enumerated in `bench/compare/README.md`) and D92 §5's single-document grant are both superseded by
+it. The per-file ledger those entries required is retired as of this date.
+
+**What is NOT lifted, and is now load-bearing in a way it was not before:** nothing may be copied,
+ported or adapted into `include/epykos/` or `src/`. The engine is written from this repository's own
+documents. **The clean-room property is precisely what makes a head-to-head benchmark mean
+anything** — an engine that has absorbed the other's implementation is not an independent
+comparison, it is a fork with a scoreboard. Reading to understand *the comparison surface* is now
+unrestricted; reading to borrow *an implementation* is still prohibited, and the prohibition is
+harder to police now that the first half is free. D92 §5's laundering guard still applies: having
+read their code, a search that "rediscovers" something in it is not evidence of anything.
+
+`tools/` may reference their public headers, as `tools/h2h/` already does, behind
+`-DEPYKOS_H2H=ON`, OFF by default, never in CI.
+
+### 2. What the comparison surface actually is
+
+Their calibration instruments are `enum class QuoteKind` (`include/swaps/calibration/problem.hpp`),
+**nine**: `ParRate`, `ParSpread`, `Rate`, `ZeroCouponRate`, `FxForward`, `XccyMtmBasis`, `Portfolio`,
+`TurnJump`, `Npv`. Ours are `enum class Kind`
+(`include/epykos/maths/instrument/tables.hpp`), **five**: `Ois`, `Irs`, `Basis`, `Deposit`, `Future`
+— which map onto `ParRate`, `ParSpread` and `Rate`. **Three of their nine.**
+
+Beyond rates they carry entire problem families we have nothing for: inflation
+(`inflation_instrument.hpp`, `Kind { ZCIS, YoY }`), credit (`credit_instrument.hpp`,
+`credit_problem.hpp`), bond fitting (`bond_fit.hpp`, `bond_universe.hpp`), FX (`fx_pairs.hpp`) and
+cross-currency (`portfolio::Position::Kind { Swap, Xccy }`), plus CSA/collateral (`csa.hpp`), P&L
+explain, consistent risk and regularisation. Their README states the shape plainly: *"SOFR + Fed
+Funds + ESTR + EURIBOR + a cross-currency curve share one stacked state, with forecast ≠ discount
+pricing, basis chains, FX forwards and MtM cross-currency swaps."*
+
+So **"compare on all the products they support" is not achievable**, and saying otherwise would be
+the dishonest answer: most of them we cannot price at all. What is achievable is a comparison over
+the shared surface, and an honest, *generated* statement of the rest.
+
+### 3. The finding that should have been noticed earlier
+
+**Our head-to-head compares roughly a quarter of what Epykos already prices.**
+
+`bench/compare/README.md` §1: one USD SOFR OIS curve and a book of OIS trades.
+`blueprints/problems/stage_a.json`: **4 curves** (USD-SOFR, EUR-ESTR, EUR-EURIBOR-3M,
+EUR-EURIBOR-6M), 2 currencies, **2,000 trades**, **8 blueprints** across five families — SOFR OIS
+plain / shift-2 / shift-2 + lockout-2, SOFR averaging swaps, ESTR OIS, EURIBOR 3M and 6M IRS, 3s6s
+basis — **40 netting sets**, **20% seasoned** with realised fixings.
+
+Every figure this project quotes against the other engine — D81's 161x, D90's 47.9x pricing and
+6.12x ladder, the 2.24x warm calibration — was measured on **plain OIS on one curve**. Whether the
+advantage survives basis, averaging swaps, seasoned trades and a 4-curve stacked solve is **not
+known**, and closing that needs no new maths: it needs the harness to carry the problem we already
+have. That is now the first piece of work, ahead of any new product.
+
+`FxForward` and `XccyMtmBasis` are blocked on more than a harness change: Stage A's own notes record
+that it **has no FX** — the USD conversion of EUR values is a placeholder of 1.0, and *"Stage B
+replaces it with an FX spot input"*.
+
+### 4. Two measurement faults the new harness must not inherit
+
+**The ladder is one row.** D103 §1: `tools/h2h/h2h_main.cpp:334` passes a single book-level ordinal,
+so D90's flagship 531.5 us is the one-row case that D92 had separately shown to be unrepresentative
+(the Jacobian's share decays 31.3% at one row to 0.5% at 256). **A ladder figure without its row
+count and book size is not a measurement**, and from here both are stated.
+
+**`max_batch` and `lane_tile` move results materially** (D104; a ~22% cliff at `lane_tile = 32`) and
+were never quoted. Both are stated from here too.

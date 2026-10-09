@@ -199,12 +199,25 @@ have an exact mechanism:
 
 ### 6.3 The bridge — measured exactly as pre-registered
 
-| profile | DF on [0, t_last] | DF on the whole grid |
-|---|---|---|
-| `linear` | 2.13e-16 rel — **IDENTICAL** | 9.33e-01 rel @ t=90 — **extrapolation** |
-| `hump` | 1.56e-16 rel — **IDENTICAL** | 8.35e-01 rel @ t=90 — **extrapolation** |
-| `step` | 2.49e-16 rel — **IDENTICAL** | 9.50e-01 rel @ t=90 — **extrapolation** |
-| `oscillate` | 3.05e-16 rel — **IDENTICAL** | 9.92e-01 rel @ t=90 — **extrapolation** |
+| profile | DF on [0, t_last] | f(t) on [0, t_last] | DF on the whole grid |
+|---|---|---|---|
+| `linear` | 2.13e-16 rel — **IDENTICAL** | **BITWISE EQUAL** | 9.33e-01 rel @ t=90 — **extrapolation** |
+| `hump` | 1.56e-16 rel — **IDENTICAL** | **BITWISE EQUAL** | 8.35e-01 rel @ t=90 — **extrapolation** |
+| `step` | 2.49e-16 rel — **IDENTICAL** | **BITWISE EQUAL** | 9.50e-01 rel @ t=90 — **extrapolation** |
+| `oscillate` | 3.05e-16 rel — **IDENTICAL** | **BITWISE EQUAL** | 9.92e-01 rel @ t=90 — **extrapolation** |
+
+**What each of those two columns proves is not the same thing, and the stronger-looking number is
+the weaker one.** The DF column is independent arithmetic: ours exponentiates an interpolated
+`log DF`, theirs exponentiates an accumulated integral of a step function, and they agree at the
+roundoff floor. The f(t) column is *not* independent — the bridge builds `x_k` with the same
+expression the difference quotient inverts — so `BITWISE EQUAL` there establishes the **interval
+correspondence** (their `Flat` is end-anchored exactly as read, and our origin knot lands where it
+must) rather than the agreement of two separate computations. The probe prints that caveat itself,
+next to the numbers.
+
+Our instantaneous forward is computed from the engine's own `log_df` at the bracketing knots: a
+difference quotient across an interval on which `log DF` is *exactly* affine is the exact forward,
+not an approximation, and no formula is re-derived by hand in the tool.
 
 Our `logdf`-linear curve and their `Flat` forward curve are **the same curve** on the knot range,
 to 3.1e-16, on every profile — which confirms the level and sign conventions line up exactly and

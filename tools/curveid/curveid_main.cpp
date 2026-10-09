@@ -233,6 +233,10 @@ Dev compare(const std::vector<double>& knots, const std::vector<double>& grid,
 
 void print_dev(const char* label, const Dev& d) {
   if (!d.valid) { std::printf("    %-26s NOT COMPARABLE — %s\n", label, d.note.c_str()); return; }
+  if (d.max_abs == 0.0) {
+    std::printf("    %-26s BITWISE EQUAL at every grid point (max|dev| exactly 0)\n", label);
+    return;
+  }
   std::printf("    %-26s max|dev| %.3e @ t=%-8.4g (interval %2d)   max rel %.3e @ t=%-8.4g   %s\n",
               label, d.max_abs, d.at_abs, d.interval, d.max_rel, d.at_rel, name_of(d.cause));
 }
@@ -416,6 +420,13 @@ void bridge() {
   std::printf("==================================================================================\n");
   std::printf("THE BRIDGE — ours (linear, logdf) against their Flat on the DERIVED knot forwards\n");
   std::printf("  x_k = -(y_k - y_{k-1}) / (t_k - t_{k-1}),  y_{-1} = 0 at t = 0 (our origin knot)\n");
+  std::printf("  NOTE ON WHAT EACH ROW PROVES. The DF rows are INDEPENDENT arithmetic: ours\n");
+  std::printf("  exponentiates an interpolated log DF, theirs exponentiates an accumulated integral\n");
+  std::printf("  of a step function. The f(t) row is NOT independent -- x_k above is built with the\n");
+  std::printf("  same expression the difference quotient inverts -- so a bitwise result there proves\n");
+  std::printf("  the INTERVAL CORRESPONDENCE (their Flat is end-anchored exactly as read) and not\n");
+  std::printf("  that two separate computations agree. Both are worth having; they are not the same\n");
+  std::printf("  claim, and the stronger-looking number is the weaker one.\n");
   std::printf("==================================================================================\n");
   const KnotSet& ks = knot_sets()[0];
   const std::vector<double> grid = dense_grid(ks.t);
@@ -436,14 +447,29 @@ void bridge() {
     b.set(x);
     std::vector<double> adf(grid.size()), bdf(grid.size());
     std::vector<double> ain, bin, gin;  // the knot range alone, to separate the two regimes
+    // The INSTANTANEOUS FORWARD, which is the most sensitive of the three quantities and the one
+    // the comparison is really about. Our logdf curve has no forward accessor, but it does not
+    // need one: log DF is EXACTLY affine on each (t_{k-1}, t_k], so the difference quotient of
+    // the engine's own `log_df` across that interval is the exact forward there, not an
+    // approximation and not a formula re-derived by hand here.
+    std::vector<double> afwd, bfwd, gf;
     for (std::size_t i = 0; i < grid.size(); ++i) {
       adf[i] = a.df(grid[i]);
       bdf[i] = b.df(grid[i]);
       if (grid[i] <= ks.t.back()) { ain.push_back(adf[i]); bin.push_back(bdf[i]); gin.push_back(grid[i]); }
+      const double t = grid[i];
+      if (t <= 0.0 || t > ks.t.back()) continue;
+      const std::size_t k = static_cast<std::size_t>(std::lower_bound(ks.t.begin(), ks.t.end(), t) - ks.t.begin());
+      const double hi = ks.t[k];
+      const double lo = k == 0 ? 0.0 : ks.t[k - 1];
+      afwd.push_back(-(a.log_df(hi) - a.log_df(lo)) / (hi - lo));
+      bfwd.push_back(b.fwd(t));
+      gf.push_back(t);
     }
     std::printf("  profile %s\n", name_of(p));
     print_dev("DF, whole grid", compare(ks.t, grid, adf, bdf));
     print_dev("DF, [0, t_last] only", compare(ks.t, gin, ain, bin));
+    print_dev("f(t), [0, t_last] only", compare(ks.t, gf, afwd, bfwd));
   }
 }
 

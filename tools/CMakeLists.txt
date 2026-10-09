@@ -1,4 +1,8 @@
 # tools/ — build-time tooling that is not engine API and not a gtest / Google Benchmark target:
+# tools/curveid/ is the curve-identity probe (bench/compare/CURVEID.md): same variable, same
+# scheme, same knots, same instruments => the same curve, to solver tolerance. Like tools/h2h/ it
+# is behind -DEPYKOS_H2H=ON, OFF by default and never in CI, but it needs only the other engine's
+# HEADERS (its curve module is header-only), not a configured build of it. It takes no timings.
 # tools/coverage/ emits bench/compare/COVERAGE.md, the generated coverage matrix against the other
 # engine (our side discovered from the shipped enums and blueprints/ at run time, their side a
 # dated snapshot citing a file and symbol per row); it takes no timings and refuses no box.
@@ -42,6 +46,9 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/exotics/CMakeLists.txt")
 endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/h2h/CMakeLists.txt")
   add_subdirectory(h2h)
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/curveid/CMakeLists.txt")
+  add_subdirectory(curveid)
 endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/coverage/CMakeLists.txt")
   add_subdirectory(coverage)

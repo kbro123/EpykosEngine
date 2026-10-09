@@ -125,7 +125,21 @@ tests/compare/h2h_problem_test   the head-to-head's problem DATA (§1). Also CI,
 tools/coverage/coverage          the capability inventory: writes COVERAGE.md. Links `epykos`
                                  only, takes no timings, safe on a loaded box. Exits non-zero
                                  rather than emitting a matrix this repository has outgrown.
+tools/curveid/curveid            THE CURVE-IDENTITY PROBE: same variable, same scheme, same
+                                 knots, same instruments => the same curve, to solver tolerance.
+                                 Pre-registration and result in CURVEID.md. Behind
+                                 -DEPYKOS_H2H=ON but needs only their HEADERS (their curve
+                                 module is header-only), not a configured build. Takes no
+                                 timings; prints `--layer-a` / `--layer-b` / `--layer-c` or all.
 ```
+
+`curveid` is the one piece here that puts the interpolation **scheme** back into the comparison:
+everything else deliberately takes it out, because `fixtures::compare_ois` is `linear` on `logdf`
+(§4). It is the probe that established that of the six shared scheme names three are the same
+construction and three only share a name, and that their interpolation variable is not
+configurable at all — see CURVEID.md §6.
+
+Run it:
 
 ### `tools/h2h` — the recipe
 

@@ -36,6 +36,34 @@
         {"blueprint": "EUR-EURIBOR-3M-FUTURE", "contracts": 8},
         {"blueprint": "EUR-3S6S-BASIS", "tenors": ["3Y", "4Y", "5Y", "7Y", "10Y", "12Y", "15Y", "20Y", "30Y"]}
       ]
+    },
+    "EUR-ESTR-LOGDF": {
+      "index": "EUR-ESTR", "currency": "EUR",
+      "description": "The same instrument set on log-linear discount factors (piecewise-constant forwards): the EUR counterpart of USD-SOFR-LOGDF, and the ONE curve family the second engine's bundle curve was measured to share (bench/compare/README.md section 3, D71).",
+      "scheme": "linear", "variable": "logdf",
+      "instruments": [
+        {"blueprint": "EUR-ESTR-ON-DEPOSIT", "tenor": "1D"},
+        {"blueprint": "EUR-ESTR-OIS", "tenors": ["1M", "2M", "3M", "6M", "9M", "1Y", "18M", "2Y", "3Y", "4Y", "5Y", "7Y", "10Y", "12Y", "15Y", "20Y", "30Y"]}
+      ]
+    },
+    "EUR-EURIBOR-6M-LOGDF": {
+      "index": "EUR-EURIBOR-6M", "currency": "EUR",
+      "description": "The same instrument set on log-linear discount factors (piecewise-constant forwards): the h2h-matched family.",
+      "scheme": "linear", "variable": "logdf",
+      "instruments": [
+        {"blueprint": "EUR-EURIBOR-6M-DEPOSIT", "tenor": "6M"},
+        {"blueprint": "EUR-EURIBOR-6M-IRS", "tenors": ["1Y", "2Y", "3Y", "4Y", "5Y", "7Y", "10Y", "12Y", "15Y", "20Y", "30Y"]}
+      ]
+    },
+    "EUR-EURIBOR-3M-LOGDF": {
+      "index": "EUR-EURIBOR-3M", "currency": "EUR",
+      "description": "The same instrument set on log-linear discount factors (piecewise-constant forwards): the h2h-matched family.",
+      "scheme": "linear", "variable": "logdf",
+      "instruments": [
+        {"blueprint": "EUR-EURIBOR-3M-DEPOSIT", "tenor": "3M"},
+        {"blueprint": "EUR-EURIBOR-3M-FUTURE", "contracts": 8},
+        {"blueprint": "EUR-3S6S-BASIS", "tenors": ["3Y", "4Y", "5Y", "7Y", "10Y", "12Y", "15Y", "20Y", "30Y"]}
+      ]
     }
   }
 }

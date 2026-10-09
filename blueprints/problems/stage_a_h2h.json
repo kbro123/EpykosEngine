@@ -1,0 +1,91 @@
+{
+  "meta": {
+    "title": "Stage A for the head-to-head: the SAME problem as stage_a.json with every curve on the ONE family the second engine shares (bench/compare/README.md section 3; D21, D78)",
+    "description": "DEFINITIONS ONLY (D36), and a near-copy of blueprints/problems/stage_a.json: the same four curves, the same two currencies, the same instrument sets, the same 2,000-trade mix across 8 blueprints and 5 families, the same seasoned fraction, netting sets, tenor and notional distributions, the same generating levels and the same seed -- so the fixture is the same desk problem and is comparable, trade for trade, with the one stage_a.json builds. EXACTLY ONE thing differs: each curve names its -LOGDF definition instead of its linear-zero one, i.e. log DF piecewise linear on {0, knots...} == piecewise-constant instantaneous forward. That is not a performance choice and it is not cosmetic: it is the only interpolation family the second engine's bundle curve was MEASURED to be (D71 reproduces its sampled discount factors to 0.000e+00 relative), so it is what makes a curve, an NPV and a ladder comparison between the two engines a comparison of two ENGINES rather than of two interpolation schemes. stage_a.json's linear-zero parameterisation has no counterpart there at all: that engine's free variables are its curves' own instantaneous forwards, so `Linear` interpolates the FORWARD, which is a different function space from a piecewise-linear zero rate. Everything numeric remains generated in code from the seed by include/epykos/fixtures/stage_a.hpp and is SYNTHETIC: nothing here is market data. The scenario block is carried verbatim and is unused by the head-to-head (O4 is not compared).",
+    "sources": [
+      "blueprints/problems/stage_a.json (this file's parent: every field but the four curve definitions is copied from it)",
+      "bench/compare/README.md section 3 (the curve family is the load-bearing choice) and section 4 (matched / not matched)",
+      "docs/DECISIONS.md D71 (the measurement that established the other engine's curve family), D78 and D90 (the one-process head-to-head)"
+    ],
+    "notes": [
+      "The USD slot names USD-SOFR-LOGDF, which blueprints/curves/usd.json already carried as a variant of USD-SOFR; the three EUR -LOGDF definitions were added to blueprints/curves/eur.json for this problem and are its EUR counterparts, same instruments, same knots.",
+      "`variants` is empty on every slot here. The scheme sweep is stage_a.json's business; this problem exists to be matched, so it offers no alternative to be matched against.",
+      "Knots are still at the instruments' own maturities and every block is still square, so neither engine needs a pseudo-inverse or a regulariser -- which the two would not share (README section 4)."
+    ]
+  },
+  "problem": {
+    "name": "stage_a_h2h",
+    "valuation": "2026-09-23",
+    "seed": 20260923,
+    "currencies": ["USD", "EUR"],
+    "reporting_currency": "USD",
+    "fx": [
+      {"currency": "USD", "placeholder": 1.0},
+      {"currency": "EUR", "placeholder": 1.0}
+    ],
+    "curves": [
+      {"definition": "USD-SOFR-LOGDF", "variants": [],
+       "generating": {"short": 0.0380, "long": 0.0430, "reversion_years": 3.0}},
+      {"definition": "EUR-ESTR-LOGDF", "variants": [],
+       "generating": {"short": 0.0195, "long": 0.0265, "reversion_years": 3.0}},
+      {"definition": "EUR-EURIBOR-3M-LOGDF", "variants": [],
+       "generating": {"short": 0.0205, "long": 0.0275, "reversion_years": 3.0}},
+      {"definition": "EUR-EURIBOR-6M-LOGDF", "variants": [],
+       "generating": {"short": 0.0213, "long": 0.0283, "reversion_years": 3.0}}
+    ],
+    "quotes": {
+      "description": "As stage_a.json: each curve's quotes are the par quotes of the generating curves plus uniform noise of +/- noise_bp on every rate quote and +/- futures_noise_price on every futures price, so the calibration is a fit and not an identity.",
+      "noise_bp": 1.0,
+      "futures_noise_price": 0.01
+    },
+    "fixings": {
+      "description": "As stage_a.json: SYNTHETIC histories, one rate per fixing business day from `from` to the day before the valuation date, a mean-reverting walk around the level, seed = problem seed + slot.",
+      "from": "2024-01-01",
+      "daily_vol": 0.0001,
+      "reversion": 0.02,
+      "levels": [
+        {"index": "USD-SOFR", "level": 0.0385},
+        {"index": "EUR-ESTR", "level": 0.0195},
+        {"index": "EUR-EURIBOR-3M", "level": 0.0205},
+        {"index": "EUR-EURIBOR-6M", "level": 0.0213}
+      ]
+    },
+    "book": {
+      "description": "As stage_a.json, trade for trade: SOFR OIS compounded (plain with the 2-day payment delay, observation shift, shift + lockout), SOFR averaging swaps, ESTR OIS, EURIBOR swaps fixing in advance, 3s6s basis swaps; about 20% seasoned with realised fixings. Same seed, same sub-streams, same draws.",
+      "trades": 2000,
+      "mix": [
+        {"blueprint": "USD-SOFR-OIS", "weight": 25},
+        {"blueprint": "USD-SOFR-OIS-SHIFT2", "weight": 10},
+        {"blueprint": "USD-SOFR-OIS-SHIFT2-LOCKOUT2", "weight": 10},
+        {"blueprint": "USD-SOFR-AVG-SWAP", "weight": 10},
+        {"blueprint": "EUR-ESTR-OIS", "weight": 15},
+        {"blueprint": "EUR-EURIBOR-6M-IRS", "weight": 12},
+        {"blueprint": "EUR-EURIBOR-3M-IRS", "weight": 8},
+        {"blueprint": "EUR-3S6S-BASIS", "weight": 10}
+      ],
+      "tenors": [
+        {"tenor": "1Y", "weight": 10}, {"tenor": "2Y", "weight": 14}, {"tenor": "3Y", "weight": 14},
+        {"tenor": "4Y", "weight": 8}, {"tenor": "5Y", "weight": 16}, {"tenor": "7Y", "weight": 10},
+        {"tenor": "10Y", "weight": 14}, {"tenor": "12Y", "weight": 3}, {"tenor": "15Y", "weight": 4},
+        {"tenor": "20Y", "weight": 3}, {"tenor": "25Y", "weight": 1}, {"tenor": "30Y", "weight": 3}
+      ],
+      "notional": {"min": 1000000, "max": 200000000, "distribution": "log_uniform"},
+      "seasoned_fraction": 0.2,
+      "seasoned_age_days": {"min": 30, "max": 1500},
+      "netting_sets": 40,
+      "rate_moneyness": 0.15
+    },
+    "scenarios": {
+      "description": "Carried verbatim from stage_a.json and NOT used by the head-to-head (O4 is not one of the four compared phases). It is kept so this definition is the same document shape and so an O4 run on the matched family needs no new file.",
+      "count": 1000,
+      "families": [
+        {"name": "parallel", "count": 250, "size_bp": 100.0, "pivot_years": 0.0},
+        {"name": "twist", "count": 250, "size_bp": 100.0, "pivot_years": 5.0},
+        {"name": "butterfly", "count": 250, "size_bp": 50.0, "pivot_years": 5.0},
+        {"name": "per_curve", "count": 250, "size_bp": 100.0, "pivot_years": 0.0}
+      ],
+      "t_max_years": 30.0,
+      "solver": {"jacobian": "chord", "warm_start": false}
+    }
+  }
+}

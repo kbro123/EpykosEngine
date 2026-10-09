@@ -351,6 +351,51 @@ interpreter. Parity gate: catalogued groups within 1.05× of the hand-fused refe
 
 ---
 
+## XP — the exotics path grid (D1's revisit clause; `docs/EXOTICS_KILL_TEST.md`)
+
+The first **path-dependent** payoff in the repository. Every other fixture here is an interest-rate swap, so D1's
+revisit clause — "revisit only if M1/M3 show the catalogue + interpreter cannot reach the gates" — had only ever been
+tested on the easiest asset class there is. `include/epykos/fixtures/exotic_path.hpp`, test-only (D28), header-only so
+the including TU's contraction setting governs the arithmetic.
+
+- **Model:** Black–Scholes GBM with **exact log increments** — the exact GBM law, not an Euler approximation of it,
+  which is what makes the geometric closed form below an exact check rather than an approximate one:
+  `S_{k,p} = S_{k-1,p}·exp((r − q − σ²/2)·Δt + σ·√Δt·ε_{k,p})`, `Δt = T/K`, `T = 1`.
+- **Draws:** sub-stream `exotic_path_substream_base = 530000`, step-major so that a grid with more steps *extends* a
+  shorter one's draws rather than reshuffling them, and a sweep over `K` nests (D17). `ε` is **structure**, a Column,
+  never an input.
+- **Inputs (6, ordinal order):** `S0 = 100`, `r = 0.03`, `q = 0.01`, `σ = 0.20`, strike `X = 100`, up-barrier
+  `Bu = 130`. The barrier is above the forward so the knock-out bites.
+- **Payoffs**, written as a payoff *script* writes them — running accumulators inside the time loop, not a stored path
+  folded afterwards — all discounted at `exp(−rT)`:
+  - arithmetic Asian call: `A_p = Σ_k S_{k,p}`, payoff `max(A_p/K − X, 0)`;
+  - geometric Asian call: `L_p = Σ_k log S_{k,p}`, payoff `max(exp(L_p/K) − X, 0)`;
+  - up-and-out call: `M_p = max_k S_{k,p}`, payoff `(M_p < Bu) ? max(S_{K,p} − X, 0) : 0`.
+  `legs` selects any subset; `exotic_leg_spot` (the mean terminal spot, one recurrence with nothing reading it) is the
+  control, which is `affine_scan`'s shape.
+- **Outputs:** the per-leg Monte Carlo means in leg order, then, with `output_paths`, every per-path payoff.
+- **Recording discipline:** four `select` sites and no C++ value branch anywhere — `max(·,0)` on each call payoff, the
+  running extremum `max(S_k, M_{k-1})`, and the knock-out test. `Bu` is an **input**, so the knock-out predicate is
+  tainted and `structural_if` on it throws by construction; `tests/exec/exotic_path_e0_test.cpp` asserts that it does.
+- **Reference:** `exotic_path_evaluate<double>` is the oracle for the engine path (case 2, it crosses the pin:
+  measured divergence **0.00e+00** across every case the gate runs, gated at 1e-13 as a bug detector per §5.1).
+  Interpreter against tape replay, catalogue on against off, every tile/lane-tile, and a batched lane against its own
+  single run are case 1 and are **bitwise**.
+- **The independent check, no dependency (so no D12 entry):** the geometric Asian has an exact closed form under this
+  discretisation, standard library only —
+  `ln G ~ N(μ, s²)`, `μ = ln S0 + (r−q−σ²/2)·t̄`, `t̄ = Δt(n+1)/2`, `s² = σ²Δt(n+1)(2n+1)/(6n)`,
+  `price = exp(−rT)[exp(μ+s²/2)Φ(d₊) − XΦ(d₋)]`, `d₋ = (μ − ln X)/s`, `d₊ = d₋ + s`.
+  **Gated on the mean z over 8 independent seeds, not on one seed**, and that is deliberate: a 3σ band on a single
+  Monte Carlo estimate has a 0.3% false-alarm rate by construction, and seed `20260922` — the one this document fixes —
+  is one of the 0.3%. Its draws have a sample mean 2.0–3.0 standard errors **below** zero with the variance correct
+  (0.995–0.999), so the single-seed estimate lands z ≈ −2.6 to −3.2. The seed is **not** changed for a prettier
+  number; what is gated is the sampling distribution, which is what the closed form can certify.
+- **No performance gate.** `tools/exotics/exoticsprobe` measures it and refuses a loaded box itself; the numbers and
+  the pre-registered criterion live in `docs/EXOTICS_KILL_TEST.md`. There is no `bench/` baseline, because the result
+  is a one-off answer to D1's clause rather than a quantity to defend against regression.
+
+---
+
 ## MX — G4 multi-currency bundle (stretch)
 - **Currencies:** USD, EUR, GBP, JPY. Collateral/discounting: each currency's OIS; USD SOFR as the cross-currency base.
 - **Curves per currency** (researched, sources in `docs/G4_BUNDLE.md`): the OIS curve from deposits/OIS swaps (and

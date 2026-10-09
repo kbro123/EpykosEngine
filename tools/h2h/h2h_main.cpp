@@ -184,7 +184,7 @@ struct FamilyResult {
   int trades = 0, positions = 0;
   double agree_npv = 0.0, agree_ladder = 0.0;
   bool ok = false;
-  double ours_price = 0.0, theirs_price = 0.0, ours_price_book = 0.0;
+  double ours_price = 0.0, theirs_price = 0.0, theirs_bound = 0.0, ours_price_book = 0.0;
   double ours_risk = 0.0, theirs_risk = 0.0;
   int rows = 0;
   std::size_t nodes_raw = 0, nodes_after = 0;
@@ -577,16 +577,28 @@ int main(int argc, char** argv) {
       }
     }
 
+    // THEIR AMORTISED REPRICE PATH, which D78/D90 did not use and should have.
+    // `price_portfolio` is documented in their own header as the ONE-SHOT path -- "the one-shot
+    // price_portfolio() deliberately stays on the templated path ... so the compiled twin is
+    // reserved for THIS cached path" -- and `bind_portfolio` + `reprice_bound` is the amortised one,
+    // "the AMORTIZED path for a live book repriced every streaming tick". This harness reprices the
+    // same book `reps` times, so the bound path is what it should be timing: anything else measures
+    // their cold entry point against our warm one. Both are timed and both are reported; the bound
+    // column is the headline ratio. There is NO bound risk path in that facade -- risk has one entry
+    // point -- so the ladder comparison was already on their best route.
+    sess.bind_portfolio(book);
+
     std::cerr << "[h2h] warm-up (book " << shown << ")\n";
     for (int k = 0; k < 3; ++k) {
       const std::vector<double> q = moved(k);
       set_state(q);
       ours.full().run(st.data(), 1, out_full.data());
       sess.price_portfolio(book);
+      sess.reprice_bound();
       sess.price_portfolio_risk(book);
     }
 
-    Samples o_eval_full, o_risk, t_price, t_risk, t_price_self, t_risk_self;
+    Samples o_eval_full, o_risk, t_price, t_bound, t_risk, t_price_self, t_bound_self, t_risk_self;
     std::vector<double> ladder_out;
     std::cerr << "[h2h] measuring the book " << shown << ", " << reps << " repetitions, interleaved\n";
     for (int k = 0; k < reps; ++k) {
@@ -605,6 +617,10 @@ int main(int argc, char** argv) {
       const swaps::api::PortfolioReprice pr = sess.price_portfolio(book);
       t_price.add(us_since(t));
       t_price_self.add(pr.price_us);
+      t = clock_type::now();
+      const swaps::api::PortfolioReprice pb2 = sess.reprice_bound();
+      t_bound.add(us_since(t));
+      t_bound_self.add(pb2.price_us);
       if (their_rows.empty()) {
         t = clock_type::now();
         const swaps::api::PortfolioRisk prk = sess.price_portfolio_risk(book);
@@ -621,6 +637,7 @@ int main(int argc, char** argv) {
 
     fr.ours_price = o_eval_full.median();
     fr.theirs_price = t_price.median();
+    fr.theirs_bound = t_bound.median();
     // The BOOK-ATTRIBUTABLE forward pass: our whole-program pass minus the same pass on the
     // calibration-only twin. Their `price_portfolio` prices the book and nothing else, so this is
     // the comparable quantity -- and it matters most on a small family book, where the 70
@@ -631,7 +648,9 @@ int main(int argc, char** argv) {
     fr.theirs_risk = t_risk.median();
 
     std::printf("  %-22s %11s %11s | %9s | %s\n", "phase, median us", "ours", "theirs", "theirs/ours", "note");
-    row("price", o_eval_full, t_price, "ours book AND instruments; theirs the book only");
+    row("price", o_eval_full, t_price, "ours warm pass; THEIRS ONE-SHOT (price_portfolio) -- D90's column");
+    row("price_bound", o_eval_full, t_bound,
+        "ours warm pass; theirs AMORTISED (bind_portfolio + reprice_bound) -- the headline");
     char rn[64];
     std::snprintf(rn, sizeof rn, "risk_ladder(R=%d)", fr.rows);
     row(rn, o_risk, t_risk,
@@ -654,10 +673,10 @@ int main(int argc, char** argv) {
     std::printf("  book-attributable forward pass = price - price_cal_only: %.1f us"
                 "  (arithmetic on two measurements, not a measurement)\n",
                 o_eval_full.median() - o_eval_cal.median());
-    std::printf("  their own reported times (medians, us): price %.1f  risk %.1f  (its risk_us EXCLUDES forming the\n"
+    std::printf("  their own reported times (medians, us): price %.1f  bound %.1f  risk %.1f  (its risk_us EXCLUDES forming the\n"
                 "    risk operator M; our ladder builds its Jacobian inside the timed region, so the outer clock is\n"
                 "    the honest column and its own is the floor)\n",
-                t_price_self.median(), t_risk_self.median());
+                t_price_self.median(), t_bound_self.median(), t_risk_self.median());
     {
       const epykos::solver::ImplicitProgram::RunStats& rs = ours.full().last_run();
       std::printf("  ours: ladder solves=%lld residual_evals=%lld jacobians=%lld\n",
@@ -680,33 +699,38 @@ int main(int argc, char** argv) {
   std::printf("\n=== %s: theirs/ours, by product family (within-run ratios; D90: the ABSOLUTES are not\n"
               "    comparable across sessions, the ratios are) ===\n",
               po.name.c_str());
-  std::printf("%-32s %7s %7s %5s %10s %10s %10s %11s %11s\n", "family", "trades", "posns", "rows", "price x",
-              "price x*", "risk x", "agree npv", "agree ladder");
+  std::printf("%-32s %7s %7s %5s %9s %9s %9s %9s %11s %11s\n", "family", "trades", "posns", "rows", "price x",
+              "bound x", "bound x*", "risk x", "agree npv", "agree ladder");
   for (const FamilyResult& r : results) {
     if (!r.ok) {
-      std::printf("%-32s %7d %7d %5d %10s %10s %10s %11.3e %11.3e   %s\n", r.name.c_str(), r.trades, r.positions,
-                  r.rows, "-", "-", "-", r.agree_npv, r.agree_ladder, r.note.c_str());
+      std::printf("%-32s %7d %7d %5d %9s %9s %9s %9s %11.3e %11.3e   %s\n", r.name.c_str(), r.trades, r.positions,
+                  r.rows, "-", "-", "-", "-", r.agree_npv, r.agree_ladder, r.note.c_str());
       continue;
     }
     char pb[16];
     if (r.ours_price_book > 0.0)
-      std::snprintf(pb, sizeof pb, "%9.2fx", r.theirs_price / r.ours_price_book);
+      std::snprintf(pb, sizeof pb, "%8.2fx", r.theirs_bound / r.ours_price_book);
     else
-      std::snprintf(pb, sizeof pb, "%10s", "-");
-    std::printf("%-32s %7d %7d %5d %9.2fx %10s %9.2fx %11.3e %11.3e\n", r.name.c_str(), r.trades, r.positions, r.rows,
-                r.ours_price > 0.0 ? r.theirs_price / r.ours_price : 0.0, pb,
+      std::snprintf(pb, sizeof pb, "%9s", "-");
+    std::printf("%-32s %7d %7d %5d %8.2fx %8.2fx %9s %8.2fx %11.3e %11.3e\n", r.name.c_str(), r.trades, r.positions,
+                r.rows, r.ours_price > 0.0 ? r.theirs_price / r.ours_price : 0.0,
+                r.ours_price > 0.0 ? r.theirs_bound / r.ours_price : 0.0, pb,
                 r.ours_risk > 0.0 ? r.theirs_risk / r.ours_risk : 0.0, r.agree_npv, r.agree_ladder);
   }
   std::printf("\ncalibrate_cold %.2fx, calibrate_hot %.2fx (theirs/ours; < 1 means we are slower)\n",
               o_cold.median() > 0.0 ? t_cold.median() / o_cold.median() : 0.0,
               o_hot.median() > 0.0 ? t_hot.median() / o_hot.median() : 0.0);
-  std::printf("  price x  = theirs/ours on the RAW forward pass. Ours prices the book AND all %d calibration\n"
-              "             instruments in one program and cannot be asked for the book alone; theirs is the book.\n"
-              "  price x* = theirs/ours on the BOOK-ATTRIBUTABLE pass (ours minus the calibration-only twin,\n"
-              "             %.1f us): arithmetic on two measurements, not a measurement, and the comparable one.\n"
+  std::printf("  price x  = theirs/ours with THEIR ONE-SHOT price_portfolio -- D90's column, and their own\n"
+              "             header calls it the cold entry point. Kept only for continuity with D90.\n"
+              "  bound x  = theirs/ours with their AMORTISED bind_portfolio + reprice_bound, which is what a\n"
+              "             harness repricing the same book %d times should time. THE HEADLINE.\n"
+              "  bound x* = the same against our BOOK-ATTRIBUTABLE pass (ours minus the calibration-only twin,\n"
+              "             %.1f us -- ours prices the book AND all %d calibration instruments in one program and\n"
+              "             cannot be asked for the book alone). Arithmetic on two measurements, not a measurement.\n"
               "  risk x   = at R = 1 a like-for-like book-level ladder; at R > 1 see the per-row rows above,\n"
-              "             where the asymmetry (ours carries the whole book, theirs R trades) is stated.\n",
-              n_q, o_eval_cal.median());
+              "             where the asymmetry (ours carries the whole book, theirs R trades) is stated. Their\n"
+              "             facade has NO bound risk path, so this was already on their best route.\n",
+              reps, o_eval_cal.median(), n_q);
   std::printf("worst curve agreement %.3e; max_batch %d, lane_tile %d, ladder rows %d, %d repetitions\n",
               agree_curve, po.max_batch, po.lane_tile, ladder_rows, reps);
   std::printf("1-minute load: %.2f before, %.2f after (bar %.2f)%s\n", load_before, load_after, max_load,

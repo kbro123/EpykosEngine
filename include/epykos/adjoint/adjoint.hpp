@@ -54,6 +54,43 @@ struct Options {
   // exec/lanes.hpp, which holds the rule, and `exec::Options::split_lane_chunks`, which is the
   // same switch on the forward runtime. true by default; false is the pre-D103 chunking.
   bool split_lane_chunks = true;
+  // Seed a value's adjoint with its FIRST contribution instead of zero-filling and then adding
+  // every contribution (D102 §4 item 1; see pull() in src/adjoint/adjoint_e0.cpp for the rule and
+  // its one carve-out). 79.3% of Stage A's pulls have exactly one reader at unit coefficient
+  // (93.6% of `compare_ois`(256)'s), and for those the whole pull becomes a single copy pass.
+  //
+  // **FALSE BY DEFAULT, AND THE DEFAULT IS THE MEASUREMENT, NOT CAUTION.** D102 priced the zero
+  // start at 26% of Stage A's reverse-only arithmetic, and that is a ceiling on the OPERATIONS; in
+  // time, at the shipped `lane_tile = 8`, seeding is a LOSS. Paired interleaved arms in one
+  // process (tools/pullprobe, fingerprint d448afd70180, -O3 -march=x86-64-v3 -fno-math-errno,
+  // load 2.4-3.0): `stage_a` B = 1 **+10.0% to +10.6%** of the whole call, `compare_ois`(256)
+  // B = 1 **+12.5% to +13.2%**, both fixtures +1.3% to +4.2% at B = 8 and +1.4% to +2.4% at
+  // B = 64. Robust to swapping which arm's buffers are allocated first.
+  //
+  // WHY, measured rather than guessed: the cost is per ROW and the saving is per LANE, so the net
+  // scales as 1/L. A `lane_tile` sweep at B = 64 (same tool, `--lane-tile`) gives, as a share of
+  // the reverse-pass bound: `compare_ois` +20.8% at 1, +5.4% at 8, ~0 at 16, **-9.6% at 32**, ~0
+  // at 64; `stage_a` +1.4% at 8, -1.4% at 16, **-7.8% at 32**, +0.2% at 64. The zero fill is an
+  // L1-resident store pass that costs very little, while deciding WHICH contribution comes first
+  // costs a four-way branch and eight CSR offset loads for every row. At L = 32 the saving wins;
+  // at the shipped L = 8 it does not. Turning this on is therefore a `lane_tile` decision and must
+  // not be taken as a free one.
+  //
+  // Both arms are kept: the option is the measurement instrument, false is the reference arm of
+  // the differential gate (tests/adjoint/seed_pull_e0_test.cpp), and a caller running wide lanes
+  // has a switch with a number attached to it.
+  //
+  // IT IS BITWISE, and that is a property of WHERE the elision is applied, not of `0.0 + x == x`.
+  // `0.0 + x` is `x` for every finite non-zero x, and the two forms differ in exactly one case: an
+  // accumulated ZERO one of whose contributions is `-0.0` (reachable — `-1.0 * (+0.0)` is `-0.0`,
+  // and under a zero seed every adjoint is a zero). Such a sign is washed by every consumer of a
+  // pulled adjoint but one: `Op::Input`'s rule writes `state_bar[ordinal] = ybar` by COPY, so an
+  // Input domain's pull is observable, and that pull alone keeps its zero start. Every other
+  // consumer accumulates into a freshly-zeroed step / gather / segment adjoint, where
+  // `(+0.0) + (-0.0)` is `+0.0` again, and the adjoint is never a DIVISOR (`acc_div`,
+  // `acc_plus_div` and `acc_sqrt` all divide by a FORWARD value), which is the only other way a
+  // zero's sign could have become a magnitude.
+  bool seed_pull = false;
   // M4/C1 (PROBLEM.md §7, DESIGN.md §7 "As built (M4/R0...)": "the reverse of a fused group is
   // rewrite / catalogue work (M4)"): the forward pass below materialises every domain's rows
   // unconditionally (unlike exec::Interpreter, Adjoint applies none of the fuse/inline
@@ -106,6 +143,14 @@ class Adjoint {
   // BITWISE -- §1b's gate, asserted by tests/adjoint/i1_gate_e0_test.cpp over every fixture the
   // adjoint is gated on, Stage A included. Batch: Q's own layout is Interpreter's, batch
   // innermost, so a B-lane Interpreter run of Q is the B-lane `run` above lane for lane.
+  //
+  // "Bitwise what `run` computes" means `run`'s OUTPUTS — `out` and `state_bar`, which are Q's
+  // outputs — and not its internal buffers. With `Options::seed_pull` on (not the default) the runtime
+  // elides the leading `+0.0` of a pull while the emitter still writes an `Affine` whose `konst` is
+  // `+0.0`, so the two now hold different bits in v̄ for a pulled zero and the same bits in every
+  // output: the sign is washed by every consumer but `Op::Input`'s, whose pull keeps the zero
+  // start for exactly that reason. See `Options::seed_pull` above and
+  // tests/adjoint/seed_pull_e0_test.cpp. The gate below is unaffected and is not weakened.
   //
   // Derived from the plan THIS Adjoint already built, so it cannot disagree with what `run`
   // does; `adjoint_to_program(P)` in adjoint/adjoint_to_program.hpp is the same function for a

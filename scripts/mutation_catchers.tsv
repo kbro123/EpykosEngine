@@ -72,4 +72,5 @@ simplify.telescope_wrong_endpoint	tape_simplify_differential_test	17
 adjoint.div_aliased_targets	adjoint_div_aliased_verify_test	3
 a2p.drop_zero_start	adjoint_i1_gate_e0_test	2
 a2p.div_not_aliased	adjoint_adjoint_to_program_e0_test	2
+adjoint.seed_input_pull	adjoint_seed_pull_e0_test	1
 a2p.scan_forward_order	adjoint_adjoint_to_program_e0_test	2

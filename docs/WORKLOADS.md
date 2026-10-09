@@ -493,3 +493,20 @@ O1 the calibrated curves — discount factors at 200 sample times **per curve, o
 shared grid would sample the shorter curves past their last knot, where the two engines extrapolate differently by
 construction; O2 book NPV per family and in total; O3 the 70-bucket ladder d(PV)/d(quote). O4 (the scenario grid),
 cross-currency, FX and second-order risk are **not** compared and no claim here extends to them.
+
+### Measured once, 2026-10-09, fingerprint `d448afd70180`
+
+The whole table is in `bench/compare/README.md` §8 (agreement, four phases, eight families, the
+`max_batch` / `lane_tile` sweep, and D90's shape reproduced in the same session). The shape of the
+result, so this file is not silent on it:
+
+- **Every one of the eight families agrees**, worst 4.023e-14 on book NPV and 6.012e-15 on the ladder;
+  the curves agree to 6.717e-15 over 4 curves and 800 sample times. Nothing went untimed.
+- The **book-level** risk ladder is 5.79x–506.62x in our favour across the families and **297x** on the
+  whole 2,000-trade book; plain OIS (10.35x) is **not** where the advantage is largest.
+- The **per-trade** risk ladder is a different object: 1.83x in our favour at 500 trades / R = 64 and
+  **0.77x — slower** at 2,000 trades / R = 256. The ratio moves by 385x between R = 1 and R = 256 and
+  crosses 1, so a ladder number without its row count is not a number.
+- Cold calibration **reverses with the curve count**: 1.5x slower on one curve, **2.41x faster** on four.
+  Warm calibration does not: 2.6x and 3.6x slower respectively.
+- `lane_tile = 32` costs **22.5%** per ladder row at `max_batch` 64. The shipped default of 8 is right.

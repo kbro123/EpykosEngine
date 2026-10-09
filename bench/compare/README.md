@@ -450,6 +450,151 @@ re-checks that node equality on demand rather than leaving it asserted; nothing 
 
 ## 8. The measurement of 2026-10-09
 
-Taken with `tools/h2h` as described in §6, both engines in one process on one `steady_clock`,
-interleaved. Numbers, loads and the agreement figures are in `docs/WORKLOADS.md` §MX-H2H; the
-summary and the conclusion are in `docs/DECISIONS.md`. **Informational under D9.**
+`tools/h2h` as described in §6, both engines in one process on one `steady_clock`, interleaved
+round-robin. Fingerprint **`d448afd70180`** (Intel Xeon W-3223, 8 physical / 16 logical cores,
+Apple clang 21.0.0), `-O3 -march=x86-64-v3 -fno-math-errno` on **both** sides (§4, re-verified).
+1-minute load **5.79 before, 4.99 after** across runs A–C, every run under the binary's own
+cores/2 = 8.0 bar, which was enforced (no `--no-load-check` anywhere). **Informational under D9.**
+Every ratio below is `theirs/ours`, so **> 1 is in our favour**; every ratio is a within-run ratio,
+and the absolutes are not comparable across sessions (D90).
+
+### 8.1 Agreement, which gated all of it
+
+Every one of the eight product families agrees. **Nothing disagreed and nothing went untimed.**
+
+| | worst relative |
+|---|---|
+| calibrated curves, 4 curves / 800 sample times | **6.717e-15** (tolerance 1e-12) |
+| book NPV, whole 2,000-trade book, against gross 9.326e+08 | **7.829e-15** (tolerance 1e-10) |
+| 70-bucket ladder, against its own inf-norm 9.745e+09 | **5.969e-15** (tolerance 1e-09) |
+| book NPV, worst of the eight families | **4.023e-14** (`USD-SOFR-OIS-SHIFT2-LOCKOUT2`) |
+| ladder, worst of the eight families | **6.012e-15** (`USD-SOFR-AVG-SWAP`) |
+
+On `compare_ois` at D90's shape the figures are **1.860e-15** on the curve, **1.412e-15** on book
+NPV and **2.896e-15** on the ladder — D90 reported 5.533e-15 and 3.818e-15, so the agreement is
+**tighter**, which it should be: the typed route hands over the observation window the engine
+actually reads instead of the accrual period the neutral form carried.
+
+The 37 MB exchange document the same run writes was fed back to their **stateless CLI** — a separate
+process, a separate code path from the linked session — and accepted: 4 curves, 70 instruments,
+2,212 positions, converged in 6 iterations at rms 4.726e-15, book NPV
+`6.88072233186896741e+07` against h2h's in-process `6.88072233186942041e+07`. The file route and
+the in-process route are the same answer.
+
+### 8.2 Calibration — family-independent, 70 quotes on 70 knots over 4 curves
+
+| phase | ours | theirs | theirs/ours |
+|---|---|---|---|
+| `calibrate_cold` | 934.4 us | 2,253.7 us | **2.41x ours** |
+| `calibrate_hot` | 83.3 us | 23.2 us | **0.28x — we are 3.6x slower** |
+| `price_cal_only` (no book) | 8.8 us | — | ours only |
+
+**The cold calibration reverses on Stage A.** On `compare_ois` in the same session it is 0.66x
+(we are 1.5x slower, consistent with D90's 1.33x); on the four-curve problem it is 2.41x **in our
+favour**. Our sequential block solve pays off as the problem stops being one curve; their
+simultaneous 70-knot LM does not. Read it against §4 item 10 — the two solves are different
+algorithms, which `PRINCIPLES.md` §4 names as the one admissible difference.
+**The warm gap does not improve**: 0.28x here against 0.38x on `compare_ois`, i.e. 3.6x and 2.6x
+slower. D90's 2.24x and this 2.6x are the same measurement at the same shape; the four-curve
+problem makes it slightly worse, and four block solves instead of one is the obvious reason
+(`solves=4 residual_evals=12 jacobians=0`).
+
+### 8.3 The whole 2,000-trade book — and the number this project has been quoting
+
+2,000 trades → **2,212** of their positions (212 basis trades split in two), tape 27,162,726 raw →
+**145,090** after the passes, recorded in 8.3 s. `max_batch` 64, `lane_tile` 8.
+
+| phase | ours | theirs | theirs/ours |
+|---|---|---|---|
+| `price`, their ONE-SHOT `price_portfolio` (D90's column) | 456.7 us | 94,313.5 us | 206.53x |
+| `price_bound`, their AMORTISED `reprice_bound` | 456.7 us | 49,938.8 us | **109.36x** |
+| `risk_ladder`, **R = 1** (book-level) | 2,022.6 us | 600,763.7 us | **297.02x** |
+| `risk_ladder`, **R = 256** (per-trade) | 237,913.2 us | 183,872.9 us | **0.77x — we are 1.29x SLOWER** |
+
+**That last pair is the most important number in this file.** D103 §1 found this harness only ever
+asked for one row and warned that one-row ladders are unrepresentative. They are worse than
+unrepresentative: between R = 1 and R = 256 **the ladder ratio moves by a factor of 385, and it
+crosses 1.** The mechanism is §4's stated asymmetry and is not noise — our adjoint carries the whole
+book's forward pass in every one of the 256 rows, because our tape prices the book in one program
+and cannot be asked for a subset, while their 256 `price_portfolio_risk` calls on single-trade books
+touch 256 trades and no more. Per row: ours 929.3 us against their 718.3 us.
+So: **a book-level delta ladder is ~300x ours; a per-trade delta ladder is roughly parity.** Any
+claim about "the risk ladder" that does not say which one it means is not a claim.
+
+### 8.4 Per product family — does the advantage hold outside plain OIS?
+
+`--per-family`, each family its own problem with its own tape and its own gate. R = 1, 20 reps,
+`max_batch` 64, `lane_tile` 8. `bound x` is the honest price ratio (their amortised path);
+`bound x*` is the same against our book-attributable pass (ours minus the 8.8 us calibration-only
+twin — arithmetic on two measurements, not a measurement).
+
+| family | trades | their posns | `price x` (one-shot) | **`bound x`** | `bound x*` | **`risk x`** (R=1) | agree NPV | agree ladder |
+|---|---|---|---|---|---|---|---|---|
+| ALL | 2000 | 2212 | 206.53x | **109.36x** | 111.50x | **297.02x** | 7.829e-15 | 5.969e-15 |
+| `USD-SOFR-OIS-SHIFT2-LOCKOUT2` | 209 | 209 | 550.46x | **553.13x** | 619.69x | **506.62x** | 4.023e-14 | 5.463e-15 |
+| `USD-SOFR-AVG-SWAP` | 199 | 199 | 206.06x | **13.30x** | 13.89x | **272.51x** | 6.461e-15 | 6.012e-15 |
+| `EUR-3S6S-BASIS` | 212 | 424 | 18.32x | **1.27x** | 1.41x | **17.08x** | 2.526e-14 | 1.818e-15 |
+| `EUR-EURIBOR-3M-IRS` | 167 | 167 | 22.92x | **1.59x** | 2.03x | **11.69x** | 2.630e-15 | 2.231e-15 |
+| `USD-SOFR-OIS` | 481 | 481 | 17.36x | **4.17x** | 5.06x | **10.35x** | 5.726e-15 | 4.472e-15 |
+| `EUR-EURIBOR-6M-IRS` | 237 | 237 | 18.84x | **1.47x** | 1.90x | **9.60x** | 1.769e-15 | 1.129e-15 |
+| `EUR-ESTR-OIS` | 300 | 300 | 13.49x | **3.27x** | 4.25x | **7.26x** | 1.329e-15 | 1.446e-15 |
+| `USD-SOFR-OIS-SHIFT2` | 195 | 195 | 11.31x | **1.91x** | 2.59x | **5.79x** | 2.198e-15 | 1.523e-15 |
+
+**On the book-level ladder the advantage holds on every family, and plain OIS is not where it is
+largest.** The range is 5.79x to 506.62x; plain `USD-SOFR-OIS` sits at 10.35x, below `EUR-3S6S-BASIS`
+(17.08x), the averaging swap (272.51x) and the lockout (506.62x), and above only `EUR-ESTR-OIS` and
+`USD-SOFR-OIS-SHIFT2`. The advantage does not merely survive contact with basis, averaging swaps and
+seasoned trades: on the two products that do not telescope it is one to two orders of magnitude
+larger.
+
+**On pricing, their W-cache is excellent and the per-family split is what shows it.** At the whole
+book their amortised reprice looks 109x slower than ours, but the family rows say that is almost
+entirely two families: per position, `reprice_bound` costs **0.24 us** on `EUR-EURIBOR-6M-IRS`,
+0.26 us on the basis, 0.43 us on plain OIS — against **14.0 us** on the averaging swap and
+**216.8 us** on the lockout. 45.3 ms of their 49.9 ms whole-book figure is the 209-trade lockout
+family. Their own header explains it: a compounded or seasoned position "rides the AAD block", so
+**their W-cache compiles telescoping and term-rate coupons and does not compile lockout or averaged
+ones.** On the products it compiles, their repeated reprice is at parity with ours (1.27x–4.17x);
+on the products it does not, we are 13x–553x.
+
+That pair of mechanisms — their W-cache covering the telescoping products, our scan layout covering
+the day-by-day ones — is the cleanest statement of where each engine wins, and it is only visible
+per family. An aggregate reports 109x and explains nothing.
+
+### 8.5 `max_batch` and `lane_tile`, measured rather than assumed
+
+500 trades, R = 64, 10 reps, load ~5.0, us per ladder row:
+
+| `max_batch` | `lane_tile` | ours/row | theirs/row | theirs/ours |
+|---|---|---|---|---|
+| 64 | **8** (shipped) | **383.8** | 700.5 | 1.83x |
+| 64 | 32 | 470.2 | 674.9 | 1.44x |
+| 16 | **8** | 390.0 | 693.0 | 1.78x |
+| 16 | 32 | 431.8 | 686.9 | 1.59x |
+
+**`lane_tile = 32` costs 22.5% at `max_batch` 64** (383.8 → 470.2) and 10.7% at 16. The shipped
+default of 8 is the right one and the cliff is real. `max_batch` 64 against 16 moves the figure by
+1.6%, inside the ~1.5% within-condition spread D104 measured — consistent with D104 §4's finding
+that there is no single best `max_batch` default.
+
+Note also the book-size effect on the per-trade ladder: 1.83x in our favour at 500 trades / R = 64,
+0.77x at 2,000 trades / R = 256. The per-trade ladder ratio **decays with book size**, for the same
+reason §8.3 gives.
+
+### 8.6 `compare_ois` at D90's shape, in this session — what reproduces and what does not
+
+1,000 trades, 25 tenors, R = 1, 20 reps, load 4.99 → 5.70.
+
+| phase | D90 (2026-10-04) | here | verdict |
+|---|---|---|---|
+| `calibrate_cold` | 1.33x slower | 1.52x slower (0.66x) | reproduced within session drift |
+| `calibrate_hot` | 2.24x slower | 2.63x slower (0.38x) | reproduced within session drift |
+| `price` | **47.9x ours** | 53.43x ours (their ONE-SHOT) | reproduced — **and both are the wrong entry point** |
+| `price`, their amortised path | not measured | **2.92x ours** | the honest figure |
+| `risk ladder` (R = 1) | 6.12x ours | **5.82x ours** | reproduced |
+
+Everything D90 measured reproduces. The one row that does not survive is the one D90 did not know
+it was measuring: `price_portfolio` is their cold entry point and `bind_portfolio` + `reprice_bound`
+is the amortised one, so **"pricing ~48x" was our warm pass against their cold one, and the honest
+number on that shape is 2.92x** (§4 item 4a). The risk ladder's ~6x, the headline this project has
+quoted since D81 §7, is reproduced exactly — and §8.3 says what it is a ladder of.

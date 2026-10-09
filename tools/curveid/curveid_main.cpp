@@ -195,8 +195,8 @@ Dev compare(const std::vector<double>& knots, const std::vector<double>& grid,
   Dev d;
   d.valid = true;
   double in_max = 0.0, out_max = 0.0;          // max |dev| inside / outside the knot range
-  double rel_lo = 0.0, rel_hi = 0.0;           // the deviation's spread, for the `units` test
-  double rel_small_t = 0.0, rel_large_t = 0.0; // for the `time_measure` test
+  double sdev_lo = 0.0, sdev_hi = 0.0;         // the SIGNED deviation's spread, for the `units` test
+  double dev_small_t = 0.0, dev_large_t = 0.0; // max |dev| in the near / far quarter, for `time_measure`
   bool first = true;
   const double tn = knots.back();
   for (std::size_t i = 0; i < grid.size(); ++i) {
@@ -208,22 +208,22 @@ Dev compare(const std::vector<double>& knots, const std::vector<double>& grid,
     if (dr > d.max_rel) { d.max_rel = dr; d.at_rel = t; }
     if (t >= knots.front() && t <= tn) in_max = std::max(in_max, da); else out_max = std::max(out_max, da);
     const double sdev = a[i] - b[i];
-    if (first) { rel_lo = rel_hi = sdev; first = false; }
-    rel_lo = std::min(rel_lo, sdev);
-    rel_hi = std::max(rel_hi, sdev);
-    if (t <= 0.25 * tn) rel_small_t = std::max(rel_small_t, da);
-    if (t >= 0.75 * tn) rel_large_t = std::max(rel_large_t, da);
+    if (first) { sdev_lo = sdev_hi = sdev; first = false; }
+    sdev_lo = std::min(sdev_lo, sdev);
+    sdev_hi = std::max(sdev_hi, sdev);
+    if (t <= 0.25 * tn) dev_small_t = std::max(dev_small_t, da);
+    if (t >= 0.75 * tn) dev_large_t = std::max(dev_large_t, da);
   }
   if (d.max_rel <= kFloorRel) { d.cause = Cause::identical; return d; }
-  const double span = rel_hi - rel_lo;
-  const double level = std::max(std::abs(rel_hi), std::abs(rel_lo));
+  const double span = sdev_hi - sdev_lo;
+  const double level = std::max(std::abs(sdev_hi), std::abs(sdev_lo));
   if (level > 0.0 && span <= 1e-9 * level) {
     d.cause = Cause::units;  // the same signed offset everywhere
   } else if (out_max <= kFloorRel * 1e3 * std::max(1.0, in_max) && in_max > 0.0 && out_max < in_max * 1e-6) {
     d.cause = Cause::construction;
   } else if (in_max == 0.0 || in_max < out_max * 1e-6) {
     d.cause = Cause::extrapolation;
-  } else if (rel_small_t < rel_large_t * 1e-3) {
+  } else if (dev_small_t < dev_large_t * 1e-3) {
     d.cause = Cause::time_measure;
   } else {
     d.cause = Cause::mixed;

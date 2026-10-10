@@ -99,6 +99,49 @@ struct Options {
   // see adjoint_e0.cpp's forward(). true by default; false disables the lookup entirely (the
   // differential gate's "registry off" side).
   bool use_catalogue = true;
+  // MATERIALISE a group's intermediate steps in the forward instead of recomputing them per tile
+  // in the reverse — the other arm of D31 item 1, built as an option so that both can be timed in
+  // one process (tools/matprobe/, D105's pattern). FALSE BY DEFAULT: shipped behaviour is D31's
+  // recompute, byte for byte.
+  //
+  // WHAT THE TWO ARMS ARE. The split is NOT per value and never has been: `ir::infer` makes a
+  // tape node a domain value — addressable in the value buffer — exactly when it is structural,
+  // is a segment member or an output, or has a use count other than one
+  // (`src/ir/signature.cpp`'s `initial_boundaries`). Everything else is folded into a group's
+  // chain. So a group's LAST step is always materialised, because other domains address it, and
+  // steps 0 .. last-1 are the only open question. This option is that question: false recomputes
+  // them from the stored operands per tile in the reverse (D31), true stores all of them in the
+  // forward and the reverse copies them back.
+  //
+  // WHY READER COUNT CANNOT DECIDE IT, and this is a theorem rather than a measurement: an
+  // intra-chain step has a use count of exactly one, by the boundary rule above. Reader count is
+  // what CONSTRUCTS the partition, so within the recomputed class it is the constant 1 — measured
+  // at 100.00% of 3,029 instances on `compare_ois`(256), 32,602 on `stage_a` and 526,340 on
+  // `exotic_path`(1024x252) (tools/matrec/). It carries no information about the choice.
+  //
+  // WHAT DOES VARY, and it varies between the two ends of the sharing spectrum: the TRANSCENDENTAL
+  // CONTENT of the recomputed cone. D31's stated reason for recomputing — "a group whose value is
+  // an exp / log / sqrt never recomputes the libm call" — holds exactly on the rates book (0 of
+  // 11,087 recomputed transcendentals on `stage_a`, 0 of 81 on `compare_ois`) and fails on a path
+  // grid, where 50.1% of them are intra-chain (259,072 of 517,121 on `exotic_path`(1024x252),
+  // D106's fixture). The recompute is 8.3% of the forward's arithmetic on `stage_a`, 21.2% on
+  // `compare_ois`(256) and 42.2-44.3% on the path grid.
+  //
+  // IT IS BITWISE, by construction and not by an argument about arithmetic. Both arms call the
+  // same `forward_step` with the same operands: an intra-chain step reads only its own group's
+  // earlier steps, columns, literals and gathers of EARLIER domains (`ir::validate` forbids a
+  // forward read), so its operands are identical whether it runs in the forward with the value
+  // buffer partly filled or in the reverse with it complete. That is the same fact that makes
+  // today's recompute bitwise. `tests/adjoint/materialise_steps_e0_test.cpp` asserts it with
+  // `memcmp` over every fixture, seed, tile, lane_tile and batch.
+  //
+  // THE COST, both directions: the buffer is sum over domains of (steps-1) · rows · Lt doubles —
+  // 0.14x the value buffer on `stage_a`, 0.21x on `compare_ois`(256) and on the path grid, NOT
+  // D31's "4-6x", which was `max_steps × rows × L` and so paid every domain the longest group's
+  // chain length. Against that it saves the recompute's arithmetic and pays a copy back into the
+  // tile buffer, because a later step of the group still reads its predecessors through
+  // `c.fs`. See `tools/matprobe/` for what that trade measures at.
+  bool materialise_steps = false;
 };
 
 class Adjoint {

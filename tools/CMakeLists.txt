@@ -19,6 +19,11 @@
 # D102 §4 asked for, both arms of `adjoint::Options::seed_pull` interleaved in ONE process, and
 # refuses a loaded box for the same reason; tools/exotics/ runs D1's revisit clause against the
 # first path-dependent payoff in the tree and, like ladder/ and pullprobe/, refuses a loaded box.
+# tools/matrec/ and tools/matprobe/ are the two halves of the materialise-vs-recompute question
+# D31 decided and D103 §3 re-opened: matrec/ is counts only (reader-count, cone-cost, reuse-distance
+# and working-set distributions over both ends of the sharing spectrum) and refuses no box, while
+# matprobe/ times both arms of `adjoint::Options::materialise_steps` in ONE process -- D105's
+# pattern -- and refuses a loaded box for the same reason pullprobe/ does.
 #
 # costmodel/, egraph_scale/ and egraph_eval/ measure the quarantined M4 plan-level search and are
 # built only with it (EPYKOS_LEGACY_SEARCH, root CMakeLists.txt; PRINCIPLES.md §7.1). This is not a
@@ -58,6 +63,12 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/coverage/CMakeLists.txt")
 endif()
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sparsity/CMakeLists.txt")
   add_subdirectory(sparsity)
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/matrec/CMakeLists.txt")
+  add_subdirectory(matrec)
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/matprobe/CMakeLists.txt")
+  add_subdirectory(matprobe)
 endif()
 if(EPYKOS_LEGACY_SEARCH AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/egraph_eval/CMakeLists.txt")
   add_subdirectory(egraph_eval)

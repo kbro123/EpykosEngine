@@ -102,6 +102,8 @@ const std::vector<std::string> documented = {
     "adjoint.seed_input_pull",
     "sparsity.gate_never_fires",
     "sparsity.closure_forward_order",
+    "adjoint.materialise_skip_catalogue",
+    "adjoint.materialise_skip_operands",
     "a2p.scan_forward_order",
 };
 

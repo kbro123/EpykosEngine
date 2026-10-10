@@ -65,12 +65,24 @@ struct Ctx {
   int b0 = 0;
   int L = 0;
   bool seed_pull = false;  // Options::seed_pull: see pull() below. Off by default: MEASURED SLOWER
+  // Options::materialise_steps (off by default: shipped behaviour is D31's recompute). When on,
+  // `mat` holds every intra-chain step value of every row — step k of row r of domain d at
+  // mat[mat_base[d] + (k·rows_d + r)·L + l] — written by forward() and copied back into `fs` by
+  // reverse() instead of being recomputed. `mat_base` is sized p->domains.size() and is null in
+  // the recompute arm, which allocates no `mat` at all.
+  bool materialise_steps = false;
+  double* mat = nullptr;
+  const size_t* mat_base = nullptr;
   // Mutants (D32; M2/Q4b), queried once per run() and read by the rules only in the mutation
   // build (mutation::compiled_in is a constexpr false elsewhere, so the checks fold away).
   bool select_wrong_arm = false;  // adjoint.select_wrong_arm: the adjoint goes to the other arm
   bool recip_rule_sign = false;   // adjoint.recip_rule_sign: abar += (ybar*y)*y instead of -=
   bool scan_forward_order = false;  // adjoint.scan_forward_order: the reverse scan runs forwards
   bool seed_input_pull = false;  // adjoint.seed_input_pull: the Input pull is seeded too
+  bool mat_skip_catalogue = false;  // adjoint.materialise_skip_catalogue: a catalogued domain's
+                                    // intra-chain steps are never stored
+  bool mat_skip_operands = false;   // adjoint.materialise_skip_operands: the materialise arm does
+                                    // not load the operands reverse_step reads
   // M4/C1: per domain, the catalogued kernel for its signature (registry.hpp), or nullptr — both
   // arrays sized p->domains.size(), owned by Impl, built once at construction (nullptr
   // everywhere when Options::use_catalogue is false). forward() below calls the kernel directly
@@ -269,6 +281,54 @@ struct Lanes {
       case SlotKind::Gather:
         return c.gbar + (idx(c.plan->gather_slot_base[idx(sl.index)]) + static_cast<size_t>(r0)) * static_cast<size_t>(lanes(c));
       default: return nullptr;
+    }
+  }
+
+  // ---- Options::materialise_steps: where an intra-chain step's values live between the passes.
+  //
+  // Layout: step k of rows r0 .. r0+n of domain d at mat[mat_base[d] + (k·rows + r0)·L], i.e.
+  // step-major within a domain, so one tile of one step is contiguous and the copy is a memcpy
+  // either way. `store_mat` is called by forward() right after `forward_step` wrote the tile into
+  // `fs`; `load_mat` is called by reverse() INSTEAD of that `forward_step`.
+  static double* mat_tile(const Ctx& c, int d, int rows, int k, int r0) {
+    return c.mat + c.mat_base[idx(d)] +
+           (static_cast<size_t>(k) * static_cast<size_t>(rows) + static_cast<size_t>(r0)) *
+               static_cast<size_t>(lanes(c));
+  }
+  static void store_mat(const Ctx& c, int d, int rows, int k, int r0, int n, const double* y) {
+    const size_t N = static_cast<size_t>(n) * static_cast<size_t>(lanes(c));
+    std::memcpy(mat_tile(c, d, rows, k, r0), y, N * sizeof(double));
+  }
+  static void load_mat(const Ctx& c, int d, int rows, int k, int r0, int n, double* y) {
+    const size_t N = static_cast<size_t>(n) * static_cast<size_t>(lanes(c));
+    std::memcpy(y, mat_tile(c, d, rows, k, r0), N * sizeof(double));
+  }
+
+  // The operand loads `reverse_step` depends on for step k, WITHOUT recomputing the step's value.
+  //
+  // `reverse_step` calls `operand(..., load = false)` for its `default:` branch, so a and b must
+  // already sit in `c.ops` — it is only the ARITHMETIC that materialising removes, never the
+  // loads, which is exactly what D31 meant by "operands that the reverse loads anyway for the
+  // local rules". The `c` slot is never read as a value by any rule (Fma and Select take it as a
+  // target only), and Sum / Affine / Const / Cmp read no operand vector at all, so those are the
+  // cases where materialising removes the whole fold.
+  static void load_step_operands(const Ctx& c, const Step& s, int k, int r0, int n) {
+    switch (s.op) {
+      case Op::Const:
+      case Op::Input:
+      case Op::CmpLt:
+      case Op::CmpLe:
+      case Op::CmpGt:
+      case Op::CmpGe:
+      case Op::CmpEq:
+        return;
+      case Op::Sum:
+      case Op::Affine:
+        return;  // the rules read `target()` and the segment tables, never c.ops
+      default:
+        (void)operand(c, s.a, k, 0, r0, n, true);
+        (void)operand(c, s.b, k, 1, r0, n, true);
+        return;
     }
   }
 
@@ -486,6 +546,21 @@ struct Lanes {
       // earlier rows) resolves exactly as it would one row at a time.
       if (c.cat_kernels != nullptr && c.cat_kernels[d] != nullptr) {
         c.cat_bindings[d].call(c.cat_kernels[d], c.values, dom.value_base, 0, dom.rows, L);
+        // Options::materialise_steps: the catalogued kernel writes the domain's VALUE only, so
+        // the intra-chain steps the reverse will want have to be produced here as well. They are
+        // produced by the same `forward_step` the recompute arm would have called, over a value
+        // buffer this kernel has just completed — which is the state the reverse would have seen
+        // — so the stored bits are the recompute arm's bits and the domain value is untouched.
+        if (c.materialise_steps && last > 0 && !(mutation::compiled_in && c.mat_skip_catalogue)) {
+          for (int r0 = 0; r0 < dom.rows; r0 += c.tile) {
+            const int n = std::min(c.tile, dom.rows - r0);
+            for (int k = 0; k < last; ++k) {
+              double* y = c.fs + static_cast<size_t>(k) * c.tile_elems;
+              forward_step(c, static_cast<int>(d), g.steps[idx(k)], k, r0, n, y);
+              store_mat(c, static_cast<int>(d), dom.rows, k, r0, n, y);
+            }
+          }
+        }
 #ifdef EPYKOS_EXEC_PROFILE
         const double ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count();
         *c.total_ns += ns;
@@ -502,6 +577,9 @@ struct Lanes {
           double* y = k == last ? dom_values + static_cast<size_t>(r0) * static_cast<size_t>(L)
                                 : c.fs + static_cast<size_t>(k) * c.tile_elems;
           forward_step(c, static_cast<int>(d), g.steps[idx(k)], k, r0, n, y);
+          // Options::materialise_steps: keep the intermediate instead of letting the next tile
+          // overwrite it. The domain value (k == last) is already in the value buffer.
+          if (c.materialise_steps && k != last) store_mat(c, static_cast<int>(d), dom.rows, k, r0, n, y);
         }
       }
 #ifdef EPYKOS_EXEC_PROFILE
@@ -630,6 +708,25 @@ struct Lanes {
     }
   }
 
+  // One tile's intermediate step values, ready for `reverse_step` to consume: recomputed from the
+  // stored operands (D31, `Mat = false`, the shipped arm) or copied back from what the forward
+  // stored (`Options::materialise_steps`, `Mat = true`). Both arms leave `c.fs` and `c.ops`
+  // holding the same bits — see Options::materialise_steps in adjoint.hpp for why that is a
+  // construction and not an argument about floating point.
+  template <bool Mat>
+  static void prepare_steps(const Ctx& c, int d, const Group& g, int rows, int last, int r0, int n) {
+    for (int k = 0; k < last; ++k) {
+      const Step& s = g.steps[idx(k)];
+      double* y = c.fs + static_cast<size_t>(k) * c.tile_elems;
+      if constexpr (Mat) {
+        if (!(mutation::compiled_in && c.mat_skip_operands)) load_step_operands(c, s, k, r0, n);
+        load_mat(c, d, rows, k, r0, n, y);
+      } else {
+        forward_step(c, d, s, k, r0, n, y);
+      }
+    }
+  }
+
   // The reverse pass of the chunk: domains backwards; per tile pull v̄, recompute the
   // intermediate steps, zero the tile's edge slots and step adjoints, run the rules last to first.
   static void reverse(const Ctx& c) {
@@ -665,10 +762,12 @@ struct Lanes {
         if (seed) pull<true>(c, dom, r0, n);
         else pull<false>(c, dom, r0, n);
         if (dp.is_const) continue;
-        // Recompute steps 0 .. last-1 (their operands stay loaded); load the last step's operands.
-        for (int k = 0; k < last; ++k) {
-          forward_step(c, static_cast<int>(d), g.steps[idx(k)], k, r0, n, c.fs + static_cast<size_t>(k) * c.tile_elems);
-        }
+        // Steps 0 .. last-1: recomputed (D31, the default) or copied back from the forward's
+        // store (Options::materialise_steps). Dispatched per tile under `if constexpr` exactly as
+        // `pull` is, so the recompute arm instantiates the call it always was.
+        if (c.materialise_steps) prepare_steps<true>(c, static_cast<int>(d), g, dom.rows, last, r0, n);
+        else prepare_steps<false>(c, static_cast<int>(d), g, dom.rows, last, r0, n);
+        // The last step's operands, which no recompute loaded.
         {
           const Step& s = g.steps[idx(last)];
           if (op_arity(s.op) > 0) {  // the rules of Sum / Affine / Const / Input read no operand vector
@@ -712,6 +811,11 @@ struct Adjoint::Impl {
   int Lt = 0;              // lanes the buffers hold: min(lane_tile, max_batch)
   size_t tile_elems = 0;   // tile · Lt
   std::vector<double> values, vbar, gbar, segbar, fs, sbar, ops;
+  // Options::materialise_steps: every intra-chain step value of every row, and the per-domain
+  // base offset into it. BOTH EMPTY in the recompute arm, which is what keeps the default's
+  // footprint byte for byte what it was.
+  std::vector<double> mat;
+  std::vector<size_t> mat_base;
   // M4/C1: per domain, the catalogued kernel and its binding, or {nullptr, {}} — see forward()
   // above. Populated once here, in domain order, when opt.use_catalogue is true.
   std::vector<catalogue::Kernel> cat_kernels;
@@ -741,6 +845,19 @@ Adjoint::Adjoint(const Program& program, Options options) : impl_(std::make_uniq
   im.fs.assign(steps * im.tile_elems, 0.0);
   im.sbar.assign(steps * im.tile_elems, 0.0);
   im.ops.assign(3 * steps * im.tile_elems, 0.0);
+  // Options::materialise_steps: sum over domains of (steps-1) · rows · Lt doubles. Not
+  // `max_steps · num_values · Lt` — D31 priced the arm with that bound and so charged every
+  // domain the longest group's chain length, which overstates it by 5x on `compare_ois`(256).
+  if (options.materialise_steps) {
+    im.mat_base.assign(program.domains.size(), 0);
+    size_t off = 0;
+    for (std::size_t d = 0; d < program.domains.size(); ++d) {
+      im.mat_base[d] = off;
+      const size_t last = program.groups[d].steps.size() - 1;
+      off += last * static_cast<size_t>(program.domains[d].rows) * Lt;
+    }
+    im.mat.assign(std::max<size_t>(off, 1), 0.0);
+  }
 
   im.cat_kernels.assign(program.domains.size(), nullptr);
   im.cat_bindings.resize(program.domains.size());
@@ -790,10 +907,15 @@ void Adjoint::run(const double* state, int B, const double* out_bar, double* out
   c.state_bar = state_bar;
   c.B = B;
   c.seed_pull = im.opt.seed_pull;
+  c.materialise_steps = im.opt.materialise_steps;
+  c.mat = m.mat.empty() ? nullptr : m.mat.data();
+  c.mat_base = m.mat_base.empty() ? nullptr : m.mat_base.data();
   c.select_wrong_arm = mutant("adjoint.select_wrong_arm");
   c.recip_rule_sign = mutant("adjoint.recip_rule_sign");
   c.scan_forward_order = mutant("adjoint.scan_forward_order");
   c.seed_input_pull = mutant("adjoint.seed_input_pull");
+  c.mat_skip_catalogue = mutant("adjoint.materialise_skip_catalogue");
+  c.mat_skip_operands = mutant("adjoint.materialise_skip_operands");
   c.cat_kernels = m.cat_kernels.empty() ? nullptr : m.cat_kernels.data();
   c.cat_bindings = m.cat_bindings.empty() ? nullptr : m.cat_bindings.data();
 #ifdef EPYKOS_EXEC_PROFILE
@@ -820,6 +942,7 @@ std::string Adjoint::describe() const {
   std::ostringstream os;
   os << "adjoint: tile " << im.opt.tile << " rows, lane_tile " << im.opt.lane_tile << " (buffers hold " << im.Lt
      << " lanes), max_batch " << im.opt.max_batch << ", seed_pull " << (im.opt.seed_pull ? "on" : "off")
+     << ", materialise_steps " << (im.opt.materialise_steps ? "on" : "off")
      << "; value buffers " << value_bytes() << " bytes, edge buffers "
      << edge_bytes() << " bytes, scratch " << scratch_bytes() << " bytes, tables " << table_bytes() << " bytes\n";
   os << adjoint::describe(im.plan, *im.p);
@@ -836,7 +959,10 @@ std::size_t Adjoint::num_values() const noexcept { return impl_->plan.num_values
 std::size_t Adjoint::value_bytes() const noexcept { return (impl_->values.size() + impl_->vbar.size()) * sizeof(double); }
 std::size_t Adjoint::edge_bytes() const noexcept { return (impl_->gbar.size() + impl_->segbar.size()) * sizeof(double); }
 std::size_t Adjoint::scratch_bytes() const noexcept {
-  return (impl_->fs.size() + impl_->sbar.size() + impl_->ops.size()) * sizeof(double);
+  // Options::materialise_steps' buffer counts here and not in value_bytes(): it is per-pass
+  // scratch of the same kind as `fs`, just sized for every row instead of one tile. It is empty
+  // in the recompute arm, so the default's figure is unchanged.
+  return (impl_->fs.size() + impl_->sbar.size() + impl_->ops.size() + impl_->mat.size()) * sizeof(double);
 }
 std::size_t Adjoint::table_bytes() const noexcept { return impl_->plan.table_bytes(); }
 

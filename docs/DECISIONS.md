@@ -9223,3 +9223,103 @@ zero**, after D92's closed-form Jacobian, D104's lane decomposition and D105's `
 The two new mutants have no line in `scripts/mutation_catchers.tsv`, so they take the full-gate
 fallback. That file's header states a missing line *"can never turn a survivor into a pass"* — it
 costs time, never correctness — so this is safe; a `--full` run on an idle box would tidy it.
+
+---
+
+## D112 — Reader count CANNOT decide materialise-vs-recompute (a theorem, not a weak signal); transcendental content can; and D31's revisit condition has fired exactly where it said it would (2026-10-10)
+
+The owner asked whether the engine detects the right values to cache, and then whether the decision
+can be made generic rather than fitted to a workload. Measured at both ends of the sharing spectrum
+— the rates book and D106's path grid.
+
+### 1. The orchestrator's premise was wrong, and the engine is in better shape than it claimed
+
+The brief asserted that `adjoint_e0.cpp` and `adjoint_to_program.hpp` make **contradictory,
+underived** caching choices for the same quantity. **Wrong on all three counts.**
+
+- They do not contradict: `adjoint_e0.cpp:482` is about **fuse/inline**, and the emitter's
+  "materialises" is about **Q's forward half**, not the reverse pass.
+- There is one policy, `include/epykos/adjoint/plan.hpp:30-36`.
+- It is **derived**, in D31 §1 (2026-09-23), with an explicit cost argument — *"storing every step
+  would cost `max_steps × rows × L` doubles … recomputing costs one extra pass of cheap arithmetic
+  over operands that the reverse loads anyway"* — **and a pre-registered revisit condition: "Not a
+  checkpointing scheme: at MC scale (M6) this changes."**
+
+**D106's path grid is MC scale, and the measurement below shows the condition firing exactly where
+D31 said it would.** A decision taken with a stated cost model and a stated expiry, which then
+expires on schedule, is the opposite of the ad-hoc choice the brief described.
+
+D31 also already exempts the expensive case: a group whose value is `exp`/`log`/`sqrt` never
+recomputes the libm call, only the arithmetic before it. That is why §3's signal is about the
+*recomputed cone's* transcendental content and not the group's.
+
+### 2. Reader count cannot decide this, and it is a theorem
+
+`ir::infer`'s boundary rule (`src/ir/signature.cpp`, `initial_boundaries`) is
+`boundary_[i] = (structural || use_count_[i] != 1 || member_use_[i])`. **A node is folded into a
+group's chain only if its use count is exactly 1.** So the always-recomputed class has reader count
+identically 1 — **100.00%** of 3,029 instances on `compare_ois`(256), 32,602 on `stage_a`, 526,340
+on `exotic_path`(1024×252).
+
+Reader count is what **constructs** the partition. Inside either class it carries zero information,
+and `AdjointPlan`'s four CSR lists are indexed by value id, so they are defined only on the
+materialised class. The orchestrator's suggested signal was not weak; it was structurally incapable.
+The op count fails too: 19.3% of forward arithmetic → recompute wins, 23.5% → materialise wins, with
+12.1% and 34.2% straddling the gap.
+
+### 3. The winner genuinely flips, and what predicts it is already in `ir::Group`
+
+One binary, interleaved A,B,B,A, swap control reproducing every sign; fingerprint `d448afd70180`,
+loads 2.64–3.41 against a bar of 8.0. Positive = materialise is worse.
+
+| fixture | transcendentals in the recomputed cone | B=1 | B=8 | winner |
+|---|---|---|---|---|
+| `compare_ois`(256) | 0 of 81 | +5.34% | +10.94% | **recompute** |
+| `stage_a` | 0 of 11,087 | +2.31% | +6.70% | **recompute** |
+| `exotic_path`(256×52) | 13,568 of 26,881 | **−7.97%** | **−9.92%** | **materialise** |
+
+Swept by leg mask within one fixture, the delta per intra-chain lane-element is **monotone in
+transcendental share and crosses zero**: +1.15/+1.86 ns at 0%, −2.07/−2.15 at ~47%, −4.62/−5.55 at
+~96–100%.
+
+**The property that makes this genuinely generic, rather than a fitted constant:** the per-step arm
+needs only the *ordering* `transcendental > copy > flop`, measured at **5.5 / 1.5 / 0.3 ns**. That
+is an order of magnitude between terms, so **the sign of the comparison is machine-independent** —
+no calibrated constant is required, only a ranking that holds on any plausible target. An
+all-or-nothing arm needs one constant (the ratio `S/c`, 3–5 here).
+
+### 4. Residency is ruled out, by the technique that would have exposed it
+
+D91 §3 measured ~40% of the head-to-head calibration figure as cache refill, so the obvious false
+positive is a structural signal that is really tracking residency. Forced eviction at 0/1/4/16/64 MB
+on **both** fixtures: **the verdict does not flip at any pressure**, and the percentage barely moves
+(−7.9 → −10.5% path grid, +9.6 → +10.8% rates book) while absolute times behave exactly as D91 and
+D103 predict (`compare_ois` 1.40x at 64 MB, `exotic_path` 1.02x). **This one is arithmetic.**
+
+### 5. Verdict: do not build it
+
+`adjoint::Options::materialise_steps` ships **false**, shipped behaviour byte-for-byte, gated
+bitwise at **2,668,528 memcmp, 0 mismatches**, with two mutants dead.
+
+The win is −8/−10% **on a workload the engine is already 0.45–0.78x of naive scalar C++ on** (D106),
+and it is +2.3/+11.2% *against* us where the engine actually ships. **Fifth consecutive lead to
+measure at or near zero** after D92, D104, D105 and D111. The per-step arm — which the ordering
+above says is the one that could work on both ends — **was not measured**, and is the only version
+worth revisiting if MC ever becomes a shipped workload.
+
+### 6. Three further corrections, one of them a hole in I1
+
+- **D31's "4–6x the value buffer" is a ~5x overestimate.** That bound is `max_steps × rows × L`; the
+  true requirement is `Σ_d (steps_d − 1)·rows_d·L` — measured **0.14x / 0.21x / 0.21x**. The
+  conclusion survives where it ships, but the number that justified it does not.
+- **D103 §3's candidate cause is now bounded**: the recomputation explains **at most ~1.1x of the
+  1.90x** per-operation gap between the reverse and the forward. The rest of that gap is unexplained
+  and stays open.
+- **`adjoint(adjoint(P))` throws for a scanning program.** `build_plan(Q)` rejects the recurrent
+  non-scan domain the emitter produces for the reverse of a scan (D99). **I1 is named "the IR is
+  closed under differentiation" and its gate tests one application only** — so the property the name
+  asserts fails at second order for scans while the gate passes. Exactly D100 §1's lesson recurring:
+  the gate is narrower than the name. Recorded against I1 in `PRINCIPLES.md`; not touched here.
+
+Also noted: **6.43% of Q's reverse half on `exotic_path` has zero readers**, against D102 §3's 0.1%
+on Stage A — the emitter's dead-node rate is two orders of magnitude worse on a low-sharing program.

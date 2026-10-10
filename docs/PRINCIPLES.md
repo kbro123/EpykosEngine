@@ -138,6 +138,12 @@ is a test that fails. **The backlog derives from these**, not from whatever is n
 the same inputs, so §5.2a case 1, and a failure is a defect.
 **Built 2026-10-07: `tests/adjoint/i1_gate_e0_test.cpp`.**
 
+**A hole the gate does not reach (D112 §6).** `adjoint(adjoint(P))` **throws for a scanning
+program**: `build_plan(Q)` rejects the recurrent non-scan domain the emitter produces for the
+reverse of a scan. The gate applies `adjoint` **once**, so it passes — but the invariant's NAME
+asserts closure, and a set closed under an operation admits applying it again. **Closure fails at
+second order for scans.** Same shape as the blind spot below: the gate is narrower than the name.
+
 **What this gate does NOT establish, stated here because it is easy to misread (D100).** It is a
 **closure check, not a correctness check** — which is the right aim, since I1 is a closure property,
 but a green I1 must never be read as *"the adjoint is correct"*. Both sides of the comparison consume

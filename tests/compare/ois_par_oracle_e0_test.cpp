@@ -282,70 +282,82 @@ TEST(OisParOracleE0, ArithmeticAveragingMatchesQuantLib) {
   EXPECT_GT(std::abs(ours[0] - plain[0]) * 1.0e4, 1.0) << "averaging must differ from compounding by ~1 bp or more";
 }
 
-// ---- §4: the one convention that DISAGREES, and the exact factor ------------------------------
+// ---- §4: the convention that disagreed, and the ARRC's answer ---------------------------------
 
-// OBSERVATION SHIFT disagrees with QuantLib by 2.12 bp at 1Y, decaying as 1/T, and the cause is
-// localised exactly: **ours is QuantLib's times d_accrual / d_obs**, verified below to 1.3e-13 on
-// the single-period instrument where that factor is unambiguous (367 accrual days against 365
-// observation days).
+// OBSERVATION SHIFT disagreed with QuantLib by 2.12 bp at 1Y until 2026-10-13, decaying as 1/T,
+// and the cause was localised to exactly one factor: ours was QuantLib's times d_accrual / d_obs
+// (367/365 on the single-period 1Y instrument, to 1.3e-13). D116 recorded it as an open question
+// between two defensible readings and declined to pick one.
 //
-// WHICH IS RIGHT IS AN OPEN QUESTION AND IS THE OWNER'S, because both readings are defensible and
-// the engines differ on a definition rather than on arithmetic:
+// **The ARRC settles it, and this engine was on the wrong side.** "An Updated User's Guide to
+// SOFR", Appendix 4 — titled "Methods for Calculating Daily Accrual in an Interest-Period
+// Weighted Observation Shift" — asks over how many days the annualised shifted rate is applied and
+// names two answers: (1) "the number of days in the OBSERVATION period", and (2) "the number of
+// days in the INTEREST period … (this variant was labeled an interest-period weighted shift)".
+// The main text then fixes which one the NAME means: "with an observation shift, interest is
+// accrued according to the number of days in the observation period, which may differ from the
+// number of days in the interest period."
 //
-//   ours      Floating Rate = (prod_obs - 1) * 360 / d_obs, then Floating Amount =
-//             N * Rate * d_accrual / 360. That is ISDA's formal structure — a Floating Rate
-//             multiplied by the CALCULATION period's day count fraction — and under observation
-//             shift the two periods have different lengths, so the factor survives.
-//   QuantLib  Floating Amount = N * (prod_obs - 1) directly: the compounded amount IS the
-//             interest, and the accrual period's length does not enter.
+// This engine computed (2) under the name `observation_shift`. Option (2) is a real convention —
+// "widely used in FRNs" — but the ARRC records it as "not the principle recommendation", "discussed
+// but not recommended" in its business-loan conventions, and notes it "can at times result in a
+// negative daily accrual even if SOFR rates are positive". `maths/instrument/coupon.hpp`'s
+// `rate_accrual` now returns the observation tau for the RFR kinds, which is option (1) and is
+// bit-identical wherever there is no shift.
 //
-// Everything else about our shift is right and is checked above: the observation window is
-// [start - 2bd, end - 2bd], its weights sum to its OWN length (365, not the accrual's 367 — the
-// mismatch is present in the structure, which is what distinguishes shift from lookback), and the
-// two engines agree exactly on lookback and on averaging. So this is one division, not a broken
-// convention.
-//
-// This test pins the MECHANISM rather than the verdict. If someone changes the division, this
-// fails and points at the decision that has to be recorded; it does not assert that today's
-// behaviour is correct.
-TEST(OisParOracleE0, ObservationShiftDiffersFromQuantLibByExactlyTheAccrualOverObservationRatio) {
+// The literals below were generated BEFORE the fix, so this test passing is the fix landing on
+// numbers it could not have been fitted to.
+TEST(OisParOracleE0, ObservationShiftMatchesQuantLib) {
   const std::vector<double> ours = quotes_of("USD-SOFR-OIS-SHIFT2");
   ASSERT_EQ(ours.size(), std::size(kQlObsShift2ParRate));
   const double worst = worst_gap_bp(ours, kQlObsShift2ParRate, ours.size());
   std::cout << "  [ql-oracle] 16 observation-shift OIS par rates vs QuantLib: worst " << worst << " bp\n";
+  EXPECT_LT(worst, kTolBp) << "observation shift is " << worst
+                           << " bp from QuantLib. If that is 2.12 bp at 1Y, the engine has gone back to the "
+                              "interest-period weighted variant -- see this test's header on ARRC Appendix 4.";
 
-  // Half one: the disagreement is real and far outside the tolerance the other four families meet.
-  EXPECT_GT(worst, 1.0) << "observation shift now agrees with QuantLib to " << worst
-                        << " bp. If that is intended, the division changed -- record the decision and replace this "
-                           "expectation. Do not delete it.";
+  // And the convention still bites: it must differ from plain by far more than the tolerance, or
+  // this test would pass on a shift that silently did nothing.
+  const std::vector<double> plain = quotes_of("USD-SOFR-OIS");
+  EXPECT_GT(std::abs(ours[0] - plain[0]) * 1.0e4, 1.0e3 * kTolBp) << "the observation shift changes nothing";
+}
 
-  // Half two: and it is EXACTLY one factor. The 1Y instrument is a single period, so d_accrual and
-  // d_obs are read straight off the fixture rather than assumed.
-  fixtures::CompareOisOptions o;
-  o.trades = 1;
-  o.quote_noise_bp = 0.0;
-  o.blueprint = "USD-SOFR-OIS-SHIFT2";
-  const fixtures::CompareOis s = fixtures::make_compare_ois(o);
-  const epykos::instrument::Instrument& in = s.set.instruments[0].instrument;
-  int accrual_days = 0, obs_weight_days = 0;
-  for (const epykos::instrument::Leg& leg : in.legs) {
-    if (leg.index.empty()) continue;
-    ASSERT_EQ(leg.coupons.size(), 1u) << "the 1Y instrument must be one period for this factor to be unambiguous";
-    accrual_days = static_cast<int>(leg.coupons[0].end - leg.coupons[0].start);
-    for (const epykos::instrument::ObsDay& od : leg.obs) obs_weight_days += od.weight_days;
+// The fix is a NO-OP wherever there is no shift, and that is what makes it checkable rather than
+// merely plausible: the observation weights of a plain or lookback coupon sum to the calculation
+// period's own length, so `obs_tau == accrual` and the payment is unchanged bit for bit. Asserted
+// on the fixture's own tables rather than argued from the formula.
+TEST(OisParOracleE0, TheObservationTauEqualsTheAccrualWithoutAShift) {
+  struct Case { const char* blueprint; bool shifted; };
+  const Case cases[] = {{"USD-SOFR-OIS", false},
+                        {"USD-SOFR-OIS-LOOKBACK2", false},
+                        {"USD-SOFR-AVG-SWAP", false},
+                        {"USD-SOFR-OIS-SHIFT2", true}};
+  for (const Case& c : cases) {
+    fixtures::CompareOisOptions o;
+    o.trades = 1;
+    o.quote_noise_bp = 0.0;
+    o.blueprint = c.blueprint;
+    const fixtures::CompareOis s = fixtures::make_compare_ois(o);
+    std::size_t floats = 0, differing = 0;
+    for (const epykos::instrument::Leg& leg : s.set.instruments[0].instrument.legs) {
+      if (leg.index.empty()) continue;
+      for (const epykos::instrument::Coupon& cp : leg.coupons) {
+        ++floats;
+        if (std::abs(cp.obs_tau - cp.accrual) > 1.0e-15) ++differing;
+      }
+    }
+    ASSERT_GT(floats, 0u) << c.blueprint;
+    if (c.shifted) {
+      EXPECT_EQ(differing, floats) << c.blueprint << ": a shifted coupon's observation tau equals its accrual, so "
+                                      "the shift is not shifting the window";
+    } else {
+      EXPECT_EQ(differing, 0u) << c.blueprint << ": an UNSHIFTED coupon's observation tau differs from its accrual, "
+                                  "so the coupon.hpp change is no longer a no-op here and every unshifted number in "
+                                  "this repository has moved";
+    }
+    std::cout << "  [ql-oracle] " << c.blueprint << ": " << differing << " of " << floats
+              << " float coupons have obs_tau != accrual\n";
   }
-  ASSERT_GT(accrual_days, 0);
-  ASSERT_GT(obs_weight_days, 0);
-  EXPECT_NE(accrual_days, obs_weight_days)
-      << "the observation window and the accrual period are the same length, so there is no shift to disagree about";
-  const double factor = static_cast<double>(accrual_days) / static_cast<double>(obs_weight_days);
-  const double measured = ours[0] / kQlObsShift2ParRate[0];
-  std::cout << "  [ql-oracle] observation shift, 1Y: accrual " << accrual_days << " days, observation window "
-            << obs_weight_days << " days; ours/QuantLib = " << measured << " against d_accrual/d_obs = " << factor
-            << '\n';
-  EXPECT_NEAR(measured, factor, 1.0e-11)
-      << "the disagreement is no longer the single factor d_accrual/d_obs, so it is not the division any more and "
-         "the cause must be re-localised before anything is concluded";
 }
 
 // The calendar, gated rather than inferred. `USD-SOFR-SWAP` is `join(USD-SIFMA, USD-FED)` and the

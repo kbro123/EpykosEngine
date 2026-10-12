@@ -125,6 +125,35 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D123, 2026-10-13: the ARRC settles the observation shift and THE ENGINE WAS WRONG.** At the
+owner's direction the authority is the ARRC's *Updated User's Guide to SOFR*, whose **Appendix 4** is
+titled "Methods for Calculating Daily Accrual in an Interest-Period Weighted Observation Shift" and
+names both readings: apply the annualised shifted rate over **(1)** the observation period's days,
+or **(2)** the interest period's. The main text fixes which one the NAME means — *"with an
+observation shift, interest is accrued according to the number of days in the observation period"* —
+and records (2) as *"not the principle recommendation"*, *"discussed but not recommended"*, and able
+to *"result in a negative daily accrual even if SOFR rates are positive"*. **This engine computed
+(2)**: `float_coupon_pv` formed `N·d_c/360·[(prod−1)·360/d_o]·DF`. Fixed via `rate_accrual`, and
+**verified against literals generated before the fix existed** — the shift families go 2.12 bp →
+**4.3e-11 bp** while plain, lookback and averaged stay bit-identical. **And a VALUE-neutral change
+is not a STRUCTURE-neutral one**: the first version altered the recorded graph everywhere and five
+gates caught it (catalogue x2, R1, R2, the telescoping spike), because D81's collapse, the
+catalogue's coverage and the rewrite site counts are properties of the graph, not the numbers. The
+shipped form changes only a τ constant and keeps the ops in order.
+
+**D122, 2026-10-13: the solve is verified, and the obstacle that blocked it for two days DID NOT
+EXIST.** The owner asked one question about D120 §2 and it sent me to QuantLib's source instead of
+its header. D115 §5 and D120 §2 both claimed "QuantLib's natural OIS pillar is the swap's maturity
+while ours is its last cash flow" — **false**: `Pillar::LastRelevantDate` is the DEFAULT and
+`oisratehelper.cpp` computes it as `max(maturityDate_, lastPaymentDate)`, so it **includes the
+payment lag** and coincides with our knot. I read the enumerator's name and assumed its meaning —
+*citing a thing is not checking it*, now applied to a library rather than one of our own gates. The
+gate: QuantLib bootstraps its own curve from the same 16 quotes, **0 of 16 pillar dates differ**,
+worst relative knot DF **8.09e-13**, worst zero rate **4.16e-10 bp** — at QuantLib's own bootstrap
+accuracy floor. **The chain quote → solve → knots → price → NPV → ladder now has an independent
+number at every link.** (Also: we are NOT solving knot forwards — Stage A is linear in zero,
+`compare_ois` linear in logdf; it is SwapEngine whose free variables are instantaneous forwards.)
+
 **D121, 2026-10-12: the 3s6s basis closes the par-rate surface — 9 rows at 8.5e-14 bp, THREE curves,
 float-vs-float.** 3M EURIBOR + spread (quarterly) against 6M flat (semiannual), ESTR-discounted,
 forecasting off two distinct slots. First attempt, no harness correction, and the tightest agreement

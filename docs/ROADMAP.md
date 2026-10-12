@@ -410,16 +410,16 @@ the order their evidence-to-effort ratio puts them:
    9 rows at **8.46e-14 bp**, three curves, first attempt and no harness correction. **The par-rate surface is now
    complete — 50 instruments, every par-rate calibration family Stage A has.**
 
-1c. **Futures as calibration rows (16: 8 SR3, 8 FEU3) — blocked on a DECISION, not effort.** They are quoted as
-   *prices* with convexity stated zero, so what a futures oracle compares depends on whether that stated-zero
-   convexity is the convention being tested or an approximation being excused. QuantLib has a Hull-White convexity
-   adjustment and their own `convexity_test.cpp` validates a test-side reference builder against it. Decide the
-   question before measuring: an oracle built on the wrong side of it would gate the approximation rather than the
-   engine.
-2. **The curve build as a gate.** Blocked on a real obstacle, not an omission: our knots sit at each instrument's
-   last cash-flow time (the payment date, D64) where QuantLib's natural OIS pillar is the maturity, so two
-   piecewise-log-linear curves on node sets two business days apart are different curves even when both reprice
-   every quote (D115 §5). Either align the node sets or keep to arm 2's form, which needs no alignment.
+1c. **Futures as calibration rows (16: 8 SR3, 8 FEU3) — the decision is TAKEN (owner, 2026-10-13): the quotes are
+   inclusive of any convexity.** So the quoted price IS the market's view of the compounded (SR3) or averaged (SR1,
+   FEU3) rate over the contract period, no adjustment is applied on either side, and `convexity zero` is the
+   CONVENTION rather than an approximation being excused. That makes the oracle decidable and plain: QuantLib's
+   `OvernightIndexFuture` with `convexityAdjustment = 0` for SR3, and `100(1 − forward)` with no `futuresConvAdj`
+   for FEU3. It is the last uncompared family on Stage A's calibration side.
+2. ~~**The curve build as a gate.** Blocked on a real obstacle…~~ **DONE 2026-10-13, D122, and the obstacle did
+   not exist.** `Pillar::LastRelevantDate` is QuantLib's DEFAULT and includes the payment lag, so its pillar
+   coincides with our knot: **0 of 16 pillar dates differ**, worst relative knot DF **8.09e-13**, worst zero rate
+   **4.16e-10 bp**. The claim in D115 §5 came from reading an enumerator's name instead of its definition.
 3. ~~**Seasoned trades and the risk ladder.**~~ **The ladder is DONE 2026-10-12, D120**: the IFT ladder matches a
    QuantLib central difference to **4.46e-10** over 16 buckets, the book NPV to 9.80e-15, and the residual is
    demonstrably the FD's own (the error falls as h² and then rises — a central difference's V). What it checks is the
@@ -427,12 +427,9 @@ the order their evidence-to-effort ratio puts them:
    D120 §2. **Seasoned trades remain open** — `compare_ois` is unseasoned by construction (one of its four agreement
    controls), so no oracle yet touches a realised fixing.
 
-3b. **The SOLVE itself, which is blocked on one structural question, not on effort.** QuantLib's natural OIS pillar
-   is the swap maturity; ours is its last cash flow (D64), so a QuantLib bootstrap puts the two curves on node sets
-   two business days apart and any comparison measures node placement (D115 §5, D120 §2). Either align the node
-   sets — a fixture option putting knots at terminations — or accept that the solve is checked only through its
-   composition with the adjoint. **This is the last link in the chain with no independent number**, and the decision
-   about how to reach it is worth taking deliberately rather than by default.
+3b. ~~**The SOLVE itself, which is blocked on one structural question…**~~ **DONE 2026-10-13, D122.** There was no
+   structural question; see item 2. **The chain quote → solve → knots → price → NPV → ladder now has an independent
+   number at every link.**
 4. **`calendar_ql_oracle_test.cpp`** — every calendar day by day. D115 already shows the SOFR fixing calendars
    agree over the 249 business days of a one-year period and over 40 years of rolls, which is a real but narrow
    slice of it.

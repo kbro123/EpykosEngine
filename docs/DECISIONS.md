@@ -9638,6 +9638,10 @@ and discounting on the same curve.
 > **Superseded in one clause by D117 §3**: "so the fixing calendars agree day for day" did not
 > follow from the par rate, which is nearly insensitive to day PLACEMENT. The claim is true and is
 > now gated directly against QuantLib's `fixingDates()`.
+>
+> **§5 is WITHDRAWN by D122 §1**: "QuantLib's natural OIS pillar is the swap's maturity" is false.
+> Its default `Pillar::LastRelevantDate` includes the payment lag, so it coincides with our knot;
+> there was never a node-set misalignment, and the solve is now gated directly.
 
 The second arm is worth stating separately: **QuantLib finds all sixteen instruments at par on the
 curve this engine calibrated**, to 5.58e-11 bp. The calibration is independently verified, not just
@@ -9765,6 +9769,11 @@ is what the compounded amount is divided by:
   survives into the payment.
 - **QuantLib** — Floating Amount = N·(Π_obs − 1) directly: the compounded amount *is* the interest
   and the accrual period's length never enters.
+
+> **RESOLVED by D123 against the ARRC, at the owner's direction: this engine was WRONG.** It
+> computed the ARRC's "interest-period weighted observation shift" — a real convention the ARRC
+> explicitly does not recommend — under the name of the plain observation shift. Fixed 2026-10-13;
+> the shift families now agree with QuantLib to 4.3e-11 bp.
 
 **Both readings are defensible and the resolution is the owner's.** It is a question about the 2021
 ISDA Definitions and the ARRC user's guide — specifically whether the Floating Amount under
@@ -10042,6 +10051,12 @@ So this is an independent check of **the adjoint and of the IFT's composition**,
 solve**. The honest form of "our risk is verified" is that sentence rather than the headline, and it
 is written at the top of the test file so the next reader of it cannot take the stronger claim.
 
+> **The stated obstacle is WITHDRAWN by D122 §1.** QuantLib's default OIS pillar includes the
+> payment lag and so coincides with our knot. §2's description of what this test checks stands —
+> it does check the adjoint and the composition and not the solve — but the *reason* given for
+> not checking the solve was wrong, and the solve is now gated separately
+> (`tests/compare/curve_solve_oracle_e0_test.cpp`).
+
 ### 3. Why the residual is the finite difference's and not the engine's
 
 Swept over the bump size, worst relative difference across the 16 buckets:
@@ -10122,3 +10137,169 @@ approximation being excused. That is the owner's call and is not taken here.
 Still open from D120 §5: seasoned trades with realised fixings, second derivatives, and the solve
 itself — the last blocked on the pillar question of D115 §5, which remains the one structural
 obstacle in the chain rather than a matter of work.
+
+## D122 — The solve is verified: knots match QuantLib's own bootstrap to 8.1e-13. The obstacle that blocked it for two days did not exist (2026-10-13)
+
+The owner read D120 §2's account of why the solve could not be checked and asked one question —
+*"Aren't we solving knot forwards?"* — which sent me to QuantLib's source instead of its header. The
+obstacle was my own misreading.
+
+### 1. The correction
+
+D115 §5 and D120 §2 both state that a direct bootstrap comparison is unavailable because
+"QuantLib's natural OIS pillar is the swap's maturity while ours is its last cash flow (D64), so two
+piecewise-log-linear curves on node sets two business days apart are different curves even when both
+reprice every quote". **That is false.** `oisratehelper.cpp`:
+
+```cpp
+Date lastPaymentDate = std::max(swap_->overnightLeg().back()->date(),
+                                swap_->fixedLeg().back()->date());
+latestRelevantDate_ = std::max(maturityDate_, lastPaymentDate);
+case Pillar::LastRelevantDate: pillarDate_ = latestRelevantDate_;
+```
+
+`Pillar::LastRelevantDate` is the **default**, and it **includes the payment lag**.
+`Pillar::MaturityDate` is the opt-in. So QuantLib's natural pillar is the last payment date —
+exactly our knot — and nothing was ever misaligned.
+
+I had read the enumerator's NAME in the header and assumed "last relevant date" meant the maturity.
+A header gives a default's name; only the source gives its meaning. **The same error in a different
+costume as the recurring one: citing a thing is not checking it** (D100 §4), here applied to a
+library rather than to one of our own gates. It cost two entries' worth of a stated structural
+obstacle and, for two days, the belief that the last link in the chain was unreachable.
+
+Also answered, since it was the question actually asked: **we are not solving knot forwards.**
+Stage A's curves are `linear` in **zero**, `compare_ois` is `linear` in **logdf**;
+`curve::Variable::forward` exists but is static_asserted to Flat/Linear. It is *SwapEngine* whose
+free variables are its curves' instantaneous forwards (D109 §5). Linear-in-logdf is equivalent to a
+piecewise-constant instantaneous forward, which is why `PiecewiseYieldCurve<Discount, LogLinear>`
+is the matching QuantLib family and why the interpolation scheme drops out of the comparison.
+
+### 2. The result
+
+`tests/compare/curve_solve_oracle_e0_test.cpp`: QuantLib takes the same 16 par quotes, bootstraps
+its own curve with its own solver, and is compared against our calibrated knots directly.
+
+| | result |
+|---|---|
+| pillar dates differing from our knots | **0 of 16** |
+| worst relative knot DF difference | **8.09e-13** |
+| worst zero-rate difference | **4.16e-10 bp** |
+
+The residual is at QuantLib's own `IterativeBootstrap` accuracy (default 1e-12), so it is the
+comparison's floor rather than a measure of our solver — the same reading as D120 §3's
+finite-difference floor.
+
+**The chain quote → solve → knots → price → NPV → ladder now has an independent number at every
+link.** D114 the schemes, D115/D116/D119/D121 the instruments, D117 the fixing calendar, this the
+solve, D120 the adjoint and the IFT.
+
+An earlier run of this same comparison (recorded in D115 §5 as 0.0009–0.12 bp and attributed partly
+to node placement) was **entirely** the `MakeOIS` stub bug of D115 §3. There was no node-placement
+term in it at all.
+
+### 3. The harness, which avoids both known traps at once
+
+`DatedOISRateHelper`, not `OISRateHelper`: it takes the start and end dates explicitly so the tenor
+is never advanced to the adjusted termination (D115 §3's weekend stub), and it builds its schedule
+with `MakeOIS`'s default **Backward** rule, which is what our `stub: ShortFront` means (D119 §2).
+The gate asserts the pillar coincidence from the engine's own dates rather than assuming it, so if
+either side ever moves its node the test fails with the reason instead of silently measuring node
+placement.
+
+## D123 — The ARRC settles the observation shift and the ENGINE WAS WRONG: it computed a variant the ARRC does not recommend, under the standard convention's name (2026-10-13)
+
+D116 measured a 2.12 bp disagreement with QuantLib on `observation_shift`, localised it to exactly
+one factor (d_accrual/d_obs, 367/365 to 1.3e-13), presented two defensible readings and declined to
+pick. The owner named the authority: **"I think the ARRC is the correct source."** It is decisive,
+and it is against us.
+
+### 1. What the ARRC says
+
+*An Updated User's Guide to SOFR* (ARRC, 2021), **Appendix 4 — "Methods for Calculating Daily
+Accrual in an Interest-Period Weighted Observation Shift"**. ISDA's compounded formula annualises by
+`d_c`, the calendar days in the interest period; under a shift the equivalent uses `d_o`, the days in
+the observation period; and then:
+
+> "However there is a question as to how many days equation (B) above would be applied when
+> calculating the coupon payment and calculating daily interest accruals. There a few possible
+> options: **(1)** One simple option is to apply interest for the number of days in the
+> **observation** period … **(2)** A second option, which seems to be widely used in FRNs, is to
+> apply interest based on an equation like (B) above, defining an annualized rate of interest and
+> applying it for the number of days in the **interest** period (this variant was labeled an
+> **interest-period weighted shift** in the ARRC technical appendices on loan conventions)."
+
+And the main text fixes which one the *name* means:
+
+> "As just described, with an observation shift, **interest is accrued according to the number of
+> days in the observation period**, which may differ from the number of days in the interest
+> period. In some instances, parties in the FRN market choose to calculate interest payments using
+> the annualized lookback rate with observation shift, but then to apply that annualized rate to
+> the number of days in the interest period."
+
+On that second variant: it "has also been noted as a potential convention by the Sterling Risk Free
+Rate Working Group for the sterling loan market, though it is **not the principle recommendation**
+and is **discussed but not recommended** in the ARRC's conventions for business loans", and "One
+issue with this approach … is that it can at times result in a **negative daily accrual even if SOFR
+rates are positive**."
+
+### 2. What the engine computed
+
+`maths/instrument/coupon.hpp`: `coupon_rate` returned `(prod − 1)/obs_tau`, which is the ARRC's
+equation (B) and correct; `float_coupon_pv` then formed `N · c.accrual · (rate + spread) · DF`.
+Composed: **N · (prod − 1) · d_c/d_o** — option (2) exactly, which is why D116 measured the ratio as
+d_accrual/d_obs to 1.3e-13 rather than as something approximate.
+
+So the engine implemented a **real, named, documented convention** — just not the one its name
+claims, and the one the ARRC declines to recommend. The structure around it was right throughout:
+the observation window, its weights summing to the window's own length, the lookback variant, the
+averaging, the lockout. One division.
+
+### 3. The fix, and why it is checkable rather than merely plausible
+
+`rate_accrual(c)` returns `obs_tau` for the RFR kinds and `accrual` otherwise, and the rate accrues
+over it. **The literals it is verified against were generated before the fix existed** (D116's
+`kQlObsShift2ParRate`), so this is the change landing on numbers it could not have been fitted to:
+
+| family | before | after |
+|---|---|---|
+| plain | 4.1425e-11 bp | 4.1425e-11 bp — identical |
+| lookback 2 | 9.0206e-13 bp | 9.0206e-13 bp — identical |
+| averaged | 1.1102e-12 bp | 1.1102e-12 bp — identical |
+| **observation shift 2** | **2.12 bp** | **4.25e-11 bp** |
+| shift 2 + lockout 2 | 2.12 bp | 4.35e-11 bp |
+
+Gated both ways: the shift must now agree, and `obs_tau == accrual` must hold for every unshifted
+coupon and fail for every shifted one — read off the fixture's tables, so the no-op claim is
+measured rather than argued.
+
+### 4. A VALUE-NEUTRAL CHANGE IS NOT A STRUCTURE-NEUTRAL ONE, and five gates said so
+
+The first version of the fix wrote `N · (rate·τ_rate + spread·τ) · DF` unconditionally. Every value
+was unchanged wherever there is no shift — and **five tests failed**:
+`adjoint_adjoint_catalogue_e0_test`, `exec_interpreter_catalogue_e0_test`,
+`rewrite_r1_fold_uniform_columns_e0_test`, `rewrite_r2_bucket_rows_e0_test` and
+`spike_telescoping_prize_test`. A sum of two products is not the one multiply chain the catalogue
+had kernels for, the R1/R2 site searches matched, and D81's collapse telescopes.
+
+The shipped form keeps the original ops in the original order and changes only a τ constant —
+`N · τ_rate · (rate + spread) · DF`, taken whenever there is no shift **or** no spread, which is
+every family this project benchmarks. The split form remains for a shifted coupon that also carries
+a spread, which no blueprint combines, and the comment says so rather than pretending it is covered.
+
+The lesson is worth more than the fix: **in this engine a change can be bit-identical in value and
+still break, because the recorded structure is itself a load-bearing artifact** — D81's 2,565x
+collapse, the catalogue's kernel coverage and the rewrite site counts are all properties of the
+graph, not of the numbers. A maths edit needs its structural consequence checked even when the
+arithmetic provably has not moved. Those five gates are the first in this repository to bind
+something the value gates cannot see, which is the inverse of the session's other recurring finding.
+
+`ctest`: 153/153 release, 128/128 reference.
+
+### 5. What is not claimed
+
+Whether option (2) should remain *available* under its own name is not decided here. It is a real
+convention, the ARRC documents it, and `ObservationMethod` could carry it as a distinct member —
+`USD-SOFR-OIS-SHIFT2` is a "customised" blueprint and nothing in the shipped Stage A problem depends
+on which variant it means. What is decided is that the name `observation_shift` now means what the
+ARRC says it means.

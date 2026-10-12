@@ -78,14 +78,76 @@ Scalar fixed_coupon_pv(const Leg& leg, const Coupon& c, Curves&& df) {
   return c.notional * c.accrual * c.rate * df_pay;
 }
 
-// pv = N · τ · (R + s) · DF(t_pay); with_spread = false prices the coupon at R alone (the flat
+// The year fraction the coupon's RATE accrues over. For an RFR coupon this is the OBSERVATION
+// period's, not the calculation period's, and the two differ only under an observation shift.
+//
+// WHY (D122 §3, resolved against the ARRC's "An Updated User's Guide to SOFR" at the owner's
+// direction). `coupon_rate` returns the annualised compounded rate (prod − 1)·basis/d_o, which is
+// the ARRC's equation (B) — correctly divided by the OBSERVATION period. Appendix 4, "Methods for
+// Calculating Daily Accrual in an Interest-Period Weighted Observation Shift", then asks over how
+// many days equation (B) is applied, and names two answers:
+//
+//   (1) "apply interest for the number of days in the OBSERVATION period" — so the payment is
+//       N·(prod − 1), which is what the main text means by an observation shift: "with an
+//       observation shift, interest is accrued according to the number of days in the observation
+//       period, which may differ from the number of days in the interest period". This is the
+//       convention ISDA's protocol incorporates and the ARRC recommends for FRNs.
+//   (2) apply it "for the number of days in the INTEREST period … (this variant was labeled an
+//       interest-period weighted shift)" — the payment is then N·(prod − 1)·d_c/d_o.
+//
+// This engine computed (2) under the name `observation_shift` until 2026-10-13, and D116 measured
+// the consequence at exactly d_c/d_o — 2.12 bp at 1Y against QuantLib. Option (2) is a real
+// convention, "widely used in FRNs", but it is **not** what the name means: the ARRC records it as
+// "not the principle recommendation", "discussed but not recommended" for business loans, and
+// notes it "can at times result in a negative daily accrual even if SOFR rates are positive".
+//
+// So `rate_accrual` is `obs_tau` for the RFR kinds. It is a NO-OP wherever there is no shift,
+// because the observation weights then sum to the calculation period's own length — plain and
+// lookback coupons are bit-identical across this change, which is what makes it checkable.
+inline double rate_accrual(const Coupon& c) noexcept {
+  switch (c.kind) {
+    case CouponKind::RfrCompounded:
+    case CouponKind::RfrAveraged:
+      return c.obs_tau;
+    case CouponKind::TermRate:
+    case CouponKind::Fixed:
+      break;
+  }
+  return c.accrual;
+}
+
+// pv = N · τ_rate · (R + s) · DF(t_pay); with_spread = false prices the coupon at R alone (the flat
 // value of a spread leg, which the par spread divides against).
+//
+// The SPREAD keeps the calculation period's τ: a margin is contracted on the interest period, and
+// only the floating rate is observed over a shifted window. The two τ coincide unless there is an
+// observation shift, and no blueprint in this repository combines a shift with a spread — the
+// shifted families are OIS with spread 0 and the spread-bearing family is a EURIBOR basis whose
+// legs are TermRate — so the split form below is correct but unexercised, and says so.
+//
+// THE SHAPE IS DELIBERATE, not incidental. `τ_rate` and `τ` are both doubles of the coupon table,
+// so `tau_rate == c.accrual` is STRUCTURE and the branch provably does not depend on an input
+// (recording discipline: `structural_if` only for input-independent branches). Taking it keeps the
+// recorded expression for an unshifted coupon — which is every coupon of every family this project
+// benchmarks — byte-identical to what it was before the ARRC fix: one multiply chain, not a sum of
+// two products. The first version of this function omitted the branch and changed the recorded
+// GRAPH everywhere while leaving every value identical; `adjoint_adjoint_catalogue_e0_test`,
+// `exec_interpreter_catalogue_e0_test`, `rewrite_r1_fold_uniform_columns_e0_test`,
+// `rewrite_r2_bucket_rows_e0_test` and `spike_telescoping_prize_test` all failed, which is them
+// doing their job: a value-neutral change is not a structure-neutral one, and D81's collapse is a
+// property of the structure.
 template <class Scalar, class Curves>
 Scalar float_coupon_pv(const Leg& leg, const Coupon& c, Curves&& df, bool with_spread = true) {
   const Scalar rate = coupon_rate<Scalar>(leg, c, df);
   const Scalar df_pay = df(leg.disc_curve, c.t_pay);
-  if (with_spread) return c.notional * c.accrual * (rate + c.spread) * df_pay;
-  return c.notional * c.accrual * rate * df_pay;
+  const double tau_rate = rate_accrual(c);
+  if (!with_spread) return c.notional * tau_rate * rate * df_pay;
+  // `tau_rate == c.accrual` (no shift) or a zero spread: one multiply chain, the SAME ops in the
+  // same order as before the ARRC fix, with only the τ constant's value differing — and for an
+  // unshifted coupon not even that. Every family this project benchmarks takes this path: the
+  // shifted ones are OIS with spread 0.
+  if (tau_rate == c.accrual || c.spread == 0.0) return c.notional * tau_rate * (rate + c.spread) * df_pay;
+  return c.notional * (rate * tau_rate + Scalar(c.spread * c.accrual)) * df_pay;
 }
 
 template <class Scalar, class Curves>

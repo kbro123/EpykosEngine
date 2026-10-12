@@ -125,6 +125,20 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D116, 2026-10-12: the RFR observation conventions — and the first real disagreement.** Over the four other
+single-curve SOFR families (`compare_ois` gains a `blueprint` option whose default leaves every recorded number
+bit-identical): `lookback` **9.0e-13 bp**, arithmetic `averaged` **1.1e-12 bp** (the family that does not telescope,
+so D81's collapse never touches it — agreeing at that level means the 249-entry observation table is right day for
+day), the lockout confirmed live on both sides (8.29e-9 against QuantLib's 8.33e-9 at 40Y). But
+**`observation_shift` differs by 2.12 bp at 1Y**, decaying as 1/T, and the cause is exactly one division: ours is
+QuantLib's times `d_accrual / d_obs`, which on the single-period 1Y is 367/365 to **1.3e-13**. Our window and its
+weights are right — they sum to the observation period's own 365 days against an accrual of 367, which is what
+distinguishes shift from lookback. What differs is whether the compounded amount is divided by the observation
+period's length (ours, which is ISDA's Rate x Calculation-Period-DCF structure) or is the interest directly
+(QuantLib's). **Both readings are defensible; the resolution is the owner's and needs the 2021 ISDA Definitions, not
+a preference.** The gate pins the mechanism and not the verdict, in two halves: the gap must exceed 1 bp, and it must
+equal `d_accrual/d_obs` with both day counts read off the fixture.
+
 **D115, 2026-10-12: the second oracle, on the INSTRUMENT — and our conventions were imported from the engine we
 compare against.** `blueprints/conventions/instruments.json` records USD-SOFR-OIS as
 `"imported_from": "SwapEngine/conventions/conventions.json"`, so a convention error on their side is in this tree

@@ -370,8 +370,16 @@ the scheme oracle is written in our own tree: `blueprints/conventions/instrument
 `"imported_from": "SwapEngine/conventions/conventions.json"`, so **the head-to-head cannot check the conventions,
 because the conventions came from the other side of it.**
 
-**2 of their 33 T1 files lifted, ~10 of which are on our comparable surface; one oracle built from scratch.** The
-remainder, in the order their evidence-to-effort ratio puts them:
+**D116 extends it over the RFR observation conventions** and finds the first real disagreement:
+`lookback` 9.0e-13 bp, `averaged` 1.1e-12 bp, plain 4.1e-11 bp — and **`observation_shift` 2.12 bp**, localised to
+exactly one division (`d_accrual / d_obs` = 367/365 on the 1Y, to 1.3e-13). Our window and its weights are right;
+what differs is whether the compounded amount is divided by the observation period's length (ours, following ISDA's
+Rate x Calculation-Period-DCF structure) or taken as the interest directly (QuantLib's). **Both readings are
+defensible and the resolution is the owner's** — it needs the 2021 ISDA Definitions, not a preference. The gate pins
+the mechanism, not the verdict.
+
+**2 of their 33 T1 files lifted, ~10 of which are on our comparable surface; two oracles built from scratch
+covering 4 of Stage A's 8 families.** The remainder, in the order their evidence-to-effort ratio puts them:
 
 1. **Multi-curve, the direct extension of D115.** EUR-ESTR, EURIBOR-3M/6M basis, and futures and deposits as
    calibration rows — the families Stage A already prices and D115's single USD-SOFR curve does not reach. Same

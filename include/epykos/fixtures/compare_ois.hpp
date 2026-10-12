@@ -84,6 +84,22 @@ struct CompareOisOptions {
   // put that caveat under measurement instead of leaving it as prose.
   int max_start_offset_years = 0;
   int max_batch = 64;
+  // The instrument blueprint the curve calibrates to and the book is written on. The DEFAULT is
+  // the plain OIS, so every number recorded against this fixture (D71, D74, D76, D77, D81, D90,
+  // D109) is bit-identical with the option absent — the random stream is untouched, because this
+  // selects a blueprint rather than drawing anything.
+  //
+  // The other SOFR families of `blueprints/instruments/stage_a.json` are single-curve and
+  // par-rate quoted, so they fit this fixture unchanged and each one exercises a different RFR
+  // OBSERVATION convention — the area where a convention error is most likely and where, until
+  // D115, the only check was against an engine whose conventions ours were imported from:
+  //
+  //   USD-SOFR-OIS                  plain compounding in arrears
+  //   USD-SOFR-OIS-SHIFT2           two business day observation shift
+  //   USD-SOFR-OIS-SHIFT2-LOCKOUT2  observation shift plus a two business day lockout
+  //   USD-SOFR-OIS-LOOKBACK2        two business day lookback, no shift
+  //   USD-SOFR-AVG-SWAP             the arithmetic average of daily SOFR (does not telescope)
+  std::string blueprint = "USD-SOFR-OIS";
 };
 
 // The default calibration tenor set: annual to 10Y then the standard long end. Stated in long

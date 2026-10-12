@@ -59,9 +59,11 @@
 #include <cstddef>
 #include <iostream>
 #include <iterator>
+#include <string>
 #include <vector>
 
 #include "epykos/fixtures/compare_ois.hpp"
+#include "epykos/maths/instrument/tables.hpp"
 
 #ifndef EPYKOS_FP_CONTRACT_OFF
 #error "an _e0_test.cpp TU must see EPYKOS_FP_CONTRACT_OFF"
@@ -90,6 +92,61 @@ inline constexpr double kQlOisParRate[] = {
 // rate), so a real convention change fails loudly while the last bits of a 249-day compounding
 // are not a maintenance burden.
 constexpr double kTolBp = 1.0e-8;
+
+
+// The other three single-curve SOFR families of `blueprints/instruments/stage_a.json`, same
+// generating curve, same sixteen tenors, same QuantLib build. Each isolates one RFR OBSERVATION
+// convention, mapped onto QuantLib's `OvernightIndexedSwap` parameters:
+//
+//   USD-SOFR-OIS-LOOKBACK2   lookbackDays = 2, applyObservationShift = false
+//   USD-SOFR-AVG-SWAP        RateAveraging::Simple
+//   USD-SOFR-OIS-SHIFT2      lookbackDays = 2, applyObservationShift = true   <-- DISAGREES, §4
+inline constexpr double kQlLookback2ParRate[] = {
+    0x1.3f5571b6e9eadp-5, 0x1.4436eceef4dfp-5,   // 1Y, 2Y
+    0x1.482cd80e4f6a3p-5, 0x1.4b5e933f7ea24p-5,  // 3Y, 4Y
+    0x1.4df8b408ce136p-5, 0x1.502121e52a851p-5,  // 5Y, 6Y
+    0x1.51e1781994ccep-5, 0x1.5356abda09f07p-5,  // 7Y, 8Y
+    0x1.5490fc39b43a8p-5, 0x1.559b735e55a93p-5,  // 9Y, 10Y
+    0x1.57407cdbb4a08p-5, 0x1.58f687cb2dd88p-5,  // 12Y, 15Y
+    0x1.5ab5385f9bd75p-5, 0x1.5bbc9dc421ed1p-5,  // 20Y, 25Y
+    0x1.5c66478c48426p-5, 0x1.5d2c9a748cc1ap-5,  // 30Y, 40Y
+};
+inline constexpr double kQlAveragedParRate[] = {
+    0x1.3932a22b72d64p-5, 0x1.3df11cfea04cap-5,  // 1Y, 2Y
+    0x1.41c12ea344dap-5,  0x1.44d4874ca387ep-5,  // 3Y, 4Y
+    0x1.47549b254a53p-5,  0x1.49640cae84b82p-5,  // 5Y, 6Y
+    0x1.4b12b90a47dbbp-5, 0x1.4c79179aa7764p-5,  // 7Y, 8Y
+    0x1.4da651bf2c24cp-5, 0x1.4ea55270aea0cp-5,  // 9Y, 10Y
+    0x1.50382063d5267p-5, 0x1.51dc393a1fa4dp-5,  // 12Y, 15Y
+    0x1.538817cae5c6bp-5, 0x1.54845c226951fp-5,  // 20Y, 25Y
+    0x1.5526c183c1008p-5, 0x1.55e49cc77fcc2p-5,  // 30Y, 40Y
+};
+inline constexpr double kQlObsShift2ParRate[] = {
+    0x1.3d926525cdc7bp-5, 0x1.434a95ef48c6dp-5,  // 1Y, 2Y
+    0x1.4789dded539a3p-5, 0x1.4b5589fd88a2fp-5,  // 3Y, 4Y
+    0x1.4df2ec4624fd6p-5, 0x1.4fd2297d65e62p-5,  // 5Y, 6Y
+    0x1.519c8167f9666p-5, 0x1.53194b24bae17p-5,  // 7Y, 8Y
+    0x1.54598b04b6b42p-5, 0x1.55925eae92dap-5,   // 9Y, 10Y
+    0x1.571810d77cf7bp-5, 0x1.58ed78e897e4dp-5,  // 12Y, 15Y
+    0x1.5a9c8dbd2a13p-5,  0x1.5ba8a1ad3b952p-5,  // 20Y, 25Y
+    0x1.5c55af71fc0bdp-5, 0x1.5d1f67a80a9e3p-5,  // 30Y, 40Y
+};
+
+// The quotes of one blueprint on the fixture's generating curve.
+std::vector<double> quotes_of(const std::string& blueprint) {
+  fixtures::CompareOisOptions o;
+  o.trades = 1;
+  o.quote_noise_bp = 0.0;
+  o.blueprint = blueprint;
+  return fixtures::make_compare_ois(o).quotes;
+}
+
+// Worst |ours - QuantLib| in basis points over the sixteen tenors.
+double worst_gap_bp(const std::vector<double>& ours, const double* ql, std::size_t n) {
+  double w = 0.0;
+  for (std::size_t i = 0; i < n; ++i) w = std::max(w, std::abs(ours[i] - ql[i]) * 1.0e4);
+  return w;
+}
 
 }  // namespace
 
@@ -162,4 +219,101 @@ TEST(OisParOracleE0, TheComparisonIsSensitiveToAConventionChange) {
             << " bp\n";
   EXPECT_GT(worst, 1.0e3 * kTolBp) << "the quotes barely move when the generating curve does, so the oracle above "
                                       "is not actually constraining the instrument";
+}
+
+// ---- the other two conventions that agree ----------------------------------------------------
+
+// A two-business-day LOOKBACK: the rate applied on each business day is the one published two
+// business days earlier, and the WEIGHTS stay those of the accrual period. Our observation table
+// shows exactly that — the first entry's rate date moves from t = 0.00548 to t = 0, while its
+// weight stays 3/360 — and the agreement is the tightest in this file.
+TEST(OisParOracleE0, LookbackTwoDaysMatchesQuantLib) {
+  const std::vector<double> ours = quotes_of("USD-SOFR-OIS-LOOKBACK2");
+  ASSERT_EQ(ours.size(), std::size(kQlLookback2ParRate));
+  const double worst = worst_gap_bp(ours, kQlLookback2ParRate, ours.size());
+  std::cout << "  [ql-oracle] 16 lookback-2 OIS par rates vs QuantLib: worst " << worst << " bp\n";
+  EXPECT_LT(worst, kTolBp);
+  // And the convention is not a no-op: it must differ from plain by far more than the tolerance,
+  // or this test would pass on a lookback that silently did nothing.
+  const std::vector<double> plain = quotes_of("USD-SOFR-OIS");
+  EXPECT_GT(std::abs(ours[0] - plain[0]) * 1.0e4, 1.0e3 * kTolBp) << "the lookback changes nothing";
+}
+
+// The ARITHMETIC AVERAGE of daily SOFR rather than the compound — the family that does NOT
+// telescope (D81's collapse does not reach it), and the one whose par rate is furthest from
+// plain, so it is the strongest check that the observation table itself is right.
+TEST(OisParOracleE0, ArithmeticAveragingMatchesQuantLib) {
+  const std::vector<double> ours = quotes_of("USD-SOFR-AVG-SWAP");
+  ASSERT_EQ(ours.size(), std::size(kQlAveragedParRate));
+  const double worst = worst_gap_bp(ours, kQlAveragedParRate, ours.size());
+  std::cout << "  [ql-oracle] 16 averaged OIS par rates vs QuantLib: worst " << worst << " bp\n";
+  EXPECT_LT(worst, kTolBp);
+  const std::vector<double> plain = quotes_of("USD-SOFR-OIS");
+  EXPECT_GT(std::abs(ours[0] - plain[0]) * 1.0e4, 1.0) << "averaging must differ from compounding by ~1 bp or more";
+}
+
+// ---- §4: the one convention that DISAGREES, and the exact factor ------------------------------
+
+// OBSERVATION SHIFT disagrees with QuantLib by 2.12 bp at 1Y, decaying as 1/T, and the cause is
+// localised exactly: **ours is QuantLib's times d_accrual / d_obs**, verified below to 1.3e-13 on
+// the single-period instrument where that factor is unambiguous (367 accrual days against 365
+// observation days).
+//
+// WHICH IS RIGHT IS AN OPEN QUESTION AND IS THE OWNER'S, because both readings are defensible and
+// the engines differ on a definition rather than on arithmetic:
+//
+//   ours      Floating Rate = (prod_obs - 1) * 360 / d_obs, then Floating Amount =
+//             N * Rate * d_accrual / 360. That is ISDA's formal structure — a Floating Rate
+//             multiplied by the CALCULATION period's day count fraction — and under observation
+//             shift the two periods have different lengths, so the factor survives.
+//   QuantLib  Floating Amount = N * (prod_obs - 1) directly: the compounded amount IS the
+//             interest, and the accrual period's length does not enter.
+//
+// Everything else about our shift is right and is checked above: the observation window is
+// [start - 2bd, end - 2bd], its weights sum to its OWN length (365, not the accrual's 367 — the
+// mismatch is present in the structure, which is what distinguishes shift from lookback), and the
+// two engines agree exactly on lookback and on averaging. So this is one division, not a broken
+// convention.
+//
+// This test pins the MECHANISM rather than the verdict. If someone changes the division, this
+// fails and points at the decision that has to be recorded; it does not assert that today's
+// behaviour is correct.
+TEST(OisParOracleE0, ObservationShiftDiffersFromQuantLibByExactlyTheAccrualOverObservationRatio) {
+  const std::vector<double> ours = quotes_of("USD-SOFR-OIS-SHIFT2");
+  ASSERT_EQ(ours.size(), std::size(kQlObsShift2ParRate));
+  const double worst = worst_gap_bp(ours, kQlObsShift2ParRate, ours.size());
+  std::cout << "  [ql-oracle] 16 observation-shift OIS par rates vs QuantLib: worst " << worst << " bp\n";
+
+  // Half one: the disagreement is real and far outside the tolerance the other four families meet.
+  EXPECT_GT(worst, 1.0) << "observation shift now agrees with QuantLib to " << worst
+                        << " bp. If that is intended, the division changed -- record the decision and replace this "
+                           "expectation. Do not delete it.";
+
+  // Half two: and it is EXACTLY one factor. The 1Y instrument is a single period, so d_accrual and
+  // d_obs are read straight off the fixture rather than assumed.
+  fixtures::CompareOisOptions o;
+  o.trades = 1;
+  o.quote_noise_bp = 0.0;
+  o.blueprint = "USD-SOFR-OIS-SHIFT2";
+  const fixtures::CompareOis s = fixtures::make_compare_ois(o);
+  const epykos::instrument::Instrument& in = s.set.instruments[0].instrument;
+  int accrual_days = 0, obs_weight_days = 0;
+  for (const epykos::instrument::Leg& leg : in.legs) {
+    if (leg.index.empty()) continue;
+    ASSERT_EQ(leg.coupons.size(), 1u) << "the 1Y instrument must be one period for this factor to be unambiguous";
+    accrual_days = static_cast<int>(leg.coupons[0].end - leg.coupons[0].start);
+    for (const epykos::instrument::ObsDay& od : leg.obs) obs_weight_days += od.weight_days;
+  }
+  ASSERT_GT(accrual_days, 0);
+  ASSERT_GT(obs_weight_days, 0);
+  EXPECT_NE(accrual_days, obs_weight_days)
+      << "the observation window and the accrual period are the same length, so there is no shift to disagree about";
+  const double factor = static_cast<double>(accrual_days) / static_cast<double>(obs_weight_days);
+  const double measured = ours[0] / kQlObsShift2ParRate[0];
+  std::cout << "  [ql-oracle] observation shift, 1Y: accrual " << accrual_days << " days, observation window "
+            << obs_weight_days << " days; ours/QuantLib = " << measured << " against d_accrual/d_obs = " << factor
+            << '\n';
+  EXPECT_NEAR(measured, factor, 1.0e-11)
+      << "the disagreement is no longer the single factor d_accrual/d_obs, so it is not the division any more and "
+         "the cause must be re-localised before anything is concluded";
 }

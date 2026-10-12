@@ -9700,3 +9700,92 @@ Still absent: anything multi-curve (EUR-ESTR, EURIBOR basis), futures and deposi
 rows, seasoned trades with realised fixings, and the risk ladder. Their registry has 33 T1 files;
 D114 took two and this takes none, building its own instead. ROADMAP's "Independent oracles" section
 carries the order.
+
+## D116 — The RFR observation conventions against QuantLib: lookback and averaging agree to 1e-12 bp, OBSERVATION SHIFT differs by 2.12 bp, and the cause is exactly one division (2026-10-12)
+
+Extends D115 the same day, over the four other single-curve SOFR families of
+`blueprints/instruments/stage_a.json`. These are the fiddliest conventions this engine carries and
+the ones a desk is least able to check by eye; until today the only comparison was against an
+engine whose conventions ours were **imported from** (D115 §1).
+
+### 1. Method
+
+`compare_ois` gains one option, `blueprint`, defaulting to `USD-SOFR-OIS` so every number recorded
+against the fixture (D71, D74, D76, D77, D81, D90, D109) is **bit-identical with the option absent**
+— it selects a blueprint and draws nothing, so the random stream is untouched. Verified: the plain
+family's worst gap is 4.14252e-11 bp before and after, the same digits. The other four families are
+single-curve and par-rate quoted, so they fit the fixture unchanged.
+
+Each maps onto a QuantLib `OvernightIndexedSwap` parameter: `lookbackDays`, `lockoutDays`,
+`applyObservationShift`, `RateAveraging`.
+
+### 2. Three of four agree, and the structure is right
+
+| family | QuantLib parameters | worst gap |
+|---|---|---|
+| `USD-SOFR-OIS` | plain | 4.14e-11 bp |
+| `USD-SOFR-OIS-LOOKBACK2` | `lookbackDays = 2`, shift off | **9.02e-13 bp** |
+| `USD-SOFR-AVG-SWAP` | `RateAveraging::Simple` | **1.11e-12 bp** |
+| `USD-SOFR-OIS-SHIFT2` | `lookbackDays = 2`, shift **on** | **2.12 bp** |
+
+Averaging is the strongest of the three: it is furthest from plain (≈0.9 bp at 1Y), it does not
+telescope, so D81's collapse never touches it, and agreeing to 1.11e-12 bp means the observation
+table itself — 249 entries, their rate dates and their weights — is right day for day. Each of the
+agreeing tests carries a no-op control: the convention must move the rate by far more than the
+tolerance, or the test would pass on an implementation that silently did nothing.
+
+The **lockout** is also confirmed live on both sides, which the first reading of the hex quotes had
+suggested it was not: at 40Y, adding a two-day lockout to the shift moves our rate by 8.29e-9 and
+QuantLib's by 8.33e-9. A lockout is almost nothing on a smooth curve, and that is the right answer
+rather than a missing feature.
+
+### 3. Observation shift: localised to one division, exactly
+
+2.12 bp at 1Y, decaying as 1/T (1.09 at 2Y, 0.74 at 3Y, 0.073 at 40Y — the signature of a fixed
+difference in total accrued interest). **Ours is QuantLib's times `d_accrual / d_obs`**, and on the
+1Y, which is a single period, that factor is exact:
+
+```
+ours / QuantLib = 1.005479452055
+367 / 365       = 1.005479452055     difference 1.3e-13
+```
+
+Our *structure* is right and is what distinguishes shift from lookback: the observation window is
+[start − 2bd, end − 2bd] and its weights sum to **its own** length, 365 days, against an accrual of
+367 — the mismatch is present, which is exactly why the two conventions differ at all. What differs
+is what the compounded amount is divided by:
+
+- **ours** — Floating Rate = (Π_obs − 1)·360/d_obs, then Floating Amount = N·Rate·d_accrual/360.
+  That is ISDA's formal structure, a Floating Rate multiplied by the **Calculation Period's** day
+  count fraction, and under observation shift the two periods differ in length so the factor
+  survives into the payment.
+- **QuantLib** — Floating Amount = N·(Π_obs − 1) directly: the compounded amount *is* the interest
+  and the accrual period's length never enters.
+
+**Both readings are defensible and the resolution is the owner's.** It is a question about the 2021
+ISDA Definitions and the ARRC user's guide — specifically whether the Floating Amount under
+Observation Period Shift applies the observation period's or the calculation period's day count
+fraction — and it needs a primary source, not a preference. Nothing here establishes that this
+engine is wrong, and the entry does not claim it.
+
+What it does establish is the shape of the disagreement: **one division, not a broken convention.**
+Everything around it is verified — the window, its weights, the lookback variant that shares the
+same 2-day offset, the averaging, the lockout.
+
+### 4. The gate pins the mechanism, not the verdict
+
+`tests/compare/ois_par_oracle_e0_test.cpp` asserts, in two halves: that the disagreement exceeds
+1 bp (so a silent "fix" cannot pass unnoticed), and that it equals `d_accrual / d_obs` to 1e-11,
+with both day counts **read off the fixture** rather than written in. If the division changes, the
+first half fails and names the decision that has to be recorded. If the disagreement stops being
+that single factor, the second half fails and says the cause must be re-localised before anything is
+concluded. A test that asserted today's number as correct would be asserting a convention nobody has
+yet adjudicated.
+
+### 5. Scale
+
+Four of Stage A's eight families now have an independent oracle, plus the schemes of D114 — all in
+ungated `_e0_test.cpp` files that run in CI, where `tools/h2h/` never does. Still absent: the
+EUR-ESTR and EURIBOR basis families (multi-curve), futures and deposits as calibration rows,
+seasoned trades with realised fixings, and the risk ladder. The ROADMAP's "Independent oracles"
+section carries the order; the multi-curve extension is next and needs no new technique.

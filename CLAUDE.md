@@ -125,6 +125,20 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D118, 2026-10-12: the EURIBOR day-count `disagree` is worth EXACTLY ZERO, and can only bite on a
+stub.** Stage A's 54 par-rate quotes computed twice, the second time with both EURIBOR IRS fixed legs
+flipped to SwapEngine's **30E/360** via `$EPYKOS_BLUEPRINTS` (no code change; the override was
+verified to reach the loaded registry before the result was believed): **not one quote moved by more
+than 1e-9 bp**. The reason is structural and the opposite of what one would guess — 30/360 (US) maps
+a day-31 END to the 30th only when the START is the 30th or 31st, so **a swap rolling on the 31st
+every period is UNAFFECTED** and `eom: true` does not expose the question. Only a **stub** beginning
+mid-month and ending on a 31st can, and Stage A's EURIBOR swaps roll annually from spot and are
+stub-free. Gated in two halves: the bases really are distinct here (five dated cases, or the zero
+could be two names for one function), and no Stage A 30/360 fixed accrual has the exposing shape
+(109 scanned, 0 exposed, and the scan fails if it finds none). **Neither of D117's two EUR questions
+needs resolving to trust any number this repository quotes** — ≤0.019 bp and exactly 0 — which
+settles the priority without settling the convention.
+
 **D117, 2026-10-12: it is not one convention, it is ALL of them — and an oracle constrains only
 what it is sensitive to.** The audit: **17 of 17 instrument conventions, 7 of 7 calendars and 4 of 4
 indices in `blueprints/conventions/` were imported from SwapEngine.** So the head-to-head cannot
@@ -200,7 +214,7 @@ noise floor, the three wins keep full size, and the absolute default-path gains 
 kernels, which stayed true while the decomposition got slower — *a gate binds only what it can observe*, for the
 sixth time in this repository and the first on a performance quantity.
 
-`ctest`: **149/149** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
+`ctest`: **150/150** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
 tests; the default configuration's count is lower). **CI green on all four jobs** (ubuntu
 release / reference / mutation, macos release) at `6d68b09`. **`integrate/invariants` was merged into
 `main` on 2026-10-12 (`046427d`): 82 commits, D95–D116** — §1b's three invariants, the exotics kill

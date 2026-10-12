@@ -382,9 +382,12 @@ the mechanism, not the verdict.
 conventions, 7 of 7 calendars and 4 of 4 indices were imported from SwapEngine.** The head-to-head is sound on
 arithmetic and structurally blind on conventions. Three convention questions are recorded as unresolved by the import
 itself — `EUR-EURIBOR-3M/6M-IRS` fixed-leg day count (`disagree`: SwapEngine 30E/360 against our 30/360) and
-`EUR-ESTR-OIS` payment lag (`partial`: 2 BD against TP ICAP / LCH 2019's 1 BD). **The payment-lag one is priced at
-0.019 bp (1Y) and under 0.007 beyond 2Y**, so it is real and not urgent; the day-count one is not yet priced and
-needs an IRS, which `compare_ois` deliberately refuses.
+`EUR-ESTR-OIS` payment lag (`partial`: 2 BD against TP ICAP / LCH 2019's 1 BD). **Both are now priced (D117 §2, D118).** The payment lag is at most
+**0.019 bp** (1Y) and under 0.007 beyond 2Y. The day count is **exactly 0** on all 54 of Stage A's par quotes, and
+structurally can only bite on a **stub** beginning mid-month and ending on a 31st — a swap rolling on the 31st every
+period is unaffected, because both bases map a 31st START to the 30th, so `eom: true` does not expose it. **Neither
+question needs resolving to trust any number this repository quotes**; that settles the priority without settling the
+convention, and bounds the cost of being wrong.
 
 D117 also bounds what these oracles establish: **the par rate is nearly blind to which days are business days**
 (EUR-ESTR 257 observation days against SOFR's 249, par rates 4.37e-12 bp apart), so calendar agreement is now gated
@@ -395,12 +398,16 @@ claim needs the same treatment: its own sensitivity argument, or its own test.
 covering 4 of Stage A's 8 families, the SOFR fixing calendar day for day, and one EUR currency.** The remainder, in
 the order their evidence-to-effort ratio puts them:
 
-1. **The EURIBOR IRS, and it is now the highest-value item in this list.** It is the one family carrying a recorded
-   `disagree` against the other engine (fixed-leg 30/360 against their 30E/360), so a third implementation settles
-   an open question rather than confirming a closed one — and the disagreement is not yet priced. It needs what
-   `compare_ois` refuses by design: a forecast index different from the discount index, i.e. two curves. That is the
-   enabling piece of work, and it also unlocks EUR-ESTR discounting, the 3s6s basis, and an independent number
-   behind D109's four-curve h2h. No new technique, just a two-curve fixture.
+1. **A two-curve fixture, for the EURIBOR IRS and the 3s6s basis.** `compare_ois` refuses a non-OIS convention by
+   design, because an IRS's forecast index differs from its discount index and a one-curve world would silently
+   misprice it. A two-curve pricing fixture (not a two-curve calibration — the oracle's strongest arm prices on
+   GENERATING curves and needs no solve) unlocks the EURIBOR IRS, ESTR discounting, the 3s6s basis and an
+   independent number behind D109's four-curve h2h. No new technique.
+
+   **Note the reason this is no longer urgent for its own sake.** It was listed first when the EURIBOR `disagree`
+   was unpriced; D118 priced it at exactly 0, so the case for the two-curve fixture is now coverage of a family we
+   benchmark, not the resolution of an open question. The IRS still has no independent oracle of any kind, which is
+   reason enough.
 2. **The curve build as a gate.** Blocked on a real obstacle, not an omission: our knots sit at each instrument's
    last cash-flow time (the payment date, D64) where QuantLib's natural OIS pillar is the maturity, so two
    piecewise-log-linear curves on node sets two business days apart are different curves even when both reprice

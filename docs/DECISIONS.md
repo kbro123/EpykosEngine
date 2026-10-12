@@ -9871,3 +9871,64 @@ only the quantities its comparison is sensitive to. "We agree to 4e-11 bp" is a 
 about the compounded rate and a weak one about everything the compounded rate is flat in. Each
 clause of an agreement claim needs its own sensitivity argument, or its own test — and the cheapest
 way to find out which is to perturb the input and watch.
+
+## D118 — The EURIBOR IRS day-count `disagree` is worth EXACTLY ZERO on Stage A, and can only ever bite on a stub (2026-10-12)
+
+The second of D117 §1's three open convention questions, priced. D117 §2 did the EUR-ESTR payment
+lag (at most 0.019 bp); this does the one marked `disagree` rather than `partial`, which is the more
+serious label: *"fixed-leg day count: SwapEngine 30E/360 vs 30/360 (CFTC MAT, Bloomberg SEF,
+Strata); registry 30/360"*, recorded against both `EUR-EURIBOR-3M-IRS` and `EUR-EURIBOR-6M-IRS`.
+
+### 1. Measured: not one quote moves
+
+Stage A's 54 par-rate quotes (the 70 less the futures prices) were computed twice — once against the
+committed blueprints and once against a tree with both fixed legs flipped to **30E/360**, SwapEngine's
+reading. The tree is selected by `$EPYKOS_BLUEPRINTS`, so **no code changed**, and the override was
+verified to reach the loaded registry before the result was believed (it prints `30E/360`).
+
+**Not one quote moved by more than 1e-9 bp.** Worst difference: 0.000000 bp.
+
+### 2. Why — and this is the part that says where it COULD matter
+
+The two bases differ in exactly one place. 30/360 (US, Bond Basis) maps a day-31 period END to the
+30th **only when the START is the 30th or 31st**; 30E/360 maps every day-31 end to the 30th
+unconditionally. So they disagree on precisely one shape: **a period whose end is the 31st and whose
+start is not the 30th or 31st.** Verified in this engine — `2026-05-15 → 2027-05-31` gives 1.04444
+against 1.04167, while `2026-08-31 → 2027-08-31`, `2026-01-30 → 2027-01-31` and
+`2026-09-25 → 2027-09-27` are all identical.
+
+Two consequences, and the first is the one that matters:
+
+- **A swap rolling on the 31st every period is UNAFFECTED**, because both bases map the 31st start
+  to the 30th and both give exactly 1.0 per annual period. So `eom: true` on these conventions does
+  not expose the question, which is the opposite of what one would guess.
+- **Only a STUB can expose it** — a front or back period beginning mid-month and ending on a 31st.
+  Stage A's EURIBOR swaps roll annually from spot and are stub-free, which is why §1 is a clean zero
+  rather than a small number.
+
+So the disagreement is **near-moot in practice**: it is not a 30/360-versus-30E/360 question about
+regular coupons at all, it is a question about stubs.
+
+### 3. The gate, in two halves
+
+`tests/conventions/irs_daycount_disagreement_test.cpp`. Half one: the two bases really are distinct
+in this engine and differ exactly on the shape above, across five dated cases — without it the zero
+could be two names for one function. Half two: **no Stage A 30/360 fixed accrual has that shape**
+(109 fixed accruals scanned, 0 exposed), which is why the zero holds, and the scan asserts it found
+coupons at all so a refactor cannot make it pass vacuously. A third test pins that the registry
+still holds 30/360 with the disagreement unresolved, and asks for a decision entry if that changes.
+
+A future fixture that adds a stub will fail half two. **That is the intended signal**: it means the
+question has become live and now needs a primary source rather than a measurement.
+
+### 4. What this does and does not settle
+
+It settles the **priority**: neither of the two EUR questions D117 surfaced needs resolving to trust
+any number this repository quotes — the payment lag is worth ≤0.019 bp and the day count exactly 0.
+It does **not** settle which reading is right. That still wants the primary source, and the useful
+change is that it is no longer urgent, and that the cost of being wrong is now bounded rather than
+unknown.
+
+Method note, for the third time in two days: **price the disagreement before resolving it** (D68).
+A zero needs a control showing the measurement could have been non-zero, which §3's first half is;
+without it, "we measured no difference" and "we measured nothing" are the same output.

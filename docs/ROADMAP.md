@@ -241,7 +241,9 @@ found in.
    `scripts/perf_gate.py` catches regressions, and per D34 only the default invocation is gated, so the default sweep
    must be the one that matters. It should cover `compare_ois` AND `stage_a`, because every figure below is one
    fixture on one box — the same objection the orchestrator raised against an agent's measurement and then committed
-   itself.
+   itself. **D113 adds a second requirement: it must sweep `lane_tile` to 64 and `max_batch` over the non-variant
+   widths.** A +25% regression lived for four days at `lane_tile` 64 behind a sweep that stopped at the default, and
+   both runtimes must appear separately — they disagree at a tail of 7 and the adjoint's vote is 4x heavier.
 
 2. **`lane_tile = 32` is a reproducible ~22% penalty, and it is a published option.** Measured on `compare_ois` 64
    trades, B=256, adjoint us/lane, three replicates at 1-minute load 2.3-2.7, fingerprint `d448afd70180`:
@@ -258,19 +260,27 @@ found in.
    from 2 to 1 exactly at L=32 — but L=64 also gets 1 and is fine, so that does not explain it alone. Investigate
    before fixing. Changing the default needs its own decision entry and a second fixture.
 
-3. **A known regression shipped on `integrate/invariants`, and it must be fixed or reverted before that branch
-   merges.** D104's chunk tiling regresses **B = 3, 7, 11, 15 by 4-13%** (adjoint and interpreter independently,
-   three replicates) — D104 reported these as "+0.7% / +2.4%, no gain, inside spread" because it measured through the
-   whole ladder, which dilutes the component. One condition fixes all of them: **3 is the only tail that ever needs
-   three width-1 chunks**, and 7, 11 and 15 all end in a tail of 3, so emitting a tail of exactly 3 as one generic
-   chunk removes every regression and keeps every win (B=2 -18.9%, B=5 -24.2%, B=6 -6.9%, B=10 -7.1%, B=13 -11.1%).
+3. ~~**A known regression shipped on `integrate/invariants`, and it must be fixed or reverted before that branch
+   merges.**~~ **DONE 2026-10-12, D113 — and this item's own account of the defect was wrong in three ways.** It
+   said "B = 3, 7, 11, 15 by 4-13%", fixed by one condition on a tail of 3. Measured: the regression reaches
+   **+25% in the adjoint**, it extends to B = 10, 13, 63 and 100, and the cause is **chunk count**, not a tail
+   width. This item measured `lane_tile` 8 only, where the `split = false` reference is already chunked; at
+   `lane_tile` 64 the reference is one generic chunk where the split is seven. The tail-of-3 rule was built first
+   and fixed the interpreter at every width while leaving the adjoint's B = 7 and B = 15 untouched at +4%.
 
-   **But it is worth ~0% on anything we measure**, and that is the point of listing it third. `compare_ois_ladder`
+   The fix is **largely a revert**: `decomposed_widths` = {2, 5, 6} in `include/epykos/exec/lanes.hpp`, the three
+   widths whose decomposition is measured faster than the generic kernel in **both** runtimes, with every other
+   non-variant width emitted whole. All five non-variant widths below 8 were measured in both runtimes at two lane
+   tiles; 3 and 7 lose. No regression remains above the ±2.5% noise floor, all three wins keep full size, and the
+   absolute default-path gains at `lane_tile` 64 are large (adjoint µs/lane: B = 15 11.06 → 8.57, B = 63
+   9.41 → 7.41, B = 100 8.09 → 7.14).
+
+   **It is still worth ~0% on anything we measure**, which was this item's one correct half. `compare_ois_ladder`
    chunks rows by `max_batch` = 64 and each chunk is split by `lane_tile` = 8, so D90's h2h ladder (R=1, B=1), the
-   256-row ladder (4x64), the 1000-trade book (15x64 + 40, and 40 mod 8 = 0) and the warm calibration (B=1) are all
-   **unaffected**. It is a correctness-of-performance fix for a pathology — `B=2` costing more than `B=1` — not a
-   speedup. Do NOT build a cost model or a DP optimiser over decomposition choices: that is D86's retired cost model
-   again, fitted to a lever measured at zero.
+   256-row ladder (4x64), the 1000-trade book (15x64 + 40, and 40 = 32 + 8) and the warm calibration (B=1) are all
+   **unaffected**. Do NOT build a cost model or a DP optimiser over decomposition choices: that is D86's retired cost
+   model again, fitted to a lever measured at zero. A width earns a place in `decomposed_widths` by a paired
+   measurement in both runtimes, or not at all.
 
 ### Interpolation schemes (owner, 2026-10-06)
 
@@ -334,8 +344,6 @@ build until every place that must learn about it has. The idea is an ordinary `s
 borrowed code; `is_linmap_domain` is the equivalent here of the "does this ride the closed-form path" question, and
 it answers by structure rather than by exclusion, so a new value-dependent scheme would correctly find no linmap
 rather than silently claiming one.
-
----
 
 ## Risk register
 

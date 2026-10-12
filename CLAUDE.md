@@ -125,7 +125,20 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
-`ctest`: **133/133** on the release preset at `d448afd70180`. **CI green on all four jobs** (ubuntu
+**D113, 2026-10-12: D104's shipped regression was chunk COUNT, reached +25%, and the fix is mostly a revert.** The
+ROADMAP's own account of it — "B = 3, 7, 11, 15 by 4-13%", fixed by one condition on a tail of 3 — was wrong in three
+ways: it measured `lane_tile` 8 only, where the reference is already chunked, and at `lane_tile` 64 the adjoint loses
+**24-25%** at B = 15 and 63 (five and seven chunks against one). The tail-of-3 rule was built and measured first and
+fixed the interpreter everywhere while leaving the adjoint untouched at +4%. `decomposed_widths` = {2, 5, 6} now names
+the three widths whose decomposition is measured faster than the generic kernel in **both** runtimes; all five
+non-variant widths below 8 were measured at two lane tiles, and 3 and 7 lose. No regression remains above the ±2.5%
+noise floor, the three wins keep full size, and the absolute default-path gains at `lane_tile` 64 are large (adjoint
+µs/lane: B = 15 11.06 → 8.57, B = 63 9.41 → 7.41). D104's gate asserted that the decomposition used specialised
+kernels, which stayed true while the decomposition got slower — *a gate binds only what it can observe*, for the
+sixth time in this repository and the first on a performance quantity.
+
+`ctest`: **148/148** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
+tests; the default configuration's count is lower). **CI green on all four jobs** (ubuntu
 release / reference / mutation, macos release) at `b294efc`, which is what `main` points at: the
 rebuild was merged with the owner on 2026-09-29 (`e85734f`) and **`main` is now the line of
 development**. `origin/integrate/rebuild` is retained at `fb5f0ed`, 20 commits behind `main` and

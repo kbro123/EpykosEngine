@@ -21,10 +21,15 @@ bool next_lane_chunk(int B, int Lt, bool split, LaneChunk* c) noexcept {
   // addressed by the chunk's own `b0` and `L` — so the cursor tiles [0, B) greedily rather than
   // splitting each `Lt` group separately. That matters when `Lt` is itself not a variant: at
   // Lt = 7 a 1,000-lane run becomes 250 chunks of 4, where splitting group by group would give
-  // 125 of 4+1+1+1.
+  // 125 of 4+3.
   const int rem = std::min(Lt, B - b0);
   int L = rem;
-  if (split) {
+  // `prefer_generic_width` is the measured rule (D113 §2): a width whose decomposition costs more
+  // than running it whole is emitted whole, so it lands on the generic kernel by choice. It is
+  // tested here rather than inside the search because what is being declined is the decomposition
+  // itself, not a particular variant within it — and because the search would otherwise have to
+  // be re-entered to discover that it should not have run.
+  if (split && !prefer_generic_width(rem)) {
     // The largest variant that fits. The table is ascending and variant 0 is the fallback, so the
     // first hit walking down is the widest kernel available for `rem`; `rem` itself is kept when
     // none fits, which is variant 0 and the only path that still needs the runtime-L kernels.
@@ -40,8 +45,10 @@ bool next_lane_chunk(int B, int Lt, bool split, LaneChunk* c) noexcept {
   // Mutant lanes.drop_split_remainder: the cursor advances past the whole GROUP instead of past
   // the chunk just produced, so every lane a split left for a later chunk is never evaluated and
   // the caller reads back whatever its output buffer held. A no-op on a group whose width is a
-  // variant (there L == rem), which is what makes it a mutant of the decomposition and not of the
-  // chunking: it bites at B = 2, 3, 5, 6, 7 and at any B whose last group is one of those.
+  // variant (there L == rem) and on one `prefer_generic_width` declines (there too L == rem),
+  // which is what makes it a mutant of the decomposition and not of the chunking: it bites at
+  // exactly the widths in `decomposed_widths` — B = 2, 5, 6 — and at any B whose last group is
+  // one of those.
   c->step = mutant("lanes.drop_split_remainder") ? rem : L;
   return true;
 }

@@ -9323,3 +9323,140 @@ worth revisiting if MC ever becomes a shipped workload.
 
 Also noted: **6.43% of Q's reverse half on `exotic_path` has zero readers**, against D102 §3's 0.1%
 on Stage A — the emitter's dead-node rate is two orders of magnitude worse on a low-sharing program.
+
+## D113 — D104's regression was NOT a tail of 3 and NOT 4–13%: it is chunk count, it reaches +25%, and the fix is mostly a revert (2026-10-12)
+
+**The item.** `docs/ROADMAP.md`, "Lane widths and chunk tiling", item 3: *"A known regression shipped
+on `integrate/invariants`, and it must be fixed or reverted before that branch merges. D104's chunk
+tiling regresses B = 3, 7, 11, 15 by 4-13% … One condition fixes all of them: 3 is the only tail
+that ever needs three width-1 chunks, and 7, 11 and 15 all end in a tail of 3, so emitting a tail of
+exactly 3 as one generic chunk removes every regression and keeps every win."* That account is wrong
+in three ways, and this entry is the correction. The ROADMAP's own closing warning — *"Do NOT build a
+cost model or a DP optimiser over decomposition choices"* — is kept.
+
+### 1. Method
+
+`tools/`-free: the probe is the same two-arms-in-one-binary harness D104's independent check used,
+so the codegen confound cannot arise — one binary holds an `exec::Interpreter` and an
+`adjoint::Adjoint` built with `split_lane_chunks` true and false over the same `ir::Program`, and
+reports median µs/lane of 45 timed runs per arm per B after 15 warm-up runs. `compare_ois` 64 trades
+(1,843 values, 23 domains), `max_batch` 256, release, fingerprint `d448afd70180`, three replicates
+per configuration, 1-minute load stated with every table. **The within-binary delta is the number;
+the cross-binary absolute is not** — recompiling moved the *unchanged* `split = false` arm by up to
+8% at one B (interpreter, B = 11, `lane_tile` 64), which is code layout, and is exactly why the
+harness puts both arms in one binary.
+
+Noise floor, measured rather than assumed: B = 1 is one chunk of width 1 under both settings, so its
+delta is pure noise. Across the six runs below it is **±2.5% worst single reading, under 1%
+typically**. Anything smaller than that is not a result.
+
+### 2. What is actually wrong with D104
+
+**(a) The ROADMAP measured one lane tile.** Every figure in item 3 is at `lane_tile` 8, where the
+`split = false` reference is *already* chunked (B = 15 is 8 + a generic 7). At `lane_tile` 64 the
+reference is **one generic chunk of 15** and the split is five, and that is where the real number is.
+Load 2.66 → 2.93, three replicates, worst-to-best:
+
+| B (`lane_tile` 64) | split emits | plain emits | adjoint | interpreter |
+|---|---|---|---|---|
+| 63 | 32+16+8+4+1+1+1 | generic 63 | **+25.0 +24.8 +24.2%** | +17.2 +15.4 +15.3% |
+| 15 | 8+4+1+1+1 | generic 15 | **+21.6 +23.1 +24.4%** | +8.1 +9.8 +11.0% |
+| 100 | 64+32+4 | 64 + generic 36 | +13.7 +12.0 +13.9% | −5.7 −5.9 −5.5% |
+| 13 | 8+4+1 | generic 13 | +9.1 +9.8 +10.2% | −8.9 −6.8 −6.7% |
+| 11 | 8+1+1+1 | generic 11 | +7.1 +7.8 +8.9% | −6.8 −6.5 −5.2% |
+| 10 | 8+1+1 | generic 10 | +2.6 +3.1 +4.0% | −17.2 −16.2 −15.0% |
+
+So the regression is **up to +25%, not 4–13%**, it extends to B = 10, 13, 63 and 100 which item 3
+does not list, and at `lane_tile` 8 it also hits **B = 63** (interpreter +3.4 to +4.3%), which item 3
+does not list either.
+
+**(b) The defect is chunk count, not a tail width.** Every extra piece is another whole pass over
+the program — the interpreter's chunk loop, and in the adjoint `run_chunk`'s `forward()` *and*
+`reverse()`. Against that sits the generic kernel's inner `for (l = 0; l < L; ++l)`, which the
+compiler cannot vectorise against a width it does not know. Measured, that second cost is large only
+at small widths: in the adjoint the generic kernel at L = 63 is 474 µs against the specialised L = 64
+kernel's 460, i.e. **within 3% per lane**, so above about 8 lanes the decomposition is buying almost
+nothing and paying for every piece. A tail-of-3 rule cannot reach this: it was built and measured
+first (§3), and it fixed the interpreter at every width while leaving the adjoint's B = 7 and B = 15
+**untouched at +4%**.
+
+**(c) The two runtimes disagree at the same width, and the adjoint's vote is the one that counts.**
+At a tail of 7 the interpreter prefers 4+3 by 1.8–2.4% and the adjoint prefers one generic chunk by
+3.9–4.4%. The adjoint costs 4.1x the interpreter per lane there (13.35 against 3.18 µs/lane), so the
+combined effect of 4+3 is **+0.53 − 0.07 = +0.46 µs/lane against it**. An optimisation whose two
+consumers disagree has to be decided on the sum, and nobody had computed the sum.
+
+### 3. The fix: three widths are decomposed, everything else is left whole
+
+`include/epykos/exec/lanes.hpp` gains `decomposed_widths = {2, 5, 6}` and
+`prefer_generic_width(w)`, which `next_lane_chunk` consults before searching the variant table. The
+list is exhaustive over the candidates rather than fitted: there are exactly five non-variant widths
+below the smallest useful variant, all five were measured in both runtimes, and three win. Load
+3.43 → 3.43, three replicates each at `lane_tile` 8 and 64:
+
+| w | split emits | adjoint | interpreter | verdict |
+|---|---|---|---|---|
+| 2 | 1+1 | −23.7 to −24.5% | −14.5 to −16.4% | decompose |
+| 3 | 1+1+1 | −0.1 to −2.5% | **+7.2 to +10.3%** | leave whole |
+| 5 | 4+1 | −19.3 to −21.5% | −22.8 to −25.3% | decompose |
+| 6 | 4+1+1 | −3.8 to −6.4% | −7.0 to −9.0% | decompose |
+| 7 | 4+1+1+1 | **+2.8 to +5.2%** | **+2.5 to +4.0%** | leave whole |
+
+Above 6 nothing is decomposed, on the evidence of §2(a): six widths measured, the adjoint regresses
+at all six. **This is largely a revert of D104** — the split now fires only at `max_batch` ∈ {2, 5, 6}
+and at a run whose remainder is one of those — and that is the honest shape of what D104 was worth.
+D103 §6's own exposure analysis said so and was not followed: *"The exposure is therefore
+`max_batch` ∈ {2, 3, 5, 6, 7}, where every chunk was generic; a merely trailing odd group is one
+chunk out of B and measures flat."* Two of those five turn out to be in the other direction, and the
+trailing-group case turns out not to be flat at a wide lane tile.
+
+**Result, every configuration measured, six runs.** No regression anywhere above the noise floor; all
+three wins at full size. Worst remaining delta at any previously-regressing B is **−1.9% to +1.7%**,
+inside the ±2.5% floor. The absolute default-path gains at `lane_tile` 64 are large:
+
+| B (`lane_tile` 64) | adjoint µs/lane before → after |
+|---|---|
+| 15 | 11.06 → 8.57 (**−22.5%**) |
+| 63 | 9.41 → 7.41 (**−21.3%**) |
+| 100 | 8.09 → 7.14 (−11.7%) |
+| 13 | 9.91 → 8.84 (−10.8%) |
+| 11 | 11.13 → 10.08 (−9.4%) |
+
+and at `lane_tile` 8, interpreter µs/lane: B = 11 2.502 → 2.158 (−13.8%), B = 15 2.595 → 2.183
+(−15.9%), B = 3 4.539 → 4.081 (−10.1%), B = 7 3.432 → 3.07 (−10.5%), B = 63 1.556 → 1.412 (−9.3%).
+
+### 4. The gate, and the one thing that lets a regression like this ship
+
+`tests/exec/lane_chunking_e0_test.cpp` keeps its bitwise layer unchanged and intact — 360 (B,
+`lane_tile`) configurations across both runtimes, mismatches 0, so the new decomposition is still
+bit-for-bit the generic chunking (PRINCIPLES.md §5.2a case 1). Its structural layer had asserted
+*"every chunk the cursor emits has a kernel of its own"*, which is now false by design, so it is
+replaced by an assertion that pins the rule in **both** directions: a width outside
+`decomposed_widths` is never decomposed, every width inside it **is** decomposed somewhere in the
+matrix, and the listed widths are non-variants of at least 2. B = 11 is added to the batch matrix.
+
+Two gates were deleted by accident while editing this file and restored before the commit; the test
+count going 8 → 6 → 8 is what caught it. A test file edited by a text slice needs its count read back.
+
+**Why D104 shipped a +25% regression with a gate in place.** The gate asserted a *structural*
+property of the decomposition — that it uses specialised kernels — and that property was true. What
+was never asserted, and never measured, is that the decomposition is **faster than the thing it
+replaced**. D104 measured the split through the whole ladder, where `max_batch` 64 and `lane_tile` 8
+make every regressing width unreachable, and reported "no gain, inside spread". This is the sixth
+instance of the standing finding in this repository — *a gate binds only what it can observe* — and
+the first where the unobserved quantity is a performance one. The remedy is the pairing discipline
+D68 and D102 already state: a performance change ships with a paired before/after at the parameter it
+changes, not at the parameter the headline benchmark happens to use.
+
+### 5. What is NOT claimed
+
+The mechanism in §2(b) is a **candidate**, not an established cause: it is consistent with every
+number here (and with the generic kernel being within 3% of specialised at L = 63 in the adjoint),
+but the per-chunk and per-lane costs do not separate cleanly — an additive two-parameter fit
+predicts the interpreter's `lane_tile` 64 B = 15 split at 30.9 µs against 39.9 measured. Nothing is
+fitted and nothing should be. `lane_tile` = 32's reproducible ~22% penalty (ROADMAP item 2) is a
+**different** finding and is untouched here; so is `lane_tile` = 16 beating the shipped 8 by ~4.8%.
+And the whole lever remains worth **~0% on the workloads this project quotes**, exactly as item 3
+said: the h2h ladder is B = 1, the 256-row ladder is 4x64, the 1,000-trade book is 15x64 + 40, and
+40 = 32 + 8. This is correctness-of-performance for a pathology, now measured at both lane tiles
+instead of one.

@@ -354,28 +354,44 @@ chunks of at most `lane_tile` lanes — 8 by default in both `exec::Options` and
 to kernels instantiated for its lane count. Only `lane_variants` = {1, 4, 8, 16, 32, 64} have one; any other width used
 to fall to variant 0, whose inner `for (l = 0; l < L; ++l)` the compiler cannot vectorise against a width it does not
 know. D103 §6 found the hole: a width of 2, 3, 5, 6 or 7 arises as the last group of any B, and as *every* group when
-`max_batch` is one of those. `next_lane_chunk` now tiles [0, B) with the largest variant that fits what is left —
-2 → 1+1, 5 → 4+1, 7 → 4+1+1+1, and at `lane_tile` 64 a batch of 1,000 as 15×64 + 32 + 8. A chunk need not start on a
-multiple of `lane_tile`: every buffer is addressed by the chunk's own `b0` and `L`, so the only constraints are
-`L <= lane_tile` and `b0 + L <= B`, and at `lane_tile` 7 a 1,000-lane run is therefore 250 chunks of 4 rather than 125
-of 4+1+1+1. Splitting rather than padding up to the next variant is forced: a kernel reads `state[ordinal·B + b0 + l]`
-and writes `out[ordinal·B + b0 + l]`, so a widened chunk would read and write outside the caller's buffers.
+`max_batch` is one of those. `next_lane_chunk` tiles [0, B) with the largest variant that fits what is left, but **only
+at the three widths whose decomposition is measured faster than the generic kernel in both runtimes** —
+`decomposed_widths` = {2, 5, 6}, so 2 → 1+1, 5 → 4+1, 6 → 4+1+1, and every other non-variant width is emitted whole
+(D113). A chunk need not start on a multiple of `lane_tile`: every buffer is addressed by the chunk's own `b0` and
+`L`, so the only constraints are `L <= lane_tile` and `b0 + L <= B`, and at `lane_tile` 7 a 1,000-lane run is
+therefore 250 chunks of 4 rather than 125 of 4 + a generic 3. Splitting rather than padding up to the next variant is
+forced: a kernel reads `state[ordinal·B + b0 + l]` and writes `out[ordinal·B + b0 + l]`, so a widened chunk would read
+and write outside the caller's buffers.
+
+**Why only three widths (D113).** Every extra piece is another whole pass over the program — the interpreter's chunk
+loop, and in the adjoint `run_chunk`'s `forward()` *and* `reverse()` — while the generic kernel's penalty is large
+only at small widths: in the adjoint the generic kernel at L = 63 is within 3% per lane of the specialised L = 64 one.
+D104 decomposed every width and shipped a regression that reaches **+25% in the adjoint** at `lane_tile` 64 (B = 63
+seven chunks against one; B = 15 five against one), because it measured the split through the whole ladder, where
+`max_batch` 64 and `lane_tile` 8 make every regressing width unreachable. The two runtimes also disagree at a tail of
+7 — the interpreter prefers 4+3 by ~2%, the adjoint prefers one chunk by ~4% on a per-lane cost 4.1x larger — so the
+decision is made on the sum. All five non-variant widths below 8 were measured in both runtimes; 3 and 7 lose. The
+split therefore fires at `max_batch` ∈ {2, 5, 6} and at a run whose remainder is one of those, and nowhere else.
 
 The split is **bitwise**, which is what licenses it. Lanes are independent — one scenario per lane in the forward
 direction, `dst[l] += src[l]` per lane in `pull()` — and the one L-dependent quantity, `acc_rows_in_flight_for`
 (`src/exec/plan.hpp`), blocks a reduction epilogue's ROWS and never reorders the members summed within a row; it is
 also read with the plan-time `lane_tile`, so segment blocking does not move when a group is split.
-`tests/exec/lane_chunking_e0_test.cpp` is the gate (PRINCIPLES.md §5.2a case 1): 345 (B, `lane_tile`) configurations
+`tests/exec/lane_chunking_e0_test.cpp` is the gate (PRINCIPLES.md §5.2a case 1): 360 (B, `lane_tile`) configurations
 across both runtimes, bit-for-bit against the old single-remainder chunking, which `split_lane_chunks = false` still
-runs and which is also what keeps the runtime-L kernels exercised.
+runs and which is what keeps the runtime-L kernels exercised at *every* non-variant width rather than only at the ones
+the default leaves whole. Its structural layer pins `decomposed_widths` in both directions — a width outside the list
+is never decomposed, and every width inside it is decomposed somewhere in the matrix — because D104's gate asserted
+only that the decomposition used specialised kernels, which stayed true while the decomposition got slower (D113 §4).
 
 Measured paired on the ladder, `d448afd70180`, release, 1,000 trades / 256 rows, load 2.1–3.3 (`tools/ladder`, three
 replicates): `max_batch` 2 goes **369 → 299 µs/row (−18.9%)**, and R = 5 **237 → 189 (−20.3%)**, R = 6 **218 → 204
-(−6.5%)**. R = 3 (−0.7%) and R = 7 (+2.4%, inside the before-spread) do **not** improve: each piece is another pass over
-the program, so the gain tracks how few pieces the width needs, and 1+1+1 and 4+1+1+1 are at the crossover. The
-ordinary widths — 4, 8, 12, 16, 63, 64, 65, 100 rows and `max_batch` 4…64 — move by at most 1.4%, i.e. nothing. The
-exposure is therefore `max_batch` ∈ {2, 3, 5, 6, 7}, where every chunk was generic; a merely trailing odd group is one
-chunk out of B and measures flat (R = 63: +0.6%).
+(−6.5%)**. R = 3 (−0.7%) and R = 7 (+2.4%, inside the before-spread) do **not** improve. D113 then measured those two
+widths directly, in both runtimes, at `lane_tile` 8 and 64: they do not merely fail to improve, they **cost** 2.5–10%,
+and so do all six non-variant widths above 6, by up to 25% in the adjoint. The ladder dilutes the component, which is
+why it reported "inside spread"; the three wins above survive unchanged and are the whole of the benefit. The exposure
+is therefore `max_batch` ∈ {2, 5, 6}, and a trailing odd group is **not** flat at a wide lane tile — at `lane_tile` 64
+a batch of 63 was 7 chunks against 1 and cost the adjoint 24–25%.
 
 Adjoints (§3 rules applied group by group in reverse): scatter-add is replaced by a **pull** through the precomputed
 transpose of each index array (CSR "who reads me"), so adjoint groups are conflict-free gathers and vectorise. At the

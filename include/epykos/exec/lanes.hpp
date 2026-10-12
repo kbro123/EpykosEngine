@@ -25,6 +25,55 @@ inline int lane_variant(int L) noexcept {
   return 0;
 }
 
+// The non-variant widths whose DECOMPOSITION is measured faster than running the width whole on
+// the generic kernel. There are three, and the list is a measurement rather than a rule — D113,
+// paired arms in one binary (`compare_ois` 64 trades, three replicates, both runtimes, at
+// `lane_tile` 8 and 64).
+//
+// What is being traded. A non-variant width w decomposes into the largest variant below it plus
+// the decomposition of the rest, so every extra piece is another whole pass over the program —
+// `exec::Interpreter::run`'s chunk loop, and in the adjoint `run_chunk`'s forward() AND reverse().
+// Against that sits the generic kernel's inner `for (l = 0; l < L; ++l)`, which the compiler
+// cannot vectorise against a width it does not know. The first cost scales with the number of
+// pieces; the second with how badly the generic kernel does at that one width. Measured, the
+// second is large only at small widths — the generic kernel at L >= 8 is within a few percent of
+// the specialised one per lane in the adjoint — so decomposition pays at a handful of small
+// widths and loses everywhere else:
+//
+//   w   split emits   adjoint        interpreter     verdict
+//   2   1+1           -23 to -24%    -15 to -17%     decompose
+//   3   1+1+1         -0.3 to -2.5%  +7.2 to +10.3%  LEAVE WHOLE
+//   5   4+1           -19 to -22%    -23 to -25%     decompose
+//   6   4+1+1         -3.8 to -6.5%  -7.1 to -9.0%   decompose
+//   7   4+1+1+1       +2.8 to +5.2%  +2.5 to +4.0%   LEAVE WHOLE
+//
+// and above the widest small variant, where the plain arm is one generic chunk and the split is
+// three to seven, the adjoint loses by 3% (w = 10), 8% (11), 9% (13), 13% (36 within B = 100),
+// 23% (15) and 25% (63), against interpreter gains that are smaller in absolute microseconds
+// because the adjoint costs 4-7x the forward pass per lane. So no width above 6 is decomposed.
+//
+// This is the whole of the regression D104 shipped (ROADMAP, "Lane widths and chunk tiling",
+// item 3, whose own account of it — "B = 3, 7, 11, 15 by 4-13%", fixed by one condition on a tail
+// of 3 — is corrected by D113 §2: it measured `lane_tile` 8 only, where the plain arm is already
+// chunked, and the defect is chunk count rather than a tail width).
+//
+// Do NOT grow this into a cost model over decomposition choices — that is D86's retired cost
+// model again, and the lever is worth ~0% on anything this project benchmarks. A width earns a
+// place here by a paired measurement in BOTH runtimes, or not at all.
+inline constexpr int decomposed_widths[] = {2, 5, 6};
+inline constexpr int n_decomposed_widths = 3;
+
+// Whether width `w` is handed to the generic kernel whole rather than decomposed. False for a
+// width that has its own kernel — there is nothing to decide, and the decomposition of a variant
+// is the variant itself.
+inline bool prefer_generic_width(int w) noexcept {
+  if (lane_variant(w) != 0) return false;
+  for (int i = 0; i < n_decomposed_widths; ++i) {
+    if (decomposed_widths[i] == w) return false;
+  }
+  return true;
+}
+
 // The cursor `next_lane_chunk` walks. `b0` is the first lane of the chunk and `L` its width — the
 // two the kernels are handed. `step` is how far the cursor moves past it, which equals `L` in
 // every correct run; it is a separate field only so that a decomposition which fails to come back
@@ -41,12 +90,17 @@ struct LaneChunk {
 //
 //     for (LaneChunk ch{}; next_lane_chunk(B, Lt, split, &ch);) { ... ch.b0, ch.L ... }
 //
-// With `split` the width of each chunk is the largest variant that fits in `min(Lt, B - b0)`, so
-// a run whose remaining lanes do not make up a width with a kernel is executed as a sequence of
-// specialised chunks — 2 -> 1+1, 3 -> 1+1+1, 5 -> 4+1, 7 -> 4+1+1+1, and at Lt = 64 a batch of
-// 1,000 as 15x64 + 32 + 8 — instead of falling to one generic chunk. Without it each group is one
-// chunk of its own width, which is what the engine did before D103 §6's holes were closed, and is
-// the reference side of tests/exec/lane_chunking_e0_test.cpp.
+// With `split`, a width in `decomposed_widths` is executed as a sequence of specialised chunks —
+// 2 -> 1+1, 5 -> 4+1, 6 -> 4+1+1 — instead of falling to one generic chunk, and every other width
+// is emitted whole exactly as it would be without `split`. At Lt = 64 a batch of 1,000 is
+// 15x64 + 32 + 8 either way, because 40 = 32 + 8 is two variants. So what `split` changes is
+// confined to the three widths above and to any run whose remainder is one of them; a batch of 15
+// at Lt = 64 is one generic chunk under both settings.
+//
+// Without `split` each group is one chunk of its own width, which is what the engine did before
+// D103 §6's holes were closed, and is the reference side of
+// tests/exec/lane_chunking_e0_test.cpp. It remains the only setting under which the runtime-L
+// kernels are exercised at EVERY non-variant width rather than at the ones left whole by default.
 //
 // A chunk is NOT required to start on a multiple of `Lt`. Every buffer a kernel touches is
 // addressed by the chunk's own `b0` and `L` — the value buffer by stride `L`, the caller's state
@@ -75,9 +129,10 @@ struct LaneChunk {
 // copy of every input and a masked copy-out; splitting needs neither.
 //
 // Variant 0 stays the correct path for a width no variant covers: the search below falls back to
-// the whole remaining group. With the table above that never fires, because 1 is a variant and so
-// every positive width decomposes — which is exactly why `split` is an option rather than
-// unconditional, since otherwise nothing would exercise the runtime-L kernels again.
+// the whole remaining group, and `prefer_generic_width` sends most non-variant widths there
+// directly without searching at all. So the generic kernels are live on the default path — they
+// are what runs a batch of 3, 7, 11 or 15 — and `split` being an option is what additionally
+// exercises them at the three widths the default decomposes.
 bool next_lane_chunk(int B, int Lt, bool split, LaneChunk* c) noexcept;
 
 }  // namespace epykos::exec

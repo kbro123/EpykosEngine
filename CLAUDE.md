@@ -125,6 +125,21 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D115, 2026-10-12: the second oracle, on the INSTRUMENT — and our conventions were imported from the engine we
+compare against.** `blueprints/conventions/instruments.json` records USD-SOFR-OIS as
+`"imported_from": "SwapEngine/conventions/conventions.json"`, so a convention error on their side is in this tree
+too and **D109's head-to-head is structurally incapable of seeing it** — that is the honest answer to "have we done
+the full h2h". `tests/compare/ois_par_oracle_e0_test.cpp` compares all sixteen `compare_ois` SOFR OIS par rates to
+QuantLib 1.35: worst **4.14e-11 bp**, and **5.58e-11 bp** on the engine's own CALIBRATED curve, so QuantLib finds
+every instrument at par on the curve we solved — the calibration is verified, not only the pricer. It covers the T+2
+spot on the joint SIFMA-and-Fed calendar, the forward annual roll on an unadjusted grid, EOM, ACT/360 both legs, SOFR
+compounded over 249 daily observations, the two-business-day payment lag and the discounting. A negative control
+ships with it (a 1 bp curve bump moves the rates 0.87 bp, ~1e8x the tolerance). **The first run reported the ENGINE
+as wrong by 0.126 bp and the harness was at fault**: `MakeOIS` and `OISRateHelper` generate the schedule backward
+from the ADJUSTED termination, leaving a spurious three-day front stub on exactly the five tenors whose roll date is
+a weekend — a disagreement localises to the harness before it localises to an engine. Both oracles are ungated and
+run in CI, where `tools/h2h/` never does.
+
 **D114, 2026-10-12: the first INDEPENDENT oracle, and `monotone_cubic` is not QuantLib's.** D108's grant to lift
 their test CASES sat unused for three days; this takes it, from two of their 33 T1 files, and the expectations are
 QuantLib 1.35 hex-float literals so **D12 acquires nothing**. Four schemes match number for number —
@@ -153,7 +168,7 @@ noise floor, the three wins keep full size, and the absolute default-path gains 
 kernels, which stayed true while the decomposition got slower — *a gate binds only what it can observe*, for the
 sixth time in this repository and the first on a performance quantity.
 
-`ctest`: **148/148** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
+`ctest`: **149/149** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
 tests; the default configuration's count is lower). **CI green on all four jobs** (ubuntu
 release / reference / mutation, macos release) at `b294efc`, which is what `main` points at: the
 rebuild was merged with the owner on 2026-09-29 (`e85734f`) and **`main` is now the line of

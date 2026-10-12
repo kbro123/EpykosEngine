@@ -362,26 +362,45 @@ other than the engine**. Four schemes match QuantLib 1.35 — `Flat`/`ForwardFla
 settles D110's open question (parabolic tangents, a limiter QuantLib does not implement; its own Hyman filter is a
 structural no-op on parabolic tangents). The expectations are hex-float literals, so **D12 is untouched**.
 
-**2 of their 33 T1 files, ~10 of which are on our comparable surface.** The remainder, in the order their
-evidence-to-effort ratio puts them:
+**D115, the same day, adds the INSTRUMENT layer and is the more important of the two.**
+`tests/compare/ois_par_oracle_e0_test.cpp`: all sixteen `compare_ois` calibration tenors against QuantLib 1.35's
+`OvernightIndexedSwap::fairRate()`, worst **4.14e-11 bp**, and a second arm run on the engine's own *calibrated*
+curve at **5.58e-11 bp** — so QuantLib finds every instrument at par on the curve we solved. The reason it outranks
+the scheme oracle is written in our own tree: `blueprints/conventions/instruments.json` records USD-SOFR-OIS as
+`"imported_from": "SwapEngine/conventions/conventions.json"`, so **the head-to-head cannot check the conventions,
+because the conventions came from the other side of it.**
 
-1. **`calibration_oracle_test.cpp`** — a four-curve calibration where the compared unit is the **knot forwards**,
-   i.e. the thing a client consumes. Needs our solver and our instruments, not just an interpolant, and is the one
-   that would put an independent number behind D109's h2h rather than behind one scheme.
-2. **`ois_weekend_test.cpp`** and **`calendar_ql_oracle_test.cpp`** — weekend and holiday accrual, and calendars
-   day by day. Conventions are where a *shared* error between two engines is most likely, so these are worth more
-   than their size suggests.
-3. **`bspline_oracle_test.cpp`** — the sixth scheme, and the only one of ours with a QuantLib counterpart still
+**2 of their 33 T1 files lifted, ~10 of which are on our comparable surface; one oracle built from scratch.** The
+remainder, in the order their evidence-to-effort ratio puts them:
+
+1. **Multi-curve, the direct extension of D115.** EUR-ESTR, EURIBOR-3M/6M basis, and futures and deposits as
+   calibration rows — the families Stage A already prices and D115's single USD-SOFR curve does not reach. Same
+   method, no new technique, and it is what would put an independent number behind D109's four-curve h2h.
+2. **The curve build as a gate.** Blocked on a real obstacle, not an omission: our knots sit at each instrument's
+   last cash-flow time (the payment date, D64) where QuantLib's natural OIS pillar is the maturity, so two
+   piecewise-log-linear curves on node sets two business days apart are different curves even when both reprice
+   every quote (D115 §5). Either align the node sets or keep to arm 2's form, which needs no alignment.
+3. **Seasoned trades and the risk ladder.** `compare_ois` is deliberately stub-free and unseasoned (its four
+   agreement controls), so the oracle so far says nothing about a realised fixing or about O3. Their
+   `risk_ladder_oracle_test.cpp` bumps and RE-CALIBRATES against QuantLib, which is the shape to copy.
+4. **`calendar_ql_oracle_test.cpp`** — every calendar day by day. D115 already shows the SOFR fixing calendars
+   agree over the 249 business days of a one-year period and over 40 years of rolls, which is a real but narrow
+   slice of it.
+5. **`bspline_oracle_test.cpp`** — the sixth scheme, and the only one of ours with a QuantLib counterpart still
    uncompared.
-4. **`scheme_value_oracle_test.cpp`'s primitive half, for the cubics.** Not liftable yet: `Hermite`,
+6. **`scheme_value_oracle_test.cpp`'s primitive half, for the cubics.** Not liftable yet: `Hermite`,
    `NaturalCubic`, `MonotoneCubic` and `BSpline` have a `value` and no `integral`, which is the same gap
    `curve::Variable::forward`'s static_assert encodes. D114 §6 makes it visible as missing oracle coverage rather
    than only as a restriction.
 
 The discipline that makes a lift worth anything is D108 §2's line: **cases and expected numbers, never a routine
-that computes an expected output.** And D114 §4(c) is the cautionary tale for anyone extending this — a scheme
-identification that held on one dataset and three sample points was briefly reported as real, and two knot sets
-refuted it. Pin both halves of a coincidence, or do not report it.
+that computes an expected output.** Two cautionary tales for anyone extending this, both from the day these were
+built. D114 §4(c): a scheme identification that held on one dataset and three sample points was briefly reported as
+real, and two knot sets refuted it — pin both halves of a coincidence, or do not report it. D115 §3: the first run
+reported the ENGINE as wrong by 0.126 bp and the fault was the harness, because `MakeOIS` and `OISRateHelper`
+generate their schedule backward from the ADJUSTED termination and so leave a spurious front stub on every
+weekend roll — **a disagreement localises to the harness before it localises to an engine**, and the control that
+separates the two is worth more than the write-up.
 
 ---
 

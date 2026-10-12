@@ -9594,3 +9594,109 @@ an interpolant does.
 This file is an `_e0_test.cpp`, so it is pinned to `-ffp-contract=off` in every preset and it is in
 the mutation gate set by name — an independent oracle inside the mutation gate is the strongest
 position any gate in this repository occupies.
+
+## D115 — The second independent oracle, on the INSTRUMENT: 16 SOFR OIS par rates match QuantLib to 4.1e-11 bp — and our conventions were imported from the engine we compare against (2026-10-12)
+
+Follows D114 the same day. That one compared four interpolation schemes to QuantLib; this compares
+the quantity a desk quotes, on the layer where a *shared* error between the two engines is most
+likely to live.
+
+### 1. The reason this is the more important of the two
+
+`blueprints/conventions/instruments.json`, against USD-SOFR-OIS:
+
+```
+"provenance": { "imported_from": "SwapEngine/conventions/conventions.json products.USD-SOFR-OIS",
+                "imported_on": "2026-09-23", "cross_check": "agree" }
+```
+
+**Our SOFR conventions were imported from the other engine's.** The same provenance block sits on
+the `USD-SOFR` index. So a convention error on their side is in this tree too, and D109's
+head-to-head — curves agreeing to 6.717e-15, book NPV to 7.829e-15 — would report perfect agreement
+with both engines wrong. D114 §1 argued that as a principle; here it is a documented fact about this
+repository, and it is the strongest available answer to *"have we done the full h2h versus
+SwapEngine"*: *the h2h is structurally incapable of checking the conventions, because the
+conventions came from the other side of it.*
+
+### 2. What was compared, and the result
+
+`tests/compare/ois_par_oracle_e0_test.cpp`: all sixteen calibration tenors of `compare_ois`
+(1Y…10Y, 12Y, 15Y, 20Y, 25Y, 30Y, 40Y) with `quote_noise_bp = 0`, so the fixture's quotes are the
+generating curve's exact par rates **as this engine computes them**. QuantLib 1.35 prices the same
+sixteen swaps on the same curve, held daily as `InterpolatedDiscountCurve<LogLinear>`.
+
+**Worst disagreement 4.14e-11 bp (at 1Y); 5.58e-11 bp in a second arm run on the engine's own
+CALIBRATED curve.** That is ~1e-13 relative on a product compounding 249 daily fixings.
+
+What that validates, clause by clause — each of these is a place a shared error could have hidden:
+the T+2 spot on the joint SIFMA-and-Fed calendar; the annual roll generated forward on an
+unadjusted grid with each date ModifiedFollowing-adjusted; EOM; ACT/360 on both legs; SOFR
+compounded in arrears with plain observation over every business day of the period (249 in the
+one-year instrument, so the fixing calendars agree day for day); the two-business-day payment lag;
+and discounting on the same curve.
+
+The second arm is worth stating separately: **QuantLib finds all sixteen instruments at par on the
+curve this engine calibrated**, to 5.58e-11 bp. The calibration is independently verified, not just
+the pricer.
+
+A negative control ships with it, because an oracle that cannot fail proves nothing: a 1 bp bump of
+the generating short rate moves the par rates by up to 0.87 bp, i.e. ~1e8 times the tolerance.
+
+### 3. The harness defect, and why it is in the test file rather than only here
+
+**The first run of this comparison reported the engine as wrong, and the engine was right.**
+Measured disagreements: 1Y −0.126 bp, 6Y −0.024, 7Y −0.022, 12Y −0.012, 40Y −0.005, with the other
+eleven tenors at **exactly** 0.00000 bp to fifteen digits. Those five are precisely the tenors of
+this set whose termination falls on a Saturday or Sunday, and that pattern is what exposed the
+cause: `MakeOIS` and `OISRateHelper` both advance the tenor to the **adjusted** termination and then
+generate the schedule **backward**, so when the roll date is a weekend the first generated date
+lands past the effective date and the swap acquires a spurious three-day front stub — QuantLib's 1Y
+came out as `[25 Sep, 28 Sep)` with one fixing and `tau = 0.00833`.
+
+The disconfirming evidence was already in the same output and was nearly missed: QuantLib's **2Y
+first coupon** spans exactly the period of the 1Y swap — 249 fixings, `tau = 1.019444` — and its
+rate was 0.038982678771403 against our quote 0.038982678771398, agreeing to **1.3e-15**. Building
+the `Schedule` explicitly, forward from the spot date to the engine's own unadjusted termination,
+takes all sixteen to 4.14e-11 bp.
+
+Two things follow. **A disagreement localises to the harness before it localises to an engine** —
+and the intermediate claim here, "the five disagreeing tenors are exactly the weekend terminations,
+so this is a convention difference in the final accrual", was a correct localisation with a wrong
+attribution. The right next step was the control that separates instrument from schedule, not the
+write-up. And the trap is recorded **in the test file**, at length, because the next person to add
+an oracle of this shape will reach for `MakeOIS` first.
+
+Noted in passing, since their own suite shows they met this too: SwapEngine has
+`ois_weekend_test.cpp` and a `portfolio_verb_oracle_test.cpp` control reading *"QuantLib with an
+Unadjusted termination on T6/T7 must miss (WK1, d52038c)"*. Weekend terminations are a known trap on
+both sides.
+
+### 4. Provenance, and the dependency that was not added
+
+Same rule as D114 and the same reason D12 is untouched: the expectations are sixteen exact hex
+floats, generated once. **Nothing is lifted from SwapEngine here at all** — not even a case, since
+the fixture is ours. What D108's grant bought was the knowledge that an oracle of this shape is
+worth building; `tests/ORACLE_TESTS.md`'s registry is what said so.
+
+The literals are tied to the generating curve and the tenor set, so the test asserts those fixture
+options explicitly and fails there, with an instruction to regenerate, rather than silently
+downstream. An `_e0_test.cpp`, so pinned to `-ffp-contract=off` in every preset and in the mutation
+gate set by name. `tests/compare/` is ungated, so this runs in the default build and in CI — unlike
+`tools/h2h/`, which is behind `-DEPYKOS_H2H=ON` and never in CI. **The independent oracle is
+therefore better protected than the head-to-head it corrects.**
+
+### 5. What is still not compared
+
+The CURVE BUILD itself is not yet gated, and the reason is a genuine one rather than an omission:
+our knots sit at each instrument's last cash-flow time (the payment date, D64), while QuantLib's
+natural pillar for an OIS helper is the swap's maturity. Two piecewise-log-linear curves on node
+sets two business days apart are different curves even when both reprice every quote, so a direct
+bootstrap comparison measures node placement. Measured anyway, for the record: 0.0009–0.12 bp in
+zero rate, with the five largest at the weekend tenors — i.e. dominated by §3's harness defect, and
+not worth quoting further until the node sets are aligned. The clean version of that test is arm 2
+of §2, which needs no alignment, and it passes.
+
+Still absent: anything multi-curve (EUR-ESTR, EURIBOR basis), futures and deposits as calibration
+rows, seasoned trades with realised fixings, and the risk ladder. Their registry has 33 T1 files;
+D114 took two and this takes none, building its own instead. ROADMAP's "Independent oracles" section
+carries the order.

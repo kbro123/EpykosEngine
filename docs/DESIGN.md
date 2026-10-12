@@ -730,6 +730,14 @@ Correctness gates:
   only one where disagreement could mean *we* are wrong about the mathematics rather than about our own passes, which
   is why it exists (D2, deferred; the review behind D106, which named self-verification as the weakness). Agreement
   with SwapEngine is **not** this: a shared convention error produces perfect agreement and two wrong engines.
+  **D115 adds the instrument layer**, which matters more: `tests/compare/ois_par_oracle_e0_test.cpp` compares all
+  sixteen `compare_ois` SOFR OIS par rates to QuantLib's `OvernightIndexedSwap::fairRate()` — worst **4.14e-11 bp**,
+  and **5.58e-11 bp** on the engine's own calibrated curve, so QuantLib finds every instrument at par on the curve we
+  solved. It covers the T+2 spot, the forward annual roll on an unadjusted grid, EOM, ACT/360, 249 daily SOFR
+  observations, the two-day payment lag and the discounting. The reason it outranks the scheme oracle is that
+  `blueprints/conventions/instruments.json` records USD-SOFR-OIS as imported from SwapEngine's own conventions file,
+  so **the head-to-head cannot check the conventions** — they came from the other side of it. Both oracles are
+  `_e0_test.cpp` and ungated, so they run in CI where `tools/h2h/` never does.
   Further product-level oracles follow the same rule — cases and expected numbers, never a routine that computes an
   expected output (D108 §2).
 

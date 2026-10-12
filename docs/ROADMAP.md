@@ -394,10 +394,10 @@ D117 also bounds what these oracles establish: **the par rate is nearly blind to
 directly against QuantLib's `fixingDates()` rather than inferred from the rate. Every future clause of an agreement
 claim needs the same treatment: its own sensitivity argument, or its own test.
 
-**2 of their 33 T1 files lifted, ~10 of which are on our comparable surface; four oracles built from scratch
+**2 of their 33 T1 files lifted, ~10 of which are on our comparable surface; six oracles built from scratch
 covering four interpolation schemes, five single-curve SOFR observation conventions, three Stage A par-rate
 families (41 rows), the SOFR fixing calendar day for day, two currencies, three calendars, the two-curve path and
-the stub rule.** The remainder, in
+the stub rule, a book NPV and the 16-bucket risk ladder.** The remainder, in
 the order their evidence-to-effort ratio puts them:
 
 1. ~~**A two-curve fixture, for the EURIBOR IRS and the 3s6s basis.**~~ **DONE 2026-10-12, D119 — and no fixture was
@@ -413,9 +413,19 @@ the order their evidence-to-effort ratio puts them:
    last cash-flow time (the payment date, D64) where QuantLib's natural OIS pillar is the maturity, so two
    piecewise-log-linear curves on node sets two business days apart are different curves even when both reprice
    every quote (D115 §5). Either align the node sets or keep to arm 2's form, which needs no alignment.
-3. **Seasoned trades and the risk ladder.** `compare_ois` is deliberately stub-free and unseasoned (its four
-   agreement controls), so the oracle so far says nothing about a realised fixing or about O3. Their
-   `risk_ladder_oracle_test.cpp` bumps and RE-CALIBRATES against QuantLib, which is the shape to copy.
+3. ~~**Seasoned trades and the risk ladder.**~~ **The ladder is DONE 2026-10-12, D120**: the IFT ladder matches a
+   QuantLib central difference to **4.46e-10** over 16 buckets, the book NPV to 9.80e-15, and the residual is
+   demonstrably the FD's own (the error falls as h² and then rises — a central difference's V). What it checks is the
+   **adjoint and the IFT's composition, not the solve**, because the calibration map is ours in both arms; see
+   D120 §2. **Seasoned trades remain open** — `compare_ois` is unseasoned by construction (one of its four agreement
+   controls), so no oracle yet touches a realised fixing.
+
+3b. **The SOLVE itself, which is blocked on one structural question, not on effort.** QuantLib's natural OIS pillar
+   is the swap maturity; ours is its last cash flow (D64), so a QuantLib bootstrap puts the two curves on node sets
+   two business days apart and any comparison measures node placement (D115 §5, D120 §2). Either align the node
+   sets — a fixture option putting knots at terminations — or accept that the solve is checked only through its
+   composition with the adjoint. **This is the last link in the chain with no independent number**, and the decision
+   about how to reach it is worth taking deliberately rather than by default.
 4. **`calendar_ql_oracle_test.cpp`** — every calendar day by day. D115 already shows the SOFR fixing calendars
    agree over the 249 business days of a one-year period and over 40 years of rolls, which is a real but narrow
    slice of it.

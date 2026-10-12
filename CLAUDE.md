@@ -125,6 +125,21 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D120, 2026-10-12: the first independent number on O3 — the IFT ladder matches a QuantLib central
+difference to 4.5e-10, and the residual is the FD's.** The risk ladder is this project's strongest
+published result (D90's 6.12x) and had been compared only to itself: to `Dual`, which shares the
+recording, and to SwapEngine, whose conventions ours were imported from. Now, on `compare_ois` with
+64 trades: **book NPV 9.80e-15 relative** (a first in itself — D109 only had SwapEngine's 7.829e-15)
+and the **16-bucket ladder 4.46e-10 relative, worst**. The residual is the finite difference's own:
+swept over the bump, the worst error falls 3.3x per halving from 0.1 to 0.05 bp — h², i.e.
+truncation — reaches 4.46e-10 at 0.025 bp and then **rises** at 0.0125 bp as round-off takes over.
+That V is a central difference's error curve, so **the engine's analytic ladder is the accurate
+side**. Gated with a degeneracy control (6 positive / 10 negative buckets, largest 19.2% of the
+total), because a one-signed or concentrated ladder would make the agreement cheap. **What it does
+NOT establish**: the pricing and the differentiation are independent, the calibration map is ours in
+both arms, so this checks the adjoint and the IFT's composition and NOT the solve — the pillar
+mismatch of D115 §5 is the one remaining structural obstacle to checking that too.
+
 **D119, 2026-10-12: the TWO-CURVE oracle — 41 Stage A par rates to 5.3e-11 bp, and one row of 41
 carried the stub convention.** D117 listed a two-curve fixture as the enabling work; it was not
 needed, because **Stage A already has the shape** — its `EUR-EURIBOR-6M-IRS` rows forecast on slot 3
@@ -228,7 +243,7 @@ noise floor, the three wins keep full size, and the absolute default-path gains 
 kernels, which stayed true while the decomposition got slower — *a gate binds only what it can observe*, for the
 sixth time in this repository and the first on a performance quantity.
 
-`ctest`: **151/151** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
+`ctest`: **152/152** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
 tests; the default configuration's count is lower). **CI green on all four jobs** (ubuntu
 release / reference / mutation, macos release) at `6d68b09`. **`integrate/invariants` was merged into
 `main` on 2026-10-12 (`046427d`): 82 commits, D95–D116** — §1b's three invariants, the exotics kill

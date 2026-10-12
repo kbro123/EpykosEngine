@@ -10008,3 +10008,77 @@ they are quoted as prices with convexity stated zero, so the comparison needs a 
 first), **seasoned trades** with realised fixings, and **the risk ladder** — O3 has no independent
 number at all, and their `risk_ladder_oracle_test.cpp` bumps and re-calibrates against QuantLib,
 which is the shape to copy.
+
+## D120 — The first independent number on O3: the IFT ladder matches a QuantLib central difference to 4.5e-10, and the residual is the FD's (2026-10-12)
+
+The risk ladder is this project's strongest published result — D90 reports 6.12x the other engine,
+D103 decomposes it, D92 and D103 argue about its row count — and until this entry it had been
+compared only to **itself**: to `Dual`, which shares the recording, and to SwapEngine, whose
+conventions ours were imported from (D117 §1). D119 §4 listed it as having "no independent number at
+all". It has one now.
+
+### 1. The result
+
+`tests/compare/book_ladder_oracle_e0_test.cpp`, `compare_ois` with 64 trades and
+`quote_noise_bp = 0`:
+
+| quantity | comparison | result |
+|---|---|---|
+| book NPV | engine vs QuantLib on the engine's calibrated curve | **9.80e-15** relative |
+| ladder, 16 buckets | IFT + adjoint vs QuantLib central difference | **4.46e-10** relative, worst |
+
+The NPV figure is itself a first: D109 compared the book NPV only to SwapEngine (7.829e-15).
+
+### 2. What it establishes, and what it does not
+
+The chain is quote → (solve) → knots → (price) → NPV, and the ladder is
+(dNPV/dknots)·(dknots/dq). **The pricing and the differentiation are independent of this engine;
+the calibration map is the engine's in both arms.** The reason is D115 §5's: QuantLib's natural OIS
+pillar is the swap's maturity, ours is its last cash flow, so a QuantLib bootstrap would put the two
+curves on node sets two business days apart and the comparison would measure node placement rather
+than risk.
+
+So this is an independent check of **the adjoint and of the IFT's composition**, and **not of the
+solve**. The honest form of "our risk is verified" is that sentence rather than the headline, and it
+is written at the top of the test file so the next reader of it cannot take the stronger claim.
+
+### 3. Why the residual is the finite difference's and not the engine's
+
+Swept over the bump size, worst relative difference across the 16 buckets:
+
+| h | worst relative | ratio to previous |
+|---|---|---|
+| 0.1 bp | 3.54e-09 | — |
+| 0.05 bp | 1.07e-09 | 3.3x — i.e. h², FD **truncation** |
+| 0.025 bp | 4.46e-10 | 2.4x |
+| 0.0125 bp | 7.23e-10 | **rises** — FD **round-off** |
+
+Falling as ~h² and then rising is a central difference's own error curve, with its minimum near
+0.025 bp. **The engine's analytic ladder is the accurate side of the comparison**, and 4.5e-10 is
+the floor of what a finite difference can resolve on a 2.3e7 NPV, not a defect.
+
+This is the argument their own `risk_ladder_oracle_test.cpp` makes for the same reason — *"fell
+exactly h² at 0.25 bp: truncation, so the bump shrank"* — arrived at here independently, and
+recorded as independent rather than as agreement, per D92 §5's laundering guard.
+
+### 4. The degeneracy control
+
+A ladder that was near-zero, one-signed, or concentrated in a single bucket would make §1's
+agreement cheap. Measured and gated: **6 positive and 10 negative buckets, and the largest bucket is
+19.2% of the total absolute ladder.** Without this, matching one dominant bucket would be most of
+the comparison and the other fifteen would come nearly free.
+
+### 5. Scope after six oracle builds
+
+Independent numbers now exist for: four interpolation schemes (D114), five single-curve SOFR
+observation conventions (D115, D116), the SOFR fixing calendar day for day (D117), three Stage A
+par-rate families across two currencies and the two-curve path (D119), the stub rule (D119 §2), a
+book NPV, and the risk ladder (this entry). The EUR convention questions the import left open are
+priced at ≤0.019 bp and exactly 0 (D117 §2, D118).
+
+Still absent: the **3s6s basis** (9 rows, float-vs-float — the last par-rate family and the only
+new shape), **futures** as calibration rows (quoted as prices with convexity stated zero, so a
+convention decision precedes the measurement), **seasoned trades** with realised fixings, **second
+derivatives** (I2 is reachable but ungated against anything external), and **the solve itself**,
+which §2 explains needs the pillar question settled first — that is the one remaining structural
+obstacle rather than a matter of effort.

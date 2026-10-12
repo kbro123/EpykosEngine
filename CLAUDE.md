@@ -184,10 +184,12 @@ sixth time in this repository and the first on a performance quantity.
 
 `ctest`: **149/149** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
 tests; the default configuration's count is lower). **CI green on all four jobs** (ubuntu
-release / reference / mutation, macos release) at `b294efc`, which is what `main` points at: the
-rebuild was merged with the owner on 2026-09-29 (`e85734f`) and **`main` is now the line of
-development**. `origin/integrate/rebuild` is retained at `fb5f0ed`, 20 commits behind `main` and
-ahead by none — history, not a branch to push to. `v1.0-m4` tags the pre-rebuild engine.
+release / reference / mutation, macos release) at `6d68b09`. **`integrate/invariants` was merged into
+`main` on 2026-10-12 (`046427d`): 82 commits, D95–D116** — §1b's three invariants, the exotics kill
+test, the head-to-head lifted to Stage A, and the first independent oracles. The merged tree is
+byte-identical to the CI-green tip. **`main` is the line of development**; `origin/integrate/rebuild`
+(`fb5f0ed`) and `origin/integrate/invariants` are retained as history, not branches to push to.
+`v1.0-m4` tags the pre-rebuild engine.
 
 **D106, 2026-10-09: the exotics kill test — D1's revisit clause has FIRED, and D81's collapse is
 rates-only.** Commissioned by an external review whose summary was *"you have solved the hard,

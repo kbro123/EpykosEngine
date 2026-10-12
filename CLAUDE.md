@@ -125,6 +125,22 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D114, 2026-10-12: the first INDEPENDENT oracle, and `monotone_cubic` is not QuantLib's.** D108's grant to lift
+their test CASES sat unused for three days; this takes it, from two of their 33 T1 files, and the expectations are
+QuantLib 1.35 hex-float literals so **D12 acquires nothing**. Four schemes match number for number —
+`Flat`/`ForwardFlat` **exactly 0**, `Linear` 6.9e-18 value / 5.6e-17 integral, `NaturalCubic`/`CubicNaturalSpline`
+1.4e-17, `Hermite`/`Parabolic` 1.4e-17 — and `NaturalCubic` is the strongest of them, because it solves the
+tridiagonal system by Thomas over `Scalar` and QuantLib solves the same system its own way. `monotone_cubic` matches
+**nothing** in QuantLib: its tangents are QuantLib's `Parabolic` exactly, its limiter is one QuantLib does not
+implement, and QuantLib's own Hyman filter is a structural **no-op** on parabolic tangents (`tmp[i] == pm` makes its
+sign test and its min vacuous, verified bit-identically). That settles D110's open question. The contract difference
+is real and in our favour on one axis — our overshoot on a wiggly dataset is 0 against
+`MonotonicCubicNaturalSpline`'s 2.7e-3 — but **not a QuantLib defect**: its guarantee is documented only "in the
+regions of local monotoniticity of the input", which that segment is not. Every other gate here compares one of our
+evaluations with another; **agreement with SwapEngine is not validation, because a shared convention error produces
+perfect agreement and two wrong engines.** D92 §5's laundering guard bit once in the doing: an identification with
+QuantLib's `Harmonic` scheme held on three sample points and one dataset and was refuted by two knot sets.
+
 **D113, 2026-10-12: D104's shipped regression was chunk COUNT, reached +25%, and the fix is mostly a revert.** The
 ROADMAP's own account of it — "B = 3, 7, 11, 15 by 4-13%", fixed by one condition on a tail of 3 — was wrong in three
 ways: it measured `lane_tile` 8 only, where the reference is already chunked, and at `lane_tile` 64 the adjoint loses

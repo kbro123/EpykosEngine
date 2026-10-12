@@ -720,7 +720,18 @@ Correctness gates:
   difference taken at 106 bits. Measured on `d448afd70180` (D72 §4): the naive path's valuation error is 1.792e-15 of
   the D26 leg scale on the M1 book and 7.854e-14 to 1.616e-13 on Stage A, and its SENSITIVITY error is 62x and 656x
   larger respectively;
-- **external oracles** (QuantLib and others) added per product, test-only.
+- **external oracles** — **live since 2026-10-12 (D114), as literals rather than as a dependency.**
+  `tests/curve/scheme_oracle_e0_test.cpp` compares the interpolation schemes to QuantLib 1.35 number for number;
+  `tests/curve/ql_oracle_data.hpp` holds the expectations as exact hex floats, generated once and checked in, so D12
+  acquires nothing. Measured: `Flat`/`ForwardFlat` **exactly 0**, `Linear` 6.9e-18 (value) and 5.6e-17 (integral),
+  `NaturalCubic`/`CubicNaturalSpline` 1.4e-17, `Hermite`/`CubicInterpolation(Parabolic)` 1.4e-17. `monotone_cubic`
+  matches **no** QuantLib scheme — parabolic tangents through a limiter QuantLib does not implement — which settles
+  D110's open question. Every other gate in this section compares one of our evaluations with another; this is the
+  only one where disagreement could mean *we* are wrong about the mathematics rather than about our own passes, which
+  is why it exists (D2, deferred; the review behind D106, which named self-verification as the weakness). Agreement
+  with SwapEngine is **not** this: a shared convention error produces perfect agreement and two wrong engines.
+  Further product-level oracles follow the same rule — cases and expected numbers, never a routine that computes an
+  expected output (D108 §2).
 
 Performance gates: per machine+toolchain fingerprint; fail on > 1.25× self-regression or an absolute target miss. As
 built (M2/Q5, D29, D34): `bench/run.sh` writes `bench/results/<fingerprint>/<run>.json` (refusing at a 1-minute load

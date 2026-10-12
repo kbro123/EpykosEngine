@@ -9460,3 +9460,137 @@ And the whole lever remains worth **~0% on the workloads this project quotes**, 
 said: the h2h ladder is B = 1, the 256-row ladder is 4x64, the 1,000-trade book is 15x64 + 40, and
 40 = 32 + 8. This is correctness-of-performance for a pathology, now measured at both lane tiles
 instead of one.
+
+## D114 — The first independent oracle: four schemes match QuantLib to 1.4e-17, `monotone_cubic` matches NOTHING in it, and D110's open question is settled (2026-10-12)
+
+**Takes up D108's grant, which had been unused for three days.** D108 permitted lifting SwapEngine's
+test CASES and said the value was an oracle that needs no dependency; nothing was lifted, and this
+entry is the first use. It also closes the gap D2 deferred and the external review behind D106 named:
+*"everything to date is self-verified against your own templated `double` path."*
+
+### 1. Why agreement with the other engine was never enough
+
+D109 reports our curves agreeing with SwapEngine to **6.717e-15** and book NPV to **7.829e-15**, and
+D110 reports curve identity holding exactly where it can be tested. None of that is evidence of
+correctness. **A shared convention error produces perfect agreement and two wrong engines**, and no
+head-to-head can see it. A third implementation can. That is the whole argument for this file, and
+it is why the h2h numbers should never have been described as validation.
+
+### 2. What was lifted, and what was not
+
+Under D107 (reading) and D108 (cases), from two of their 33 T1 oracle files:
+
+| From | Lifted |
+|---|---|
+| `tests/scheme_value_oracle_test.cpp` | case A's knots {1, 1.5, 2.25, 3, 5, 7.5, 10}, its deliberately wiggly values, its 0.045 grid step, its `tol::literal` = 1e-12 — and **the correspondence between a scheme name and a QuantLib class**, which is a convention and is the single most valuable item in the lift |
+| `tests/monotone_cubic_oracle_test.cpp` | its knots and its two datasets, one monotone and one wiggly "where the Hyman filter actively clamps", and the fact that its `MonotoneCubic` is *"transcribed to match QuantLib EXACTLY"* |
+
+**Not lifted: any routine that computes an expected output** (D108 §2). The expectations are
+QuantLib 1.35's, printed once as exact `%a` hex floats into `tests/curve/ql_oracle_data.hpp` and
+checked in. **D12 is untouched** — there is no new dependency, exactly as D108 §1 predicted. The
+generator is ~100 lines against `<ql/math/interpolations/...>`, lives in no tree, and the
+correspondence table in the test header is its specification.
+
+On the "no data files in the repo" rule: it does not reach this table. A fixture is generated from a
+seed because a stale fixture is a silent lie about the workload; **an oracle table is the other
+implementation's answer**, which is the one thing that must not be regenerated from our own code.
+
+### 3. The four that match
+
+`tests/curve/scheme_oracle_e0_test.cpp`, 201 points for case A, worst absolute gap:
+
+| Epykos | QuantLib 1.35 | value | integral |
+|---|---|---|---|
+| `curve::Flat` | `ForwardFlatInterpolation` | **0.0 exactly** | **0.0 exactly** |
+| `curve::Linear` | `LinearInterpolation` | 6.94e-18 | 5.55e-17 |
+| `curve::NaturalCubic` | `CubicNaturalSpline` | 1.39e-17 | — |
+| `curve::Hermite` | `CubicInterpolation(Parabolic)` | 1.39e-17 | — |
+
+`NaturalCubic` is the strongest of these: it solves the tridiagonal system by the Thomas algorithm
+over `Scalar` with structural pivots, QuantLib solves the same system its own way, and nothing but
+the mathematics makes them agree to 1.4e-17. `Flat` and `Linear` are the two with an `integral`, and
+they are exactly the two `curve::Variable::forward` permits — a forward curve's discount factor *is*
+the integral, so that pair is the comparison standing behind a DF.
+
+**One API fact, established and pinned:** QuantLib applies its boundary condition only in the
+`da == Spline` branch, so for `Parabolic` it is **inert** — the columns generated with
+`SecondDerivative, 0.0` and with `Lagrange` are bit-identical over all 201 points. SwapEngine's own
+oracle passes `SecondDerivative, 0.0` there and those arguments do nothing. Their comparison is
+still valid; the correspondence it documents holds for the derivative rule alone.
+
+### 4. `monotone_cubic`: D110's question answered, in three parts
+
+D110 found that our `monotone_cubic` and theirs differ in tangent source and could not say which is
+QuantLib's, because two engines cannot adjudicate that. Three findings, each with the dataset that
+isolates it:
+
+**(a) The tangent source is settled, and D110 was right.** On the MONOTONE dataset neither limiter
+clamps — our values equal QuantLib's *unfiltered* parabolic cubic to 1.39e-17 — so that dataset
+exposes the tangents alone. Ours are QuantLib's `Parabolic`; theirs are the C2 spline's. Our gap to
+`MonotonicCubicNaturalSpline` is 7.20e-5, which is also exactly our gap to the plain
+`CubicNaturalSpline`.
+
+**(b) QuantLib's Hyman filter is a structural no-op on parabolic tangents.**
+`CubicInterpolation(Parabolic, monotonic = true)` is **bit-identical** to the same with
+`monotonic = false` on both datasets. The reason is in its source: the filter tests
+`tmp[i]*pm > 0` and clips to `min(|tmp[i]|, M)` with `M >= 3·min(|S[i-1]|, |S[i]|, |pm|)`, where
+`pm` is the Bessel tangent — so when the derivative rule IS `Parabolic`, `tmp[i] == pm`, the sign
+test can never fail and the min is vacuous. QuantLib's enum documents `Parabolic` as *"local,
+non-monotonic"*, consistent with this.
+
+**(c) The engine matches no QuantLib scheme at all.** All six local derivative rules were evaluated
+with the flag on and off. **One looked like a hit and is not**, and the near-miss is worth recording
+because it was briefly reported as an identification on three sample points: `Harmonic` agrees with
+us to **1.39e-17 on the wiggly dataset** and misses by **1.18e-4** on the monotone one and
+**4.98e-4** on case A's knots. The coincidence is degenerate — wiggly-B alternates secant sign at
+every interior knot, so both schemes zero every interior tangent and both reduce to the unique cubic
+with zero end tangents per segment. Both halves are pinned on two knot sets, so no one reads one
+dataset and concludes we are QuantLib's `Harmonic`. *Three points is not a grid.*
+
+So `monotone_cubic` is parabolic tangents through a limiter QuantLib does not implement, and
+**QuantLib cannot validate that limiter**. Stated rather than papered over, and the limiter gets the
+property its name promises instead:
+
+### 5. What the limiter is, measured — and the contrast reported correctly
+
+Worst excursion outside each segment's own knot bracket, wiggly dataset, 191 points:
+
+| | overshoot |
+|---|---|
+| **Epykos `MonotoneCubic`** | **0.0** |
+| QuantLib `CubicInterpolation(Parabolic)` | 1.09e-3 |
+| QuantLib `MonotonicCubicNaturalSpline` | 2.67e-3 |
+| QuantLib `CubicNaturalSpline` | 2.88e-3 |
+
+**This is NOT "QuantLib's monotone cubic is broken", and the first draft of this finding said so
+before its header was read.** QuantLib's documented guarantee is narrower than the property
+measured: the filter ensures monotonicity *"in the regions of local monotoniticity of the input
+(three successive increasing or decreasing values)"*. The wiggly set's last three values are 0.032,
+0.050, 0.031, so segment [7, 10] is not such a region and QuantLib promises nothing there. Its
+excursion is consistent with its own contract.
+
+What the numbers do show is that the two implement **different contracts**: ours zeroes the tangent
+at every secant sign change and brackets every segment unconditionally; Hyman–Dougherty relaxes its
+bound by `1.5·min(|pm|, |pd|)` and keeps the bracket only where the input is locally monotone. Ours
+is the more aggressive, and pays in smoothness rather than in correctness. That also prices D92 §7a's
+finding better: our seven `select`s and the Stage A slice's 284 → 708 values buy a *stronger*
+shape guarantee than the scheme we are usually compared with, which is an argument for ROADMAP's
+`tension` item (shape control with no value-dependent branch), not against the limiter.
+
+### 6. Scope, and what this does not yet cover
+
+Four schemes of six. `bspline` has a QuantLib counterpart (`bspline_oracle_test.cpp` in their
+registry) and is not done; `monotone_cubic`'s limiter has no counterpart by §4. The **integral** is
+compared for `Flat` and `Linear` only, because they are the only schemes with one — the cubics have
+`value` and no `integral`, which is the same gap `curve::Variable::forward`'s static_assert already
+encodes, and it is now visible as missing oracle coverage rather than only as a restriction.
+
+Nothing here touches calibration, conventions or schedules. Their registry has 33 T1 files and ~10
+on our comparable surface; this takes 2. The next ones with the best ratio of evidence to effort are
+`calibration_oracle_test.cpp` (four-curve calibration, knot forwards as the compared unit) and
+`ois_weekend_test.cpp` (weekend and holiday accrual), and both need more of our own machinery than
+an interpolant does.
+
+This file is an `_e0_test.cpp`, so it is pinned to `-ffp-contract=off` in every preset and it is in
+the mutation gate set by name — an independent oracle inside the mutation gate is the strongest
+position any gate in this repository occupies.

@@ -339,11 +339,51 @@ NOT the same job — the first is coverage, the second is the one that answers a
    the scheme that would test it. **A maths-layer feature, not an optimisation**, and until it exists D92 §1's
    warm-path result is established only for affine and piecewise-affine schemes.
 
+**Settled 2026-10-12 (D114): `monotone_cubic` is not QuantLib's monotone cubic, and that is a contract difference
+rather than a defect.** Its tangents are QuantLib's `Parabolic` exactly (1.4e-17 where no limiter acts); its limiter
+zeroes the tangent at every secant sign change and so brackets every segment unconditionally, where QuantLib's
+Hyman–Dougherty filter keeps the bracket only "in the regions of local monotoniticity of the input". Measured on a
+wiggly dataset, our overshoot is 0 and `MonotonicCubicNaturalSpline`'s is 2.7e-3 — outside the property we measure,
+inside the one QuantLib documents. This strengthens the case for `tension` above rather than weakening the limiter:
+the seven recorded `select`s buy a stronger shape guarantee than the scheme we are usually compared with, and
+`tension` would buy shape control with no value-dependent branch at all.
+
 Also worth taking when a scheme is added: a **compile-time tripwire** on the scheme count, so appending one fails to
 build until every place that must learn about it has. The idea is an ordinary `static_assert` pattern and not
 borrowed code; `is_linmap_domain` is the equivalent here of the "does this ride the closed-form path" question, and
 it answers by structure rather than by exclusion, so a new value-dependent scheme would correctly find no linmap
 rather than silently claiming one.
+
+### Independent oracles — the T1 lift (D114; D108's grant, first used 2026-10-12)
+
+`tests/curve/scheme_oracle_e0_test.cpp` is the **first gate in this repository that compares the engine to something
+other than the engine**. Four schemes match QuantLib 1.35 — `Flat`/`ForwardFlat` exactly, `Linear` 6.9e-18,
+`NaturalCubic` 1.4e-17, `Hermite`/`Parabolic` 1.4e-17 — and `monotone_cubic` matches nothing in QuantLib, which
+settles D110's open question (parabolic tangents, a limiter QuantLib does not implement; its own Hyman filter is a
+structural no-op on parabolic tangents). The expectations are hex-float literals, so **D12 is untouched**.
+
+**2 of their 33 T1 files, ~10 of which are on our comparable surface.** The remainder, in the order their
+evidence-to-effort ratio puts them:
+
+1. **`calibration_oracle_test.cpp`** — a four-curve calibration where the compared unit is the **knot forwards**,
+   i.e. the thing a client consumes. Needs our solver and our instruments, not just an interpolant, and is the one
+   that would put an independent number behind D109's h2h rather than behind one scheme.
+2. **`ois_weekend_test.cpp`** and **`calendar_ql_oracle_test.cpp`** — weekend and holiday accrual, and calendars
+   day by day. Conventions are where a *shared* error between two engines is most likely, so these are worth more
+   than their size suggests.
+3. **`bspline_oracle_test.cpp`** — the sixth scheme, and the only one of ours with a QuantLib counterpart still
+   uncompared.
+4. **`scheme_value_oracle_test.cpp`'s primitive half, for the cubics.** Not liftable yet: `Hermite`,
+   `NaturalCubic`, `MonotoneCubic` and `BSpline` have a `value` and no `integral`, which is the same gap
+   `curve::Variable::forward`'s static_assert encodes. D114 §6 makes it visible as missing oracle coverage rather
+   than only as a restriction.
+
+The discipline that makes a lift worth anything is D108 §2's line: **cases and expected numbers, never a routine
+that computes an expected output.** And D114 §4(c) is the cautionary tale for anyone extending this — a scheme
+identification that held on one dataset and three sample points was briefly reported as real, and two knot sets
+refuted it. Pin both halves of a coincidence, or do not report it.
+
+---
 
 ## Risk register
 

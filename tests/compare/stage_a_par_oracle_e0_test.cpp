@@ -11,8 +11,12 @@
 //   EUR-ESTR-OIS         (TARGET, Estr)      17   5.25e-11 bp
 //   USD-SOFR-OIS         (SIFMA n FED)       13   5.15e-11 bp
 //   EUR-EURIBOR-6M-IRS   (6M fwd / ESTR)     11   7.63e-13 bp
+//   EUR-3S6S-BASIS       (3M/6M fwd/ESTR)     9   8.46e-14 bp   <- THREE curves, float-vs-float
 //
-// 41 instruments, two currencies, three calendars, and the two-curve path. What that covers beyond
+// 50 instruments, two currencies, three calendars, and the two- and THREE-curve paths. With the
+// basis row this is **every par-rate calibration family Stage A has**; what remains uncompared on
+// its calibration side is the futures (16 rows, quoted as prices with convexity stated zero, so a
+// convention decision precedes the measurement). What that covers beyond
 // D115: a second currency's calendar end to end; the EURIBOR-6M index; a 30/360 annual fixed leg
 // against an ACT/360 SEMIANNUAL float leg; forecast != discount; and the STUB RULE, which the 18M
 // ESTR row is the only instrument in Stage A to exercise (see below).
@@ -91,6 +95,18 @@ inline constexpr double kQlSofrOis[] = {
     0x1.57458e26f3018p-5, 0x1.58fa0161a6464p-5,  // 10Y, 12Y
     0x1.5ab5aa51dec56p-5, 0x1.5bbc27d4b9f0fp-5,  // 15Y, 20Y
     0x1.5c658a872ad17p-5,                        // 30Y
+};
+// The 3s6s basis: 3M EURIBOR + spread (quarterly) against 6M EURIBOR flat (semiannual), ESTR
+// discounted, spread on the shorter leg -- so three curves, and the only float-vs-float shape here.
+// The spread enters the 3M leg linearly, so QuantLib's par spread is solved in CLOSED FORM,
+// s = (PV6 - PV3)/A3 with A3 the 3M annuity sum(tau_i * N * DF(pay_i)), rather than by a root find:
+// importing a solver into an oracle would be a second thing to be wrong.
+inline constexpr double kQlBasisParSpread[] = {
+    0x1.a2820a9a214cep-11, 0x1.a2b90d49e0135p-11,  // 3Y, 4Y
+    0x1.a2e0f80c3272ep-11, 0x1.a3191ce8d211dp-11,  // 5Y, 7Y
+    0x1.a34a27796a73ap-11, 0x1.a35ff4d36e906p-11,  // 10Y, 12Y
+    0x1.a375894e88009p-11, 0x1.a38c180d84f5ap-11,  // 15Y, 20Y
+    0x1.a3a28f349a5c7p-11,                         // 30Y
 };
 inline constexpr double kQlEuribor6mIrs[] = {
     0x1.724e3276dc1e7p-6, 0x1.80c4036273712p-6,  // 1Y, 2Y
@@ -179,6 +195,39 @@ TEST(StageAParOracleE0, SofrOisMatchesQuantLib) {
 // The two-curve one: the float leg forecasts off curve 3 and discounts off curve 1.
 TEST(StageAParOracleE0, Euribor6mIrsMatchesQuantLibAcrossTwoCurves) {
   compare("EUR-EURIBOR-6M-IRS", 3, "EUR-EURIBOR-6M-IRS", kQlEuribor6mIrs, std::size(kQlEuribor6mIrs));
+}
+
+// The basis is quoted as a SPREAD, around 8 bp rather than 2.7%, so the same absolute tolerance is
+// four orders of magnitude tighter in relative terms -- which is why it is the tightest agreement
+// in the file and not a weaker one.
+TEST(StageAParOracleE0, ThreeCurveBasisMatchesQuantLib) {
+  compare("EUR-3S6S-BASIS", 2, "EUR-3S6S-BASIS", kQlBasisParSpread, std::size(kQlBasisParSpread));
+}
+
+// The basis really does read THREE distinct curves. Without this, a basis whose two forecast slots
+// had collapsed onto one would price its two legs off the same curve, give a spread near zero, and
+// still match a QuantLib swap built the same wrong way.
+TEST(StageAParOracleE0, TheBasisReadsThreeDistinctCurves) {
+  const fixtures::StageA& s = exact_par_stage_a();
+  std::size_t checked = 0;
+  for (const epykos::instrument::CalibrationInstrument& ci : s.sets[2].instruments) {
+    if (ci.instrument.blueprint != "EUR-3S6S-BASIS") continue;
+    ++checked;
+    int spread_legs = 0;
+    std::vector<int> forecast;
+    for (const epykos::instrument::Leg& leg : ci.instrument.legs) {
+      ASSERT_FALSE(leg.index.empty()) << ci.key << ": a basis swap has no fixed leg";
+      EXPECT_EQ(leg.disc_curve, 1) << ci.key << ": both legs must discount on EUR-ESTR (slot 1)";
+      forecast.push_back(leg.curve);
+      if (leg.spread_leg) ++spread_legs;
+    }
+    ASSERT_EQ(forecast.size(), 2u) << ci.key << ": a basis swap has two legs";
+    EXPECT_NE(forecast[0], forecast[1]) << ci.key << ": both legs forecast off slot " << forecast[0]
+                                        << ", so the spread is structurally zero and the comparison is vacuous";
+    EXPECT_EQ(spread_legs, 1) << ci.key << ": exactly one leg carries the quoted spread";
+  }
+  EXPECT_GT(checked, 0u) << "no 3s6s basis rows found at all";
+  std::cout << "  [ql-oracle] " << checked << " basis rows, two distinct forecast curves discounting on slot 1\n";
 }
 
 // The structural facts the comparison above rests on, pinned so the two-curve claim cannot quietly

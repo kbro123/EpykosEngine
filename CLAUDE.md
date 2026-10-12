@@ -125,6 +125,21 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D121, 2026-10-12: the 3s6s basis closes the par-rate surface — 9 rows at 8.5e-14 bp, THREE curves,
+float-vs-float.** 3M EURIBOR + spread (quarterly) against 6M flat (semiannual), ESTR-discounted,
+forecasting off two distinct slots. First attempt, no harness correction, and the tightest agreement
+in the suite for a stateable reason: the basis is quoted as an ~8 bp spread rather than a 2.7% rate,
+so the same absolute tolerance is four orders tighter in relative terms. The par spread is solved in
+CLOSED FORM, s = (PV6 − PV3)/A3, because importing a solver into an oracle would be a second thing
+to be wrong. Gated with the control the shape needs — both legs must forecast off DIFFERENT slots,
+exactly one carries the spread — since a basis whose forecast slots had collapsed would give a
+spread near zero and still match a QuantLib swap built the same wrong way. **The par-rate surface is
+now complete: 50 instruments, every par-rate calibration family Stage A has** (ESTR OIS 17, SOFR OIS
+13, EURIBOR-6M IRS 11, basis 9). What remains on the calibration side is the 16 futures rows, and
+they are blocked on a DECISION not effort: quoted as prices with convexity stated zero, so what a
+futures oracle compares depends on whether that zero is the convention under test or an
+approximation being excused — the owner's call.
+
 **D120, 2026-10-12: the first independent number on O3 — the IFT ladder matches a QuantLib central
 difference to 4.5e-10, and the residual is the FD's.** The risk ladder is this project's strongest
 published result (D90's 6.12x) and had been compared only to itself: to `Dual`, which shares the

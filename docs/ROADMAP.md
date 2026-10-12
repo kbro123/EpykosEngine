@@ -394,10 +394,10 @@ D117 also bounds what these oracles establish: **the par rate is nearly blind to
 directly against QuantLib's `fixingDates()` rather than inferred from the rate. Every future clause of an agreement
 claim needs the same treatment: its own sensitivity argument, or its own test.
 
-**2 of their 33 T1 files lifted, ~10 of which are on our comparable surface; six oracles built from scratch
-covering four interpolation schemes, five single-curve SOFR observation conventions, three Stage A par-rate
-families (41 rows), the SOFR fixing calendar day for day, two currencies, three calendars, the two-curve path and
-the stub rule, a book NPV and the 16-bucket risk ladder.** The remainder, in
+**2 of their 33 T1 files lifted, ~10 of which are on our comparable surface; seven oracles built from scratch
+covering four interpolation schemes, five single-curve SOFR observation conventions, ALL FOUR Stage A par-rate
+families (50 rows, one, two and three curves), the SOFR fixing calendar day for day, two currencies, three
+calendars, the stub rule, a book NPV and the 16-bucket risk ladder.** The remainder, in
 the order their evidence-to-effort ratio puts them:
 
 1. ~~**A two-curve fixture, for the EURIBOR IRS and the 3s6s basis.**~~ **DONE 2026-10-12, D119 — and no fixture was
@@ -406,9 +406,16 @@ the order their evidence-to-effort ratio puts them:
    now match QuantLib to 5.3e-11 bp. Read D119 §2 before extending it: the 18M ESTR row is the ONLY instrument in
    Stage A that distinguishes a front stub from a back one, and it carried a 0.0265 bp signal alone.
 
-1b. **The 3s6s basis — the last par-rate family, and the only new SHAPE left.** 9 rows on slot 2, float-vs-float with
-   two forecast curves and ESTR discounting. QuantLib expresses it as two float legs; nothing else about the method
-   changes.
+1b. ~~**The 3s6s basis — the last par-rate family, and the only new SHAPE left.**~~ **DONE 2026-10-12, D121**:
+   9 rows at **8.46e-14 bp**, three curves, first attempt and no harness correction. **The par-rate surface is now
+   complete — 50 instruments, every par-rate calibration family Stage A has.**
+
+1c. **Futures as calibration rows (16: 8 SR3, 8 FEU3) — blocked on a DECISION, not effort.** They are quoted as
+   *prices* with convexity stated zero, so what a futures oracle compares depends on whether that stated-zero
+   convexity is the convention being tested or an approximation being excused. QuantLib has a Hull-White convexity
+   adjustment and their own `convexity_test.cpp` validates a test-side reference builder against it. Decide the
+   question before measuring: an oracle built on the wrong side of it would gate the approximation rather than the
+   engine.
 2. **The curve build as a gate.** Blocked on a real obstacle, not an omission: our knots sit at each instrument's
    last cash-flow time (the payment date, D64) where QuantLib's natural OIS pillar is the maturity, so two
    piecewise-log-linear curves on node sets two business days apart are different curves even when both reprice

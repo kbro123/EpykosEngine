@@ -10082,3 +10082,43 @@ convention decision precedes the measurement), **seasoned trades** with realised
 derivatives** (I2 is reachable but ungated against anything external), and **the solve itself**,
 which §2 explains needs the pillar question settled first — that is the one remaining structural
 obstacle rather than a matter of effort.
+
+## D121 — The 3s6s basis closes the par-rate surface: 9 rows at 8.5e-14 bp, three curves, float-vs-float (2026-10-12)
+
+The last item on D119 §4's list and the only genuinely new *shape*: EUR 3s6s tenor basis, 3M EURIBOR
++ spread (quarterly, ACT/360) against 6M EURIBOR flat (semiannual, ACT/360), ESTR-discounted, spread
+on the shorter leg. **Three curves** — forecast 3M (slot 2), forecast 6M (slot 3), discount ESTR
+(slot 1).
+
+**9 rows, worst 8.46e-14 bp**, first attempt, with no harness correction needed. It is the tightest
+agreement in the file and for a reason worth stating: the basis is quoted as a spread of about 8 bp
+rather than a rate of 2.7%, so the same absolute tolerance is four orders of magnitude tighter in
+relative terms.
+
+The par spread is solved in **closed form** rather than by a root find — the spread enters the 3M
+leg linearly, so s = (PV₆ − PV₃)/A₃ with A₃ the 3M annuity Σ τᵢ·N·DF(payᵢ). Importing a solver into
+an oracle would be a second thing to be wrong.
+
+Gated with the structural control the shape needs: **both legs must forecast off DIFFERENT slots**
+and exactly one must carry the spread. A basis whose two forecast slots had collapsed onto one would
+price both legs off the same curve, give a spread near zero, and still match a QuantLib swap built
+the same wrong way — the same hazard D119 §2 pinned for the two-curve IRS, one curve further on.
+
+### The par-rate surface is now complete
+
+| family | rows | curves | worst |
+|---|---|---|---|
+| `EUR-ESTR-OIS` | 17 | 1 | 5.25e-11 bp |
+| `USD-SOFR-OIS` | 13 | 1 | 5.15e-11 bp |
+| `EUR-EURIBOR-6M-IRS` | 11 | 2 | 7.63e-13 bp |
+| `EUR-3S6S-BASIS` | 9 | **3** | 8.46e-14 bp |
+
+**50 instruments, every par-rate calibration family Stage A has.** What remains uncompared on its
+calibration side is the **16 futures rows** (8 SR3, 8 FEU3), and those are blocked on a decision
+rather than on effort: they are quoted as *prices* with convexity stated zero, so what a futures
+oracle compares depends on whether that stated-zero convexity is the convention being tested or an
+approximation being excused. That is the owner's call and is not taken here.
+
+Still open from D120 §5: seasoned trades with realised fixings, second derivatives, and the solve
+itself — the last blocked on the pillar question of D115 §5, which remains the one structural
+obstacle in the chain rather than a matter of work.

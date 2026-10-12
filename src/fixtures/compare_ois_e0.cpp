@@ -138,7 +138,20 @@ CompareOis make_compare_ois(const CompareOisOptions& options) {
   s.blueprints = Blueprints::load();
   s.blueprints.validate(s.registry);
   s.valuation = parse_iso(options.valuation);
-  s.slots.add("USD-SOFR");
+  // The index and currency come from the chosen blueprint's own convention rather than being
+  // written in, so `options.blueprint` carries the whole family — including a EUR one. A
+  // single-curve OIS discounts and forecasts on one index, which is what makes that sound here;
+  // an IRS, whose forecast index differs from its discount index, does NOT fit this fixture and
+  // is rejected below rather than silently given a one-curve world.
+  const InstrumentConvention& bconv = s.registry.instrument(s.blueprints.blueprint(options.blueprint).convention);
+  if (bconv.type != InstrumentConvention::Type::OIS) {
+    throw std::invalid_argument("compare_ois: blueprint '" + options.blueprint +
+                                "' has convention type " + std::to_string(static_cast<int>(bconv.type)) +
+                                "; this fixture is single-curve and takes an OIS, whose forecast and discount "
+                                "index are the same one");
+  }
+  const std::string index = bconv.discount_index.empty() ? bconv.legs.back().index : bconv.discount_index;
+  s.slots.add(index);
   // The fixings history stays EMPTY: every trade of this fixture starts at or after the
   // valuation date, so no coupon has a realised day (compare_ois.hpp, reason 4).
 
@@ -146,11 +159,12 @@ CompareOis make_compare_ois(const CompareOisOptions& options) {
   // fixture's curve is a comparison artefact, not a curve the desk problem calibrates, so it
   // does not belong in the committed curve definitions (D36 keeps those as the problem's data).
   CurveDefinition& def = s.definition;
-  def.name = "USD-SOFR-COMPARE";
-  def.index = "USD-SOFR";
-  def.currency = "USD";
+  def.name = index + "-COMPARE";
+  def.index = index;
+  def.currency = bconv.currency;
   def.description =
-      "MX head-to-head: USD SOFR OIS, par-rate quoted, log-linear discount factors (piecewise-constant "
+      "MX head-to-head: " + index +
+      " OIS, par-rate quoted, log-linear discount factors (piecewise-constant "
       "instantaneous forward), one knot per instrument at its maturity.";
   CurveRegionDef region;
   region.from = "";                              // the single region starts at t = 0

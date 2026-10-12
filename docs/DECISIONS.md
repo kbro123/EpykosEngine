@@ -9635,6 +9635,10 @@ compounded in arrears with plain observation over every business day of the peri
 one-year instrument, so the fixing calendars agree day for day); the two-business-day payment lag;
 and discounting on the same curve.
 
+> **Superseded in one clause by D117 §3**: "so the fixing calendars agree day for day" did not
+> follow from the par rate, which is nearly insensitive to day PLACEMENT. The claim is true and is
+> now gated directly against QuantLib's `fixingDates()`.
+
 The second arm is worth stating separately: **QuantLib finds all sixteen instruments at par on the
 curve this engine calibrated**, to 5.58e-11 bp. The calibration is independently verified, not just
 the pricer.
@@ -9789,3 +9793,81 @@ ungated `_e0_test.cpp` files that run in CI, where `tools/h2h/` never does. Stil
 EUR-ESTR and EURIBOR basis families (multi-curve), futures and deposits as calibration rows,
 seasoned trades with realised fixings, and the risk ladder. The ROADMAP's "Independent oracles"
 section carries the order; the multi-curve extension is next and needs no new technique.
+
+## D117 — EVERY convention in the registry was imported from SwapEngine; two are marked `disagree`; and the par rate does not constrain the fixing calendar (2026-10-12)
+
+Three findings from extending D115/D116 past USD, in descending order of how much they change what
+this repository can claim.
+
+### 1. The provenance audit: it is not one convention, it is all of them
+
+D115 §1 quoted the import provenance of USD-SOFR-OIS. The audit of the whole registry:
+
+| | imported from SwapEngine |
+|---|---|
+| instrument conventions | **17 of 17** |
+| calendars | **7 of 7** |
+| indices | **4 of 4** |
+
+**Every convention, calendar and index this engine prices with came from the engine it is compared
+against.** So D109's head-to-head cannot check *any* of them, not merely the SOFR OIS one, and the
+independent oracles of D114–D116 are the only thing that can. This is the complete answer to *"have
+we done the full h2h versus SwapEngine"*: the h2h is sound on arithmetic and structurally blind on
+conventions.
+
+Worse and better at once, the `cross_check` field records what the import found:
+
+- **`disagree` (2)** — `EUR-EURIBOR-3M-IRS` and `EUR-EURIBOR-6M-IRS`. The note: *"fixed-leg day
+  count: SwapEngine 30E/360 vs 30/360 (CFTC MAT, Bloomberg SEF, Strata); registry 30/360."* An
+  open disagreement with the other engine, adjudicated by neither.
+- **`partial` (1)** — `EUR-ESTR-OIS`. *"payment_lag 2 agrees with SwapEngine but disagrees with the
+  TP ICAP template and LCH 2019 (1 BD): recorded, not resolved."*
+- `agree` (4), `own_research` (10).
+
+Three named, unresolved convention questions, all EUR. A third implementation is exactly what they
+have been waiting for.
+
+### 2. Price the disagreement before resolving it
+
+D68's method applied to a convention: measure the consequence first. `EUR-ESTR-OIS-LAG1` already
+exists as a blueprint, so the payment-lag question is directly measurable — same curve, same
+tenors, the two readings side by side:
+
+| tenor | 1Y | 2Y | 3Y | 5Y | 10Y | 20Y | 40Y |
+|---|---|---|---|---|---|---|---|
+| pay_lag 2 − pay_lag 1 (bp) | **0.0187** | 0.0068 | 0.0034 | 0.0025 | 0.0001 | −0.000004 | −0.000007 |
+
+**The unresolved question is worth at most 0.019 bp, and under 0.007 bp beyond two years.** It is
+real and it is far below any bid-offer, so it does not need resolving urgently — which is itself
+the useful result, and could not have been said before it was measured.
+
+To get there, `compare_ois` now derives its index and currency from the chosen blueprint's own
+convention instead of writing `USD-SOFR` in, and **rejects a non-OIS convention** rather than
+silently giving an IRS — whose forecast and discount index differ — a one-curve world. The USD
+numbers are bit-identical after the change (worst gap 4.14252e-11 bp, the same digits).
+
+### 3. The par rate does NOT constrain the fixing calendar — and D115 said it did
+
+Running the same generating curve through EUR-ESTR exposed it: **EUR-ESTR projects 257 observation
+days against USD SOFR's 249, and the two 1Y par rates differ by 4.37e-12 bp.** On a smooth curve
+the compounded rate depends on the weights summing to the period length and almost not at all on
+*which* days carry them.
+
+So D115's clause *"249 in the one-year instrument, so the fixing calendars agree day for day"* did
+not follow from what it cited. The conclusion is true — but the evidence for it was the matching
+COUNT plus a rate that is insensitive to placement, and a calendar wrong by a few days in
+compensating directions would have passed every test in that file.
+
+It is now gated directly: QuantLib's own `OvernightIndexedCoupon::fixingDates()` for the 1Y
+instrument, 249 dates as day offsets, checked against our observation dates one by one —
+**0 mismatches**. `USD-SOFR-SWAP` = join(SIFMA, FED) and the `USD-SOFR` fixing calendar against
+QuantLib's `UnitedStates(GovernmentBond)` are independently built holiday sets agreeing on every
+day of a 367-day period. The 249-vs-257 demonstration is gated too, so the note explaining why the
+date test is needed cannot rot: if the two calendars ever give the same count, or if the par rates
+ever differ across them, the test says to re-derive the note rather than delete it.
+
+**The general lesson, and it is the branch's recurring one in a new place.** An oracle constrains
+only the quantities its comparison is sensitive to. "We agree to 4e-11 bp" is a strong statement
+about the compounded rate and a weak one about everything the compounded rate is flat in. Each
+clause of an agreement claim needs its own sensitivity argument, or its own test — and the cheapest
+way to find out which is to perturb the input and watch.

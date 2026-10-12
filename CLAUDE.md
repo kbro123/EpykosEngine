@@ -125,6 +125,24 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D117, 2026-10-12: it is not one convention, it is ALL of them — and an oracle constrains only
+what it is sensitive to.** The audit: **17 of 17 instrument conventions, 7 of 7 calendars and 4 of 4
+indices in `blueprints/conventions/` were imported from SwapEngine.** So the head-to-head cannot
+check any of them, and the oracles are the only thing that can. The `cross_check` field records what
+the import found: **two `disagree`** (`EUR-EURIBOR-3M/6M-IRS` fixed-leg day count — SwapEngine
+30E/360 against our 30/360) and **one `partial`** (`EUR-ESTR-OIS` payment lag 2 against TP ICAP /
+LCH 2019's 1 BD, "recorded, not resolved") — three named convention questions adjudicated by
+nobody. The payment-lag one is now PRICED rather than argued: **worth at most 0.019 bp** (1Y), under
+0.007 beyond 2Y, so it is real and far below bid-offer. `compare_ois` derives its index and currency
+from the blueprint's convention and rejects a non-OIS one rather than giving an IRS a one-curve
+world; the USD numbers are bit-identical after the change. **And D115's claim that the fixing
+calendars "agree day for day" did not follow from the par rate**: EUR-ESTR projects 257 observation
+days against SOFR's 249 and the 1Y par rates differ by 4.37e-12 bp, so the rate is nearly blind to
+day PLACEMENT. The claim is true and is now gated directly against QuantLib's `fixingDates()` — 249
+dates, 0 mismatches — with the 249-vs-257 insensitivity gated too, so the note cannot rot. The
+general lesson: **an oracle constrains only the quantities its comparison is sensitive to**, so each
+clause of an agreement claim needs its own sensitivity argument or its own test.
+
 **D116, 2026-10-12: the RFR observation conventions — and the first real disagreement.** Over the four other
 single-curve SOFR families (`compare_ois` gains a `blueprint` option whose default leaves every recorded number
 bit-identical): `lookback` **9.0e-13 bp**, arithmetic `averaged` **1.1e-12 bp** (the family that does not telescope,

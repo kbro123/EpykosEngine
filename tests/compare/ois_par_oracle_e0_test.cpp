@@ -132,6 +132,36 @@ inline constexpr double kQlObsShift2ParRate[] = {
     0x1.5c55af71fc0bdp-5, 0x1.5d1f67a80a9e3p-5,  // 30Y, 40Y
 };
 
+
+// ---- the fixing CALENDAR, which the par rate does not constrain --------------------------------
+//
+// The par rate on a smooth curve is nearly independent of WHICH days are business days, provided
+// the weights sum to the period length: EUR-ESTR projects **257** observation days against USD
+// SOFR's 249 on this same generating curve and the two par rates agree to 1e-15. So the agreement
+// above constrains the business-day COUNT and not the day PLACEMENT, and a calendar wrong by a few
+// days in compensating directions would pass every test before this one. These are QuantLib's own
+// `OvernightIndexedCoupon::fixingDates()` for the one-year instrument, as day offsets from the
+// valuation date, and they constrain the placement.
+// QuantLib 249 fixing dates, as DAY OFFSETS from the valuation date
+inline constexpr int kQlSofr1yFixingOffset[] = {
+    2, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16, 20, 21, 22, 23, 26,
+    27, 28, 29, 30, 33, 34, 35, 36, 37, 40, 41, 42, 43, 44, 47, 48,
+    50, 51, 54, 55, 56, 57, 58, 61, 62, 63, 65, 68, 69, 70, 71, 72,
+    75, 76, 77, 78, 79, 82, 83, 84, 85, 86, 89, 90, 91, 92, 96, 97,
+    98, 99, 103, 104, 105, 106, 107, 110, 111, 112, 113, 114, 118, 119, 120, 121,
+    124, 125, 126, 127, 128, 131, 132, 133, 134, 135, 138, 139, 140, 141, 142, 146,
+    147, 148, 149, 152, 153, 154, 155, 156, 159, 160, 161, 162, 163, 166, 167, 168,
+    169, 170, 173, 174, 175, 176, 177, 180, 181, 182, 183, 187, 188, 189, 190, 191,
+    194, 195, 196, 197, 198, 201, 202, 203, 204, 205, 208, 209, 210, 211, 212, 215,
+    216, 217, 218, 219, 222, 223, 224, 225, 226, 229, 230, 231, 232, 233, 236, 237,
+    238, 239, 240, 243, 244, 245, 246, 247, 251, 252, 253, 254, 257, 258, 259, 260,
+    261, 264, 265, 266, 267, 271, 272, 273, 274, 275, 278, 279, 280, 281, 282, 286,
+    287, 288, 289, 292, 293, 294, 295, 296, 299, 300, 301, 302, 303, 306, 307, 308,
+    309, 310, 313, 314, 315, 316, 317, 320, 321, 322, 323, 324, 327, 328, 329, 330,
+    331, 334, 335, 336, 337, 338, 341, 342, 343, 344, 345, 349, 350, 351, 352, 355,
+    356, 357, 358, 359, 362, 363, 364, 365, 366,
+};
+
 // The quotes of one blueprint on the fixture's generating curve.
 std::vector<double> quotes_of(const std::string& blueprint) {
   fixtures::CompareOisOptions o;
@@ -316,4 +346,72 @@ TEST(OisParOracleE0, ObservationShiftDiffersFromQuantLibByExactlyTheAccrualOverO
   EXPECT_NEAR(measured, factor, 1.0e-11)
       << "the disagreement is no longer the single factor d_accrual/d_obs, so it is not the division any more and "
          "the cause must be re-localised before anything is concluded";
+}
+
+// The calendar, gated rather than inferred. `USD-SOFR-SWAP` is `join(USD-SIFMA, USD-FED)` and the
+// SOFR fixing calendar is `USD-SOFR` (U.S. Government Securities Business Days, less Good Friday);
+// QuantLib's `Sofr` index fixes on `UnitedStates(GovernmentBond)`. Those are independently built
+// holiday sets, and over the 249 business days of a 367-day period they agree on every single day.
+//
+// This test exists because the agreement on the par rate does NOT establish it — see the note on
+// the table above. D115 first claimed the calendars agreed "day for day" on the strength of the
+// rate and a matching count, which was true and insufficiently supported; this is the support.
+TEST(OisParOracleE0, EveryObservationDateMatchesQuantLibsFixingDates) {
+  fixtures::CompareOisOptions o;
+  o.trades = 1;
+  o.quote_noise_bp = 0.0;
+  const fixtures::CompareOis s = fixtures::make_compare_ois(o);
+  const epykos::instrument::Instrument& in = s.set.instruments[0].instrument;
+  std::vector<int> ours;
+  for (const epykos::instrument::Leg& leg : in.legs) {
+    if (leg.index.empty()) continue;
+    for (const epykos::instrument::ObsDay& od : leg.obs) {
+      ours.push_back(static_cast<int>(od.rate_date - s.valuation));
+    }
+    break;
+  }
+  ASSERT_EQ(ours.size(), std::size(kQlSofr1yFixingOffset))
+      << "the engine projects " << ours.size() << " observation days where QuantLib fixes on "
+      << std::size(kQlSofr1yFixingOffset) << ": the fixing calendars no longer agree on the business-day COUNT";
+  std::size_t mismatches = 0;
+  for (std::size_t i = 0; i < ours.size(); ++i) {
+    if (ours[i] == kQlSofr1yFixingOffset[i]) continue;
+    if (mismatches < 8) {
+      ADD_FAILURE() << "observation " << i << ": the engine reads the rate for valuation + " << ours[i]
+                    << " days, QuantLib for valuation + " << kQlSofr1yFixingOffset[i]
+                    << ". The par rate would barely move, so this is the only test that sees it.";
+    }
+    ++mismatches;
+  }
+  EXPECT_EQ(mismatches, 0u);
+  std::cout << "  [ql-oracle] " << ours.size() << " SOFR observation dates vs QuantLib's fixingDates(): "
+            << mismatches << " mismatches\n";
+}
+
+// And the proof that the test above is needed: a different fixing calendar, same generating curve,
+// gives a DIFFERENT number of observation days and the same par rate to 1e-15. Without this, the
+// claim "the par rate does not constrain the calendar" would itself be unsupported.
+TEST(OisParOracleE0, TheParRateDoesNotConstrainTheFixingCalendar) {
+  fixtures::CompareOisOptions o;
+  o.trades = 1;
+  o.quote_noise_bp = 0.0;
+  const fixtures::CompareOis usd = fixtures::make_compare_ois(o);
+  o.blueprint = "EUR-ESTR-OIS";   // EUR-TARGET, not join(SIFMA, FED)
+  const fixtures::CompareOis eur = fixtures::make_compare_ois(o);
+
+  const auto obs_count = [](const fixtures::CompareOis& c) {
+    for (const epykos::instrument::Leg& leg : c.set.instruments[0].instrument.legs) {
+      if (!leg.index.empty()) return leg.obs.size();
+    }
+    return std::size_t{0};
+  };
+  const std::size_t nu = obs_count(usd), ne = obs_count(eur);
+  const double gap_bp = std::abs(usd.quotes[0] - eur.quotes[0]) * 1.0e4;
+  std::cout << "  [ql-oracle] USD SOFR " << nu << " observation days, EUR ESTR " << ne
+            << "; 1Y par rates differ by " << gap_bp << " bp\n";
+  EXPECT_NE(nu, ne) << "the two calendars now give the same business-day count, so this no longer demonstrates "
+                       "anything and the note on the fixing-date table must be re-derived";
+  EXPECT_LT(gap_bp, 1.0e-6) << "the par rates differ by " << gap_bp
+                            << " bp across two calendars, so the rate DOES constrain the calendar after all -- then "
+                               "the note above is wrong and should be corrected, not deleted";
 }

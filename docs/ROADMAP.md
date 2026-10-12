@@ -378,12 +378,29 @@ Rate x Calculation-Period-DCF structure) or taken as the interest directly (Quan
 defensible and the resolution is the owner's** — it needs the 2021 ISDA Definitions, not a preference. The gate pins
 the mechanism, not the verdict.
 
-**2 of their 33 T1 files lifted, ~10 of which are on our comparable surface; two oracles built from scratch
-covering 4 of Stage A's 8 families.** The remainder, in the order their evidence-to-effort ratio puts them:
+**D117 audited the provenance and the answer is worse than D115's one quotation suggested: 17 of 17 instrument
+conventions, 7 of 7 calendars and 4 of 4 indices were imported from SwapEngine.** The head-to-head is sound on
+arithmetic and structurally blind on conventions. Three convention questions are recorded as unresolved by the import
+itself — `EUR-EURIBOR-3M/6M-IRS` fixed-leg day count (`disagree`: SwapEngine 30E/360 against our 30/360) and
+`EUR-ESTR-OIS` payment lag (`partial`: 2 BD against TP ICAP / LCH 2019's 1 BD). **The payment-lag one is priced at
+0.019 bp (1Y) and under 0.007 beyond 2Y**, so it is real and not urgent; the day-count one is not yet priced and
+needs an IRS, which `compare_ois` deliberately refuses.
 
-1. **Multi-curve, the direct extension of D115.** EUR-ESTR, EURIBOR-3M/6M basis, and futures and deposits as
-   calibration rows — the families Stage A already prices and D115's single USD-SOFR curve does not reach. Same
-   method, no new technique, and it is what would put an independent number behind D109's four-curve h2h.
+D117 also bounds what these oracles establish: **the par rate is nearly blind to which days are business days**
+(EUR-ESTR 257 observation days against SOFR's 249, par rates 4.37e-12 bp apart), so calendar agreement is now gated
+directly against QuantLib's `fixingDates()` rather than inferred from the rate. Every future clause of an agreement
+claim needs the same treatment: its own sensitivity argument, or its own test.
+
+**2 of their 33 T1 files lifted, ~10 of which are on our comparable surface; three oracles built from scratch
+covering 4 of Stage A's 8 families, the SOFR fixing calendar day for day, and one EUR currency.** The remainder, in
+the order their evidence-to-effort ratio puts them:
+
+1. **The EURIBOR IRS, and it is now the highest-value item in this list.** It is the one family carrying a recorded
+   `disagree` against the other engine (fixed-leg 30/360 against their 30E/360), so a third implementation settles
+   an open question rather than confirming a closed one — and the disagreement is not yet priced. It needs what
+   `compare_ois` refuses by design: a forecast index different from the discount index, i.e. two curves. That is the
+   enabling piece of work, and it also unlocks EUR-ESTR discounting, the 3s6s basis, and an independent number
+   behind D109's four-curve h2h. No new technique, just a two-curve fixture.
 2. **The curve build as a gate.** Blocked on a real obstacle, not an omission: our knots sit at each instrument's
    last cash-flow time (the payment date, D64) where QuantLib's natural OIS pillar is the maturity, so two
    piecewise-log-linear curves on node sets two business days apart are different curves even when both reprice

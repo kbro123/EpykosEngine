@@ -394,20 +394,21 @@ D117 also bounds what these oracles establish: **the par rate is nearly blind to
 directly against QuantLib's `fixingDates()` rather than inferred from the rate. Every future clause of an agreement
 claim needs the same treatment: its own sensitivity argument, or its own test.
 
-**2 of their 33 T1 files lifted, ~10 of which are on our comparable surface; three oracles built from scratch
-covering 4 of Stage A's 8 families, the SOFR fixing calendar day for day, and one EUR currency.** The remainder, in
+**2 of their 33 T1 files lifted, ~10 of which are on our comparable surface; four oracles built from scratch
+covering four interpolation schemes, five single-curve SOFR observation conventions, three Stage A par-rate
+families (41 rows), the SOFR fixing calendar day for day, two currencies, three calendars, the two-curve path and
+the stub rule.** The remainder, in
 the order their evidence-to-effort ratio puts them:
 
-1. **A two-curve fixture, for the EURIBOR IRS and the 3s6s basis.** `compare_ois` refuses a non-OIS convention by
-   design, because an IRS's forecast index differs from its discount index and a one-curve world would silently
-   misprice it. A two-curve pricing fixture (not a two-curve calibration — the oracle's strongest arm prices on
-   GENERATING curves and needs no solve) unlocks the EURIBOR IRS, ESTR discounting, the 3s6s basis and an
-   independent number behind D109's four-curve h2h. No new technique.
+1. ~~**A two-curve fixture, for the EURIBOR IRS and the 3s6s basis.**~~ **DONE 2026-10-12, D119 — and no fixture was
+   needed.** Stage A already had the shape: its `EUR-EURIBOR-6M-IRS` rows forecast on slot 3 and discount on slot 1,
+   and at `quote_noise_bp = 0` its quotes are the generating curves' exact par rates. 41 rows across three families
+   now match QuantLib to 5.3e-11 bp. Read D119 §2 before extending it: the 18M ESTR row is the ONLY instrument in
+   Stage A that distinguishes a front stub from a back one, and it carried a 0.0265 bp signal alone.
 
-   **Note the reason this is no longer urgent for its own sake.** It was listed first when the EURIBOR `disagree`
-   was unpriced; D118 priced it at exactly 0, so the case for the two-curve fixture is now coverage of a family we
-   benchmark, not the resolution of an open question. The IRS still has no independent oracle of any kind, which is
-   reason enough.
+1b. **The 3s6s basis — the last par-rate family, and the only new SHAPE left.** 9 rows on slot 2, float-vs-float with
+   two forecast curves and ESTR discounting. QuantLib expresses it as two float legs; nothing else about the method
+   changes.
 2. **The curve build as a gate.** Blocked on a real obstacle, not an omission: our knots sit at each instrument's
    last cash-flow time (the payment date, D64) where QuantLib's natural OIS pillar is the maturity, so two
    piecewise-log-linear curves on node sets two business days apart are different curves even when both reprice

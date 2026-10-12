@@ -9932,3 +9932,79 @@ unknown.
 Method note, for the third time in two days: **price the disagreement before resolving it** (D68).
 A zero needs a control showing the measurement could have been non-zero, which §3's first half is;
 without it, "we measured no difference" and "we measured nothing" are the same output.
+
+## D119 — The two-curve oracle: 41 Stage A par rates match QuantLib to 5.3e-11 bp, and one row out of 41 carried the stub convention (2026-10-12)
+
+The oracle moved onto the problem this project actually benchmarks. D114 compared interpolation
+schemes; D115/D116 compared single-curve SOFR OIS on `compare_ois`, which **refuses** a non-OIS
+convention by design, because an IRS's forecast index differs from its discount index and a
+one-curve world would silently misprice it (D117 §2).
+
+D117 listed "a two-curve fixture" as the enabling piece of work. It was not needed: **Stage A
+already has the shape.** Its `EUR-EURIBOR-6M-IRS` rows carry `leg.curve = 3` (forecast EURIBOR-6M)
+and `leg.disc_curve = 1` (discount ESTR), and with `quote_noise_bp = 0` — the fixture's own
+O1-recovery setting — its quotes are the generating curves' exact par rates. So the comparison is
+the D115 method pointed at a fixture that already existed, and the roadmap item is discharged
+without building anything.
+
+### 1. The result
+
+| family | rows | calendars / curves | worst gap |
+|---|---|---|---|
+| `EUR-ESTR-OIS` | 17 | TARGET, `Estr` | **5.25e-11 bp** |
+| `USD-SOFR-OIS` | 13 | join(SIFMA, FED), `Sofr` | **5.15e-11 bp** |
+| `EUR-EURIBOR-6M-IRS` | 11 | TARGET; 6M forecast / **ESTR discount** | **7.63e-13 bp** |
+
+**41 instruments, two currencies, three calendars, and the two-curve path.** Beyond D115 this covers
+a second currency's calendar end to end, the EURIBOR-6M index, a 30/360 **annual** fixed leg against
+an ACT/360 **semiannual** float leg, forecast ≠ discount, and the stub rule. Sub-annual tenors
+(1M, 2M, 3M, 6M, 9M) are included, so the `term_up_to: 1Y` single-period clause is covered too.
+
+Dates and accruals matched before the rates did, which is what makes the agreement meaningful rather
+than coincidental: QuantLib's 1Y IRS came back with float periods `[46290, 46471)` tau 0.5027777778
+and `[46471, 46657)` tau 0.5166666667 and fixed `[46290, 46657)` tau 1.0055555556 — ours to the
+digit, including the ModifiedFollowing roll of the 2027-09-25 Saturday onto the 27th.
+
+### 2. One row out of forty-one carried the stub convention
+
+`DateGeneration::Forward` produces a short BACK stub; our conventions declare `stub: ShortFront`.
+Forward and Backward **agree on every whole-year and every sub-annual tenor**, so 40 of the 41 rows
+cannot tell them apart. The **18M ESTR row** — the only instrument in Stage A that is neither
+sub-annual nor a whole number of years — disagreed by **0.0265 bp** until the rule was corrected.
+
+That is worth stating plainly: a convention applying to every stubbed trade a desk books was
+visible in **one** calibration row, and only because that row exists at all. It is the same
+structure as D118's finding from the other side — there the exposing shape was absent from the
+fixture and the measurement was a clean zero; here it was present exactly once and carried the
+entire signal. **Coverage of a convention is not coverage of the instruments that use it.**
+
+The gate pins it: the 18M row's first period must be the short one, and the test says to regenerate
+the QuantLib table if that changes. It also pins that the IRS is *really* two-curve
+(`leg.curve != leg.disc_curve`), because an IRS whose two slots coincided would still match a
+QuantLib swap built the same wrong way and nothing else in the file would notice.
+
+### 3. Both harness traps, again
+
+This is the third time a disagreement localised to the harness before the engine, and both traps
+are now recorded in the test file rather than only in the ledger:
+
+1. **`MakeOIS` / `MakeVanillaSwap`** advance the tenor to the ADJUSTED termination and generate
+   backward from it, stubbing every weekend roll (D115 §3).
+2. **`DateGeneration::Forward`** contradicts `ShortFront` (§2 above).
+
+Both reported the engine as wrong first. The ratio is now 3 harness defects to 1 genuine
+disagreement (D116's observation shift) across four oracle builds, which is the base rate worth
+remembering before writing up a disagreement: **localise, then conclude.**
+
+### 4. Scope
+
+Covered across D114–D119: four interpolation schemes, five single-curve SOFR observation
+conventions, three Stage A par-rate families, the SOFR fixing calendar day for day, two currencies,
+three calendars, the two-curve path, the stub rule and the sub-annual single-period clause.
+
+Still absent: the **3s6s basis** (9 rows, float-vs-float, two forecast curves — the one remaining
+par-rate family and the only genuinely new shape left), **futures** as calibration rows (8 + 8, and
+they are quoted as prices with convexity stated zero, so the comparison needs a convention decision
+first), **seasoned trades** with realised fixings, and **the risk ladder** — O3 has no independent
+number at all, and their `risk_ladder_oracle_test.cpp` bumps and re-calibrates against QuantLib,
+which is the shape to copy.

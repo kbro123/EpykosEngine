@@ -125,6 +125,20 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D119, 2026-10-12: the TWO-CURVE oracle — 41 Stage A par rates to 5.3e-11 bp, and one row of 41
+carried the stub convention.** D117 listed a two-curve fixture as the enabling work; it was not
+needed, because **Stage A already has the shape** — its `EUR-EURIBOR-6M-IRS` rows forecast on slot 3
+and discount on slot 1, and at `quote_noise_bp = 0` its quotes are the generating curves' exact par
+rates. Measured against QuantLib 1.35: `EUR-ESTR-OIS` 17 rows **5.25e-11 bp**, `USD-SOFR-OIS` 13
+rows **5.15e-11 bp**, `EUR-EURIBOR-6M-IRS` 11 rows **7.63e-13 bp**. Two currencies, three calendars,
+a 30/360 annual fixed leg against an ACT/360 semiannual float, forecast ≠ discount, and the
+sub-annual single-period clause. Dates and accruals matched before the rates did. **The 18M ESTR row
+— the only Stage A instrument that is neither sub-annual nor a whole number of years — disagreed by
+0.0265 bp until the stub rule was corrected from Forward to Backward generation**, because the two
+agree on every other tenor: a convention applying to every stubbed trade a desk books was visible in
+ONE calibration row. Coverage of a convention is not coverage of the instruments that use it. Tally
+across four oracle builds: **3 harness defects to 1 genuine disagreement** — localise, then conclude.
+
 **D118, 2026-10-12: the EURIBOR day-count `disagree` is worth EXACTLY ZERO, and can only bite on a
 stub.** Stage A's 54 par-rate quotes computed twice, the second time with both EURIBOR IRS fixed legs
 flipped to SwapEngine's **30E/360** via `$EPYKOS_BLUEPRINTS` (no code change; the override was
@@ -214,7 +228,7 @@ noise floor, the three wins keep full size, and the absolute default-path gains 
 kernels, which stayed true while the decomposition got slower — *a gate binds only what it can observe*, for the
 sixth time in this repository and the first on a performance quantity.
 
-`ctest`: **150/150** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
+`ctest`: **151/151** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
 tests; the default configuration's count is lower). **CI green on all four jobs** (ubuntu
 release / reference / mutation, macos release) at `6d68b09`. **`integrate/invariants` was merged into
 `main` on 2026-10-12 (`046427d`): 82 commits, D95–D116** — §1b's three invariants, the exotics kill

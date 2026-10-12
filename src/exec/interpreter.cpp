@@ -831,13 +831,18 @@ void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
     table_bytes += g.emit_ordinal.size() * sizeof(std::int32_t);
   }
   if (dom.recurrent) {
-    if (dom.scan < 0) {
-      throw std::invalid_argument("exec: domain " + std::to_string(d) + " (" + dom.name +
-                                  ") is recurrent but not a scan; only scan domains read themselves");
-    }
     if (g.fused || g.inlined_into >= 0 || !inline_refs[d].empty()) {
-      throw std::logic_error("exec: a scan domain was fused or inlined");
+      throw std::logic_error("exec: a recurrent domain was fused or inlined");
     }
+  }
+  if (dom.recurrent && dom.scan < 0) {
+    // M5/C3b (PRINCIPLES.md §1b, I1): a recurrent domain that is NOT a scan — its rows read
+    // earlier rows of their own domain through a segment member rather than through a carry
+    // gather, so no `ir::Scan` describes the chains and there are no waves to schedule. That is
+    // what the reverse of a scan is (`adjoint::adjoint_to_program`). Row by row, in row order:
+    // see GroupPlan::recurrent (exec/plan.hpp) for why this path is deliberately the slow one.
+    g.recurrent = true;
+  } else if (dom.recurrent) {
     // Waves: a row's wave is one more than the deepest wave it reads through any gather into
     // this domain (validate: only earlier rows), 0 when it reads none. Rows in row order.
     g.scan = true;
@@ -864,7 +869,16 @@ void Interpreter::Impl::build_group(std::size_t d, GroupPlan& g) {
     table_bytes += (g.wave_rows.size() + g.wave_begin.size()) * sizeof(std::int32_t);
   }
   if (grp.steps.empty()) throw std::invalid_argument("exec: a group with no steps");
-  if (is_whole_segment(grp)) {
+  // A RECURRENT domain never takes the whole-domain reduction path, even when its group is one
+  // Sum / Affine step: `build_segment` bucket-sorts the rows by segment length, so the rows come
+  // out in a different order, and a row of a recurrence may not be evaluated before the row it
+  // reads. It falls through to the per-row Sum / Affine step below (the same fold, the same
+  // bits), evaluated one row at a time by run()'s `g.recurrent` branch or wave by wave by its
+  // `g.scan` one. No program in the tree reaches this for a SCAN — a scan's carry must be read
+  // by an operand slot of a step, and a one-step Sum / Affine group has only `konst` free — but
+  // the guard is on `dom.recurrent` rather than on `g.recurrent` because the hazard is the row
+  // reordering, which is the same hazard either way.
+  if (is_whole_segment(grp) && !dom.recurrent) {
     const ir::Step& last = grp.steps.back();
     const bool affine = last.op == Op::Affine;
     build_segment(static_cast<std::int32_t>(d), p->segments[static_cast<std::size_t>(last.a.index)], affine, last.konst,
@@ -1115,8 +1129,9 @@ void Interpreter::run(const double* state, int B, double* out) const {
   // keeps whatever the value buffer held). Constexpr 0 outside the mutation build.
   const int trim = im.trim_mutant ? 1 : 0;
   const int drop_last_wave = mutant("interpreter.scan_drop_last_wave") ? 1 : 0;
-  for (int b0 = 0; b0 < B; b0 += im.Lt) {
-    const int L = std::min(im.Lt, B - b0);
+  for (LaneChunk chunk{}; next_lane_chunk(B, im.Lt, im.opt.split_lane_chunks, &chunk);) {
+    const int b0 = chunk.b0;
+    const int L = chunk.L;
     RunCtx ctx;
     ctx.values = values;
     ctx.state = state;
@@ -1162,6 +1177,17 @@ void Interpreter::run(const double* state, int B, double* out) const {
             double* dst = dom + static_cast<std::size_t>(keep[k0 + i]) * Ls;
             for (int l = 0; l < L; ++l) dst[l] = src[l];
           }
+        }
+        continue;
+      }
+      if (g.recurrent) {
+        // M5/C3b: a recurrent domain that is not a scan (exec/plan.hpp, GroupPlan::recurrent).
+        // Rows strictly in row order, one per call, written straight to their slot of the value
+        // buffer, so a row's segment member or gather into an EARLIER row of this same domain
+        // reads a value already written. Tile 1 unconditionally — `tile` and the `trim` mutant
+        // both belong to the independent-row path and neither is sound on a recurrence.
+        for (int r = 0; r < g.rows; ++r) {
+          eval_group(g, ctx, r, nullptr, 1, dom + static_cast<std::size_t>(r) * Ls);
         }
         continue;
       }
@@ -1293,6 +1319,10 @@ std::string Interpreter::describe() const {
         }
         if (g.emitted > 0) os << "; " << g.emitted << " output rows written from the reduction blocks";
         os << "): ";
+      } else if (g.recurrent) {
+        os << "recurrent (not a scan): " << dom.rows << " row(s) one at a time, in row order: ";
+        for (const StepPlan& s : g.steps) total_calls += static_cast<std::size_t>(dom.rows) * static_cast<std::size_t>(1 + s.n_pre);
+        total_tiles += static_cast<std::size_t>(dom.rows);
       } else if (g.scan) {
         const ir::Scan& sc = p.scans[static_cast<std::size_t>(dom.scan)];
         std::size_t tiles = 0;

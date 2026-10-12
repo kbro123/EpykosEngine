@@ -82,6 +82,31 @@ struct SolveOptions {
   // hot path, not a weakening of what the engine reports by default.
   bool optimality_diagnostic = true;
   bool throw_on_failure = false;    // std::runtime_error when a lane does not converge
+  // The structural gate (solver/sparsity.hpp): every unknown must reach at least one residual and
+  // every residual must be reached by at least one unknown, checked ONCE at block registration by
+  // reachability over the recorded forward program, before any market data exists. A violation
+  // THROWS, because the behaviour it replaces is to return a state whose unconstrained entries sit
+  // wherever the solve left them with no diagnostic (D110 §3 found exactly that in our own
+  // `(forward, flat)` curve: square by count, an exact zero Jacobian column in substance).
+  //
+  // Set false for a DELIBERATELY under-determined solve — a block with a regulariser or a
+  // smoothing term that pins the null directions outside F. That is a legitimate design and this
+  // is its explicit opt-out; it is not a way to quiet an unexpected failure, and the message names
+  // the unknown or residual at fault so that the distinction can be made before switching it off.
+  //
+  // THE OPT-OUT IS HONOURED FOR DEAD ROWS AND CANNOT BE HONOURED FOR DEAD COLUMNS, and the reason
+  // is representational rather than a policy choice. A residual that reads no unknown is an
+  // ordinary constant row: `ResidualProgram` binds it, the over-determined Gauss–Newton path
+  // carries it, and switching this off genuinely admits the block (it will not converge, which is
+  // the caller's business once they have said so). An UNKNOWN that no residual reads has no slot
+  // to bind to at all — `ResidualProgram` maps each unknown to a sub-input ordinal of the slice,
+  // and `slice()` only copies the Inputs the residuals reach — so that constructor throws on its
+  // own, whatever this flag says. An under-determined calibration is therefore not merely
+  // undetected in this engine today (D110 §3): below this gate it is UNREPRESENTABLE. Supporting
+  // one needs the solver to carry an unknown the residual program does not read, plus the
+  // regulariser that pins it, and neither exists. `tests/solver/structural_gate_test.cpp` measures
+  // both halves of this paragraph rather than asserting it.
+  bool require_structural_coupling = true;
 };
 
 struct SolveReport {
@@ -139,8 +164,16 @@ namespace detail {
 // an empty z0 / n_residuals < z0.size().
 ImplicitResult implicit_begin(Tape& tape, ImplicitRegistry& registry, std::string name,
                               std::span<const double> z0, int n_residuals, const SolveOptions& options);
-// Registers the residual outputs, checks every unknown is read by some residual, and runs the
-// record-time solve; writes the solution into the tape's record point and into `result`.
+// Registers the residual outputs, runs the STRUCTURAL GATE over the recorded program
+// (solver/sparsity.hpp: every unknown reaches a residual, every residual is reached by an
+// unknown), and runs the record-time solve; writes the solution into the tape's record point and
+// into `result`. Throws std::invalid_argument when the gate fires.
+//
+// This comment used to claim the function "checks every unknown is read by some residual". It did
+// not: it checked `Tape::tainted` per residual, which asks whether a residual depends on ANY input
+// and is satisfied by one that reads a quote and no unknown at all. The unknown direction was
+// enforced further downstream, as a by-product of `slice()` inside `ResidualProgram`. Both
+// directions are now checked here, explicitly, before anything is solved.
 void implicit_end(Tape& tape, ImplicitRegistry& registry, ImplicitResult& result, std::span<const Rec> F);
 }  // namespace detail
 

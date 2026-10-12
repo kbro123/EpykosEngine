@@ -49,6 +49,13 @@ class ResidualProgram {
   // IR and builds the interpreter (lane tile 1) and the adjoint (up to `max_batch` lanes per
   // call). Throws std::invalid_argument when an unknown is read by no residual (a zero Jacobian
   // column) or the block has fewer residuals than unknowns.
+  //
+  // The zero-column throw is not a reachability pass of its own: `slice()` copies only the Input
+  // nodes the roots reach, so an unreached unknown has no sub-ordinal to bind to and the bind loop
+  // fails. Sound, but silent about the other direction (a residual that reads no unknown binds
+  // fine), and it fires wherever a ResidualProgram happens to be built rather than where the block
+  // was declared. The gate proper is `solver/sparsity.hpp`, run once at registration in
+  // `detail::implicit_end`; this remains the backstop for a block reaching here by another route.
   ResidualProgram(const Tape& tape, const ImplicitBlock& block, bool passes = true, int max_batch = 64);
   ~ResidualProgram();
   ResidualProgram(const ResidualProgram&) = delete;

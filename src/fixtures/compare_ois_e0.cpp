@@ -158,7 +158,7 @@ CompareOis make_compare_ois(const CompareOisOptions& options) {
   region.variable = curve::Variable::logdf;      // log DF piecewise linear on {0, knot_t...}
   def.regions.push_back(region);
   CurveInstrumentEntry entry;
-  entry.blueprint = "USD-SOFR-OIS";
+  entry.blueprint = options.blueprint;
   entry.tenors = options.tenors.empty() ? compare_ois_default_tenors() : options.tenors;
   def.instruments.push_back(entry);
   // def.knot_tenors stays empty: the knots are the instruments' maturities, so the block is square.
@@ -210,7 +210,7 @@ CompareOis make_compare_ois(const CompareOisOptions& options) {
     const Instrument& anchor = s.set.instruments[tix].instrument;
     Trade t;
     t.id = "CMP-" + std::to_string(i);
-    t.blueprint = "USD-SOFR-OIS";
+    t.blueprint = s.options.blueprint;
     const int term_days = static_cast<int>(anchor.termination - anchor.effective);
     const int max_offset = std::min(options.max_start_offset_days, term_days / 2);
     const int offset = max_offset > 0 ? static_cast<int>(pb.uniform() * static_cast<double>(max_offset)) : 0;
@@ -238,7 +238,7 @@ CompareOis make_compare_ois(const CompareOisOptions& options) {
         // So the offset is walked DOWN to the nearest anniversary that is already a business day,
         // which is on the grid and needs no adjustment. About five in seven offsets survive,
         // which is ample structural diversity; k = 0 (spot) is the terminating case.
-        const InstrumentConvention& oconv = s.registry.instrument(s.blueprints.blueprint("USD-SOFR-OIS").convention);
+        const InstrumentConvention& oconv = s.registry.instrument(s.blueprints.blueprint(s.options.blueprint).convention);
         const Calendar& ocal = s.registry.calendar(oconv.calendar);
         int kk = k;
         while (kk > 0 && !ocal.is_business_day(conventions::add_years(t.effective, kk))) --kk;

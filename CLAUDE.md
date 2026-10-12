@@ -6,7 +6,9 @@ end. `docs/PRIOR_ART.md` holds the measured evidence the design rests on; `docs/
 
 ## What this is
 A financial computation engine that records pricing maths written once (templated on `Scalar`) and compiles it into a
-domain-typed array program executed by pre-compiled fused kernels, with mechanically derived adjoints. **No JIT.**
+domain-typed array program executed by pre-compiled fused kernels, with mechanically derived adjoints. **No JIT
+(D1) — whose revisit clause FIRED on 2026-10-09 (D106): on a path-dependent payoff the back half measures 0.45–0.78x
+the engine's own naive templated `double`. The decision is the owner's and is not taken.**
 
 ## Status
 **The front half of the compiler exists and the engine derives telescoping.** `docs/PRINCIPLES.md`
@@ -123,11 +125,87 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
-`ctest`: **133/133** on the release preset at `d448afd70180`. **CI green on all four jobs** (ubuntu
+**D116, 2026-10-12: the RFR observation conventions — and the first real disagreement.** Over the four other
+single-curve SOFR families (`compare_ois` gains a `blueprint` option whose default leaves every recorded number
+bit-identical): `lookback` **9.0e-13 bp**, arithmetic `averaged` **1.1e-12 bp** (the family that does not telescope,
+so D81's collapse never touches it — agreeing at that level means the 249-entry observation table is right day for
+day), the lockout confirmed live on both sides (8.29e-9 against QuantLib's 8.33e-9 at 40Y). But
+**`observation_shift` differs by 2.12 bp at 1Y**, decaying as 1/T, and the cause is exactly one division: ours is
+QuantLib's times `d_accrual / d_obs`, which on the single-period 1Y is 367/365 to **1.3e-13**. Our window and its
+weights are right — they sum to the observation period's own 365 days against an accrual of 367, which is what
+distinguishes shift from lookback. What differs is whether the compounded amount is divided by the observation
+period's length (ours, which is ISDA's Rate x Calculation-Period-DCF structure) or is the interest directly
+(QuantLib's). **Both readings are defensible; the resolution is the owner's and needs the 2021 ISDA Definitions, not
+a preference.** The gate pins the mechanism and not the verdict, in two halves: the gap must exceed 1 bp, and it must
+equal `d_accrual/d_obs` with both day counts read off the fixture.
+
+**D115, 2026-10-12: the second oracle, on the INSTRUMENT — and our conventions were imported from the engine we
+compare against.** `blueprints/conventions/instruments.json` records USD-SOFR-OIS as
+`"imported_from": "SwapEngine/conventions/conventions.json"`, so a convention error on their side is in this tree
+too and **D109's head-to-head is structurally incapable of seeing it** — that is the honest answer to "have we done
+the full h2h". `tests/compare/ois_par_oracle_e0_test.cpp` compares all sixteen `compare_ois` SOFR OIS par rates to
+QuantLib 1.35: worst **4.14e-11 bp**, and **5.58e-11 bp** on the engine's own CALIBRATED curve, so QuantLib finds
+every instrument at par on the curve we solved — the calibration is verified, not only the pricer. It covers the T+2
+spot on the joint SIFMA-and-Fed calendar, the forward annual roll on an unadjusted grid, EOM, ACT/360 both legs, SOFR
+compounded over 249 daily observations, the two-business-day payment lag and the discounting. A negative control
+ships with it (a 1 bp curve bump moves the rates 0.87 bp, ~1e8x the tolerance). **The first run reported the ENGINE
+as wrong by 0.126 bp and the harness was at fault**: `MakeOIS` and `OISRateHelper` generate the schedule backward
+from the ADJUSTED termination, leaving a spurious three-day front stub on exactly the five tenors whose roll date is
+a weekend — a disagreement localises to the harness before it localises to an engine. Both oracles are ungated and
+run in CI, where `tools/h2h/` never does.
+
+**D114, 2026-10-12: the first INDEPENDENT oracle, and `monotone_cubic` is not QuantLib's.** D108's grant to lift
+their test CASES sat unused for three days; this takes it, from two of their 33 T1 files, and the expectations are
+QuantLib 1.35 hex-float literals so **D12 acquires nothing**. Four schemes match number for number —
+`Flat`/`ForwardFlat` **exactly 0**, `Linear` 6.9e-18 value / 5.6e-17 integral, `NaturalCubic`/`CubicNaturalSpline`
+1.4e-17, `Hermite`/`Parabolic` 1.4e-17 — and `NaturalCubic` is the strongest of them, because it solves the
+tridiagonal system by Thomas over `Scalar` and QuantLib solves the same system its own way. `monotone_cubic` matches
+**nothing** in QuantLib: its tangents are QuantLib's `Parabolic` exactly, its limiter is one QuantLib does not
+implement, and QuantLib's own Hyman filter is a structural **no-op** on parabolic tangents (`tmp[i] == pm` makes its
+sign test and its min vacuous, verified bit-identically). That settles D110's open question. The contract difference
+is real and in our favour on one axis — our overshoot on a wiggly dataset is 0 against
+`MonotonicCubicNaturalSpline`'s 2.7e-3 — but **not a QuantLib defect**: its guarantee is documented only "in the
+regions of local monotoniticity of the input", which that segment is not. Every other gate here compares one of our
+evaluations with another; **agreement with SwapEngine is not validation, because a shared convention error produces
+perfect agreement and two wrong engines.** D92 §5's laundering guard bit once in the doing: an identification with
+QuantLib's `Harmonic` scheme held on three sample points and one dataset and was refuted by two knot sets.
+
+**D113, 2026-10-12: D104's shipped regression was chunk COUNT, reached +25%, and the fix is mostly a revert.** The
+ROADMAP's own account of it — "B = 3, 7, 11, 15 by 4-13%", fixed by one condition on a tail of 3 — was wrong in three
+ways: it measured `lane_tile` 8 only, where the reference is already chunked, and at `lane_tile` 64 the adjoint loses
+**24-25%** at B = 15 and 63 (five and seven chunks against one). The tail-of-3 rule was built and measured first and
+fixed the interpreter everywhere while leaving the adjoint untouched at +4%. `decomposed_widths` = {2, 5, 6} now names
+the three widths whose decomposition is measured faster than the generic kernel in **both** runtimes; all five
+non-variant widths below 8 were measured at two lane tiles, and 3 and 7 lose. No regression remains above the ±2.5%
+noise floor, the three wins keep full size, and the absolute default-path gains at `lane_tile` 64 are large (adjoint
+µs/lane: B = 15 11.06 → 8.57, B = 63 9.41 → 7.41). D104's gate asserted that the decomposition used specialised
+kernels, which stayed true while the decomposition got slower — *a gate binds only what it can observe*, for the
+sixth time in this repository and the first on a performance quantity.
+
+`ctest`: **149/149** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
+tests; the default configuration's count is lower). **CI green on all four jobs** (ubuntu
 release / reference / mutation, macos release) at `b294efc`, which is what `main` points at: the
 rebuild was merged with the owner on 2026-09-29 (`e85734f`) and **`main` is now the line of
 development**. `origin/integrate/rebuild` is retained at `fb5f0ed`, 20 commits behind `main` and
 ahead by none — history, not a branch to push to. `v1.0-m4` tags the pre-rebuild engine.
+
+**D106, 2026-10-09: the exotics kill test — D1's revisit clause has FIRED, and D81's collapse is
+rates-only.** Commissioned by an external review whose summary was *"you have solved the hard,
+generic problems on the easiest asset class."* Criterion committed **before the fixture existed**
+(verified from git: `6e3a68a` touches only the criterion doc). On a scripted path-dependent payoff
+the engine measures **0.45–0.78x its own naive templated `double`** — FAIL at all nine swept points,
+degrading in both path and step count, with agreement 0.00e+00–4.03e-16: the right answer, computed
+slowly. The mechanism is not the one D1 names: a fixed **2.6–6.0 ns per path-step**, because a path
+grid has one row per path-step and almost no sharing, where the rates book has 1,000 trades sharing
+one curve. **D81's 2,565x collapse measures 1.22–1.25x here** — it is an interest-rate phenomenon,
+and that pair of numbers is the cleanest statement of where this engine wins. Catalogue coverage is
+**anti-correlated** with the verdict (99.6% row coverage scores 0.568x), so the pre-registered
+diagnostic fails but does not predict. Structural finding: **a `Select` inside a recurrence destroys
+the scan layout** — zero scan rows, coverage 1–4%, domain count linear in step count — which every
+barrier, lookback and cliquet hits, and which needs no op-set change. The engine's strengths are
+untouched and remain real; what is now measured is that their benefit is confined to workloads with
+high structural sharing. **The decision — JIT below the pin, a different execution strategy for
+low-sharing programs, or narrowing the claimed domain — is the owner's.**
 
 **D93, 2026-10-06: the architecture is now specified as INVARIANTS WITH GATES (§1b), because goals
 do not bind.** Asked whether these capabilities should have driven the design from day one: partly —

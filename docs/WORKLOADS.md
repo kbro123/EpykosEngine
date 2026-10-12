@@ -91,7 +91,13 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   the curve gates `curve_*_e0_test`), `expander.drop_gather` (gather 0 reads the identity index),
   `expander.segment_off_by_one` (every segment loses its last member), `signature.merge_classes` (the const-slot
   pattern is not part of the signature), `interpreter.tile_boundary` (the last row of every elementwise tile is
-  skipped); then the adjoint mutants (M2/Q4b, D33), caught by the adjoint gates — `tests/adjoint/m1_adjoint_test.cpp`
+  skipped), `lanes.drop_split_remainder` (after a chunk group is split into specialised lane widths, the cursor
+  advances past the whole group instead of past the chunk just produced, so the lanes the split left for a later
+  chunk are never evaluated — one guarded line in `src/exec/lanes.cpp`, which drives the chunk loop of BOTH
+  `exec::Interpreter` and `adjoint::Adjoint`, so it is a defect in the forward and reverse runtimes at once; a no-op
+  on a group whose width is already a variant, so it bites at B = 2, 3, 5, 6, 7 and at any B whose last group is one
+  of those, and is caught by `tests/exec/lane_chunking_e0_test.cpp` and by the odd-B batches of
+  `exec_m1_interp_e0_test` / `adjoint_m1_adjoint_e0_test`); then the adjoint mutants (M2/Q4b, D33), caught by the adjoint gates — `tests/adjoint/m1_adjoint_test.cpp`
   (vs central FD, linearity) and `m1_adjoint_vs_dual_test.cpp` (vs forward mode) on the M1 book, and
   `tests/adjoint/nearmiss_adjoint_test.cpp` (vs `Dual<6>` and FD on the near-miss shapes below) — never by a test
   written for them:
@@ -210,6 +216,14 @@ Terms (defined 2026-09-23 by the M1/P7 review, after the M1 rounds were measured
   | `simplify.cancel_mismatched_operand` | tape `simplify`: `mul(div(x, c), d) -> x` WITHOUT checking that `c` and `d` are the same node, so a divide by one value and a multiply by another cancel each other. The guard is the entire rule | `SimplifyDifferential.LeavesAMismatchedCancellationAlone` and three more |
   | `adjoint.div_aliased_targets` | `adjoint::acc_div_aliased`: only the numerator's contribution is accumulated, dropping the denominator's `-(ybar/b)·y`, so `d(x/x)/dx` reads `1/x` instead of 0. That is the observable symptom of the restrict-aliasing defect CI found on GCC 13, reproduced ARITHMETICALLY so it is caught on every compiler -- a mutant of the dispatch would survive on clang, which does not exploit the UB (D84) | `DivAliasedVerify.TheAdjointOfXOverXIsZero` |
   | `simplify.telescope_wrong_endpoint` | tape `simplify`: `mul(div(p, q), div(q, s)) -> div(p, q)` instead of `div(p, s)`, keeping the INNER endpoint. Right for a one-step chain and wrong for every longer one | `SimplifyDifferential.TheWholeCompoundedCouponCollapses` and one more |
+  | `a2p.drop_zero_start` | `adjoint::adjoint_to_program` (PRINCIPLES.md §1b I1, stages C2/C3a): the leading `+0.0` of an accumulation is elided — a chain's first `Add(Lit 0.0, t)` becomes `t` and its first `Sub(Lit 0.0, t)` becomes `Neg(t)`, and a pull whose every coefficient is 1.0 is emitted as a `Sum` instead of an `Affine` with `konst = +0.0`. Exact everywhere EXCEPT at a zero: `0.0 + (-0.0)` is `+0.0` and `-0.0` alone is not, and the runtime memsets its accumulators to `+0.0` before the first `+=`. Invisible under any tolerance, which is why I1's gate is `memcmp` | `AdjointToProgram.SignedZeroSurvivesTheEmission` (a one-step `-x` seeded with `out_bar = +0.0`: the state adjoint must be `+0.0`, not `-0.0`), and the nearmiss / m1_book / compare_ois bitwise gates |
+  | `a2p.div_not_aliased` | `adjoint::adjoint_to_program`: an aliased `Div` — both operand slots the same `Step` or the same `Gather`, which is exactly when `adjoint_e0.cpp` dispatches `acc_div_aliased` — emits `acc_div`'s two separate accumulations (`+ ȳ/b`, then `− (ȳ/b)·y`) instead of the single `(ȳ/b)·(1 − y)`. Both are the right derivative; they round differently as soon as the target already holds a value, which is the bitwise half of the defect D84 found. No fixture in the tree contains an aliased `Div` (`simplify` turns `div(x, x)` into 1), so the cover is built by hand | `AdjointToProgram.AliasedDivIsBitwiseTheAdjoint`'s `div_xx_mix` program: `G/G` and `G·C` both accumulate into one gather edge slot, with `G = 2^53` and `C = 1 + 2^-52` chosen so the engine answers `1 + 2^-52` and the split form `1 + 2^-51` |
+  | `a2p.scan_forward_order` | `adjoint::adjoint_to_program` (stage C3b): the reverse of a scan is emitted as a RECURRENT domain whose rows run BACKWARDS, so that the edge slot `(carry, r+1)` the pull of row `r` reads is literally the previous emitted row. This mutant publishes those rows to the rest of the emitted program in FORWARD order, so every reader outside the recurrence — the `vbar` pull, and the pull of the domain holding the chains' initial values — takes row `r`'s carried adjoint from the row the FORWARD scan would have had. The emitter's form of `adjoint.scan_forward_order`, and the only form a Program can express: laying the domain out forwards instead would make the self-read a FORWARD read, which `ir::validate` rejects outright, so there would be nothing left to compare | `AdjointToProgram.AffineScanIsBitwiseTheAdjoint` (9,438 + 2,562 mismatches), `.DefaultTenorOisIsBitwiseTheAdjoint` (6,534) and `.OtherScanFixturesAreBitwiseTheAdjoint`'s `instrument_sample` (5,082) — **every one of them in `state_bar`, none in `out`**, which is the check that the mutant is observable where the invariant is stated and not only inside the emitted program. `rfr_book` does NOT catch it and cannot: its scan compounds realised fixings, so 0 of its 40 scan rows depend on an input and no error in the reverse scan can reach a state adjoint |
+  | `sparsity.gate_never_fires` | `solver::check_structure` (`solver/sparsity.hpp`): the structural pattern of a declared `ImplicitBlock` is computed and then not read, so a dead Jacobian column or row passes registration. The FALSE NEGATIVE direction and the one the gate exists to prevent — what it replaces is a calibration that returns a state whose unconstrained entries sit wherever the solve left them, with no diagnostic (D110 §3; the same plausible-number shape as D81 §6(a), D89 §3 and D94) | `StructuralGate.forward_flat_last_knot_is_dead_and_the_gate_fires` and `.a_residual_that_reads_only_quotes_is_a_dead_row_and_the_gate_fires`, both of which expect a throw. These are the ONLY catchers and necessarily so: no shipped fixture is structurally singular, which is why the gate had to ship with a fixture that is — a `(forward, flat)` curve with knots at the maturities, built in the test. **The file name is part of the gate.** It was `structural_gate_test.cpp` for exactly one mutation run, in which this mutant **SURVIVED the full 76-gate set** while failing that very test when run by hand: `mutation_test.sh` selects its gate set by a regex on the ctest entry name (`roundtrip|differential|verify|_adjoint_test$|_vs_dual_test$|_e0_test$`) and `..._gate_test` matches none of it. Renamed to `..._gate_verify_test`. This is the SECOND instance of that failure — `interpreter.duplicate_output_unwritten` is in this table because the same thing happened to `variants_test.cpp` — so the lesson is a naming rule and not a one-off |
+  | `sparsity.closure_forward_order` | `solver::structural_pattern`: the reverse reachability sweep visits the nodes ASCENDING. Operands are always EARLIER nodes, so a mark propagated downwards lands behind the cursor and the transitive closure stops one edge deep. The FALSE POSITIVE direction — nearly every unknown looks unreachable and the gate fires on correct maths — so it has different catchers from the mutant above, which is the point of carrying both. Deliberately NOT a variadic-skipping mutant: the `Rec` operators never emit `Sum` or `Affine` (only the passes do, and this gate runs before them), so a variadic mutant would be unreachable here and could not be caught — the failure four stages of this programme shipped | Every gate that records an implicit block: `solver_structural_gate_verify_test`'s four admitted configurations, and the `compare_ois` and Stage A gates, which then cannot record their calibration at all |
+  | `adjoint.materialise_skip_catalogue` | `Adjoint::run` (`Options::materialise_steps`, D31 item 1's other arm; the option is OFF by default and the gate sets it explicitly): a domain served by a CATALOGUED kernel has its intra-chain steps left UNWRITTEN in the materialise buffer. The kernel writes the domain's value and nothing else, so the materialise arm has to run its own `forward_step` sweep for the rest; this mutant drops that sweep, and the reverse then copies whatever the buffer last held — zeros on the first run — into the tile, differentiating a stale intermediate at every step below the group's last. Invisible in the recompute arm, which never reads the buffer, and invisible with the catalogue OFF, which is why the gate sweeps BOTH settings rather than taking the default | `MaterialiseSteps.MaterialisingTheIntermediatesIsBitwiseRecomputingThem` (55,248 mismatches of 7,949,088 comparisons). `MaterialiseSteps.TheGateCanObserveBothMutants` asserts the sites exist — 64,343 catalogued multi-step rows over 12 fixtures — so a stale generated registry (D81 §6's defect) says so instead of letting the mutant survive quietly |
+  | `adjoint.materialise_skip_operands` | `Adjoint::run` (`Options::materialise_steps`): the materialise arm skips `load_step_operands`, on the plausible-looking reasoning that materialising the step's VALUE is all the reverse needs. It is not — `reverse_step` calls `operand(..., load = false)` and reads a and b out of `c.ops`, which only a load puts there, so `mul`, `div`, `log`, `fma` and `select` take the previous tile's or previous domain's operands. This is D31's "operands that the reverse loads anyway for the local rules" as a defect: it is the half of the recompute that materialising does NOT remove, and the reason the arm's measured saving is the arithmetic alone. Deliberately paired with the mutant above — that one is the arm's data dependency, this one its arithmetic dependency | `MaterialiseSteps.MaterialisingTheIntermediatesIsBitwiseRecomputingThem` (201,816 mismatches). Sites counted at 66,110 operand-reading intra-chain rows |
+  | `adjoint.seed_input_pull` | `Adjoint::run` (`Options::seed_pull`, D102 §4 item 1; the option is OFF by default -- it measured SLOWER at the shipped `lane_tile = 8` -- so the gate below sets it explicitly, and a gate that did not would have nothing for this mutant to perturb): the pull of an INPUT domain is seeded with its first contribution like every other pull, instead of keeping its zero start. `pull()` now takes the first contribution in plan order as a STORE and `+=` the rest, which is exact except for an accumulated ZERO one of whose contributions is `-0.0` — and `Op::Input`'s rule is the one consumer that COPIES the pulled adjoint out (`state_bar[ordinal] = ybar`, not `+=`), so that pull alone keeps the zero start. Every other consumer accumulates into a step / gather / segment adjoint `reverse()` has just memset to `+0.0`, and an adjoint is never a divisor. Invisible under any tolerance, so the gate is a memcmp | `SeedPull.SeedingTheAccumulatorIsBitwiseTheZeroStart` (killed on `compare_ois(short)`, 10+ `state_bar` elements reading `8000000000000000` where the engine says `0000000000000000`, none in `out`) and `SeedPull.TheInputPullKeepsItsZeroStartSoAStateAdjointIsNeverMinusZero`. **The two live routes are counted, per fixture, by that test's `census()` rather than argued**: an Input row folds to `-0.0` only if EVERY contribution does, so every reader of it must be an output reader (live under a `-0.0` seed: 2 of `compare_ois(short)`'s 10 inputs are also outputs) or an `Affine` at coef < 0 (live under the all-`+0.0` seed, where every adjoint is a zero) — one gather or `Sum` reader washes the sign and rules the row out. The hand-built `affine_neg` program (one input, read once, by an `Affine` of coefficient `-1.0`) is the cover for the second route, which no recorded fixture has; `neg` is the NEGATIVE control, since `Op::Neg`'s `acc_minus` reaches `+0.0` from either sign. `tests/adjoint/i1_gate_e0_test.cpp` does NOT catch it: its "mixed" seed is `(o % 3) - 1` = {-1, +0.0, +1} and the file contains no `-0.0` at all |
 - **Near-miss shapes** (`include/epykos/fixtures/nearmiss_shapes.hpp`, the gate fixture the mutation harness showed
   was missing, D32): 42 templated shapes over six positive inputs, each an op tree that differs from a neighbour in
   exactly one respect a signature may overlook — a constant on the left or the right of `−` and `/`, a constant in
@@ -341,6 +355,157 @@ interpreter. Parity gate: catalogued groups within 1.05× of the hand-fused refe
 
 ---
 
+## XP — the exotics path grid (D1's revisit clause; `docs/EXOTICS_KILL_TEST.md`)
+
+The first **path-dependent** payoff in the repository. Every other fixture here is an interest-rate swap, so D1's
+revisit clause — "revisit only if M1/M3 show the catalogue + interpreter cannot reach the gates" — had only ever been
+tested on the easiest asset class there is. `include/epykos/fixtures/exotic_path.hpp`, test-only (D28), header-only so
+the including TU's contraction setting governs the arithmetic.
+
+- **Model:** Black–Scholes GBM with **exact log increments** — the exact GBM law, not an Euler approximation of it,
+  which is what makes the geometric closed form below an exact check rather than an approximate one:
+  `S_{k,p} = S_{k-1,p}·exp((r − q − σ²/2)·Δt + σ·√Δt·ε_{k,p})`, `Δt = T/K`, `T = 1`.
+- **Draws:** sub-stream `exotic_path_substream_base = 530000`, step-major so that a grid with more steps *extends* a
+  shorter one's draws rather than reshuffling them, and a sweep over `K` nests (D17). `ε` is **structure**, a Column,
+  never an input.
+- **Inputs (6, ordinal order):** `S0 = 100`, `r = 0.03`, `q = 0.01`, `σ = 0.20`, strike `X = 100`, up-barrier
+  `Bu = 130`. The barrier is above the forward so the knock-out bites.
+- **Payoffs**, written as a payoff *script* writes them — running accumulators inside the time loop, not a stored path
+  folded afterwards — all discounted at `exp(−rT)`:
+  - arithmetic Asian call: `A_p = Σ_k S_{k,p}`, payoff `max(A_p/K − X, 0)`;
+  - geometric Asian call: `L_p = Σ_k log S_{k,p}`, payoff `max(exp(L_p/K) − X, 0)`;
+  - up-and-out call: `M_p = max_k S_{k,p}`, payoff `(M_p < Bu) ? max(S_{K,p} − X, 0) : 0`.
+  `legs` selects any subset; `exotic_leg_spot` (the mean terminal spot, one recurrence with nothing reading it) is the
+  control, which is `affine_scan`'s shape.
+- **Outputs:** the per-leg Monte Carlo means in leg order, then, with `output_paths`, every per-path payoff.
+- **Recording discipline:** four `select` sites and no C++ value branch anywhere — `max(·,0)` on each call payoff, the
+  running extremum `max(S_k, M_{k-1})`, and the knock-out test. `Bu` is an **input**, so the knock-out predicate is
+  tainted and `structural_if` on it throws by construction; `tests/exec/exotic_path_e0_test.cpp` asserts that it does.
+- **Reference:** `exotic_path_evaluate<double>` is the oracle for the engine path (case 2, it crosses the pin:
+  measured divergence **0.00e+00** across every case the gate runs, gated at 1e-13 as a bug detector per §5.1).
+  Interpreter against tape replay, catalogue on against off, every tile/lane-tile, and a batched lane against its own
+  single run are case 1 and are **bitwise**.
+- **The independent check, no dependency (so no D12 entry):** the geometric Asian has an exact closed form under this
+  discretisation, standard library only —
+  `ln G ~ N(μ, s²)`, `μ = ln S0 + (r−q−σ²/2)·t̄`, `t̄ = Δt(n+1)/2`, `s² = σ²Δt(n+1)(2n+1)/(6n)`,
+  `price = exp(−rT)[exp(μ+s²/2)Φ(d₊) − XΦ(d₋)]`, `d₋ = (μ − ln X)/s`, `d₊ = d₋ + s`.
+  **Gated on the mean z over 8 independent seeds, not on one seed**, and that is deliberate: a 3σ band on a single
+  Monte Carlo estimate has a 0.3% false-alarm rate by construction, and seed `20260922` — the one this document fixes —
+  is one of the 0.3%. Its draws have a sample mean 2.0–3.0 standard errors **below** zero with the variance correct
+  (0.995–0.999), so the single-seed estimate lands z ≈ −2.6 to −3.2. The seed is **not** changed for a prettier
+  number; what is gated is the sampling distribution, which is what the closed form can certify.
+- **No performance gate.** `tools/exotics/exoticsprobe` measures it and refuses a loaded box itself; the numbers and
+  the pre-registered criterion live in `docs/EXOTICS_KILL_TEST.md`. There is no `bench/` baseline, because the result
+  is a one-off answer to D1's clause rather than a quantity to defend against regression.
+
+---
+
+## CM — the coverage matrix (`tools/coverage/`, artefact `bench/compare/COVERAGE.md`)
+
+Not a workload: an **inventory**. It takes no timings, defends no baseline and refuses no box. It exists so that
+*"what can we not compare?"* is a number this repository maintains rather than a guess someone makes in a review.
+
+- **Three axes.** (1) Calibration instruments — the other engine's 9 `QuoteKind` enumerators against our
+  `instrument::Kind`. (2) Problem families — rates, multi-curve, cross-currency, inflation, credit, bonds, FX,
+  volatility, XVA, scenario grids, VaR. (3) Capabilities around the problem — stacked multi-curve state,
+  forecast ≠ discount, seasoned fixings, netting sets, CSA, turns, regularisation, P&L explain, the risk ladder and
+  its cross-basis transform, an external oracle, interpolation schemes, soft-quote bands, streaming recalibration.
+- **Three levels per row, not two.** `compared` (the head-to-head exercises it today) / `supported, not compared`
+  (the engine has it; `fixtures::compare_ois` does not reach it) / `theirs only` (no path here at all). The middle
+  level is the point: collapsing it into "both" overstates what we can measure, and into "theirs only" understates
+  what is built. It separates a **fixture** gap from a **capability** gap.
+- **Our side is generated, theirs is a dated snapshot**, and the artefact says so in its own header. Ours:
+  `instrument::Kind`, `instrument::CouponKind`, `curve::SchemeKind` and `curve::Variable` are discovered from the
+  shipped enums at run time (each answers `"?"` for an unknown value, so a 0..255 scan finds the live set);
+  `blueprints/` is loaded through the engine's own loaders; the head-to-head's reach is read off
+  `fixtures::compare_ois` by **building it**. Theirs: a checked-in table citing a file and a symbol per row so a
+  human can re-verify it in seconds. D11 as relaxed by the owner (2026-10-09) permits reading that checkout;
+  nothing is copied, and `tools/coverage/` links `epykos` only — `tools/h2h/` remains the only target that compiles
+  against their facade.
+- **It fails loudly rather than going stale.** A `Kind` with no quote-form row, or a live cardinality that has
+  moved past what the matrix reasons about, exits 2 and names what changed; an unresolvable blueprint or curve
+  definition exits 1 through `Blueprints::validate`. Both paths were exercised when the tool landed.
+- **Stage A against the head-to-head** is generated in the same run, because it is the cheapest gap in the
+  document: the head-to-head reaches one curve, one currency and one instrument type, while Stage A's calibration
+  set already covers all five of our instrument kinds. The artefact also separates the head-to-head's *deliberate*
+  restrictions — the `logdf` curve that removes interpolation from the comparison, the square Jacobian that avoids
+  a regulariser neither engine shares, and the stub-free book that exists because the two engines are **measured**
+  to disagree on front stubs — from the ones nothing defends.
+
+---
+
+## MR — materialise vs recompute (`tools/matrec/` + `tools/matprobe/`, artefact `bench/compare/MATREC.md`)
+
+Not a new workload: a **probe over the existing ones**, asking whether any structural signal the engine already
+holds predicts D31 item 1's materialise-vs-recompute choice, at both ends of the sharing spectrum — the rates book
+(`compare_ois`, `stage_a`) and XP's path grid above. It is the shape D68, D92 and D111 established: measure the
+share, and the signal, before fitting anything.
+
+- **Two binaries by design, split on whether they time anything.** `tools/matrec/` is counts, byte sizes and
+  ratios only, so it reads no load and refuses no box — the position `tools/sparsity/`, `tools/coverage/` and
+  `tools/revcollapse/` take. `tools/matprobe/` times, so it reads the 1-minute load itself and refuses above
+  cores/2, like `tools/ladder/`, `tools/pullprobe/` and `tools/exotics/`.
+- **The counterfactual is an option, not a branch**: `adjoint::Options::materialise_steps`, false by default and
+  shipped behaviour byte for byte. Both arms are measured interleaved A,B,B,A **in one process** on one
+  `ir::Program` — D105's pattern, because a two-binary comparison of this very subsystem carried a 6.6% codegen
+  confound that collapsed to 0.2% once both arms sat behind one option. `--swap` controls allocation order.
+- **The flip is bitwise and that is a construction, not a tolerance.** An intra-chain step reads only its own
+  group's earlier steps and values of *earlier* domains (`ir::validate` forbids a forward read), so both arms call
+  the same `forward_step` on the same operands and only the time of the call changes.
+  `tests/adjoint/materialise_steps_e0_test.cpp` asserts it with `memcmp` over 12 fixtures x tile x lane_tile x
+  batch x both catalogue settings, and **counts its own observability** rather than arguing it (D105 §4, D111 §4).
+  Two mutants: `adjoint.materialise_skip_catalogue`, `adjoint.materialise_skip_operands`.
+- **`exotic_path` is in the gate set for a structural reason, not for breadth.** On the rates book every
+  transcendental is a group's VALUE, so 0 of `stage_a`'s 11,087 and 0 of `compare_ois`'s 81 are ever recomputed;
+  on the path grid 50.1% of them are intra-chain. A gate set without XP would assert this arm's correctness over
+  a population from which the deciding op is structurally absent.
+- **No performance gate and no baseline.** `tools/matprobe/` defends nothing; `bench/compare/MATREC.md` holds the
+  numbers with their loads, flags and fingerprint, and the model's two constants are labelled estimates.
+
+---
+
+## CI — the curve-identity probe (`tools/curveid/`, pre-registration + result `bench/compare/CURVEID.md`)
+
+Not a workload: an **alignment probe**, and the sharpest one available, because it has no tolerance to hide in.
+Same interpolation variable, same scheme, same knots, same instruments => the **same curve**, to solver tolerance.
+It takes no timings, defends no baseline and refuses no box. Behind `-DEPYKOS_H2H=ON`, OFF by default, never in CI;
+unlike `tools/h2h/` it needs only the other engine's **headers** (its curve module is header-only), not a
+configured build of it. D107 (2026-10-09) permits reading that checkout; nothing is copied, and no test case of
+theirs is lifted, so D108's cases-yes/implementations-no line is not exercised.
+
+- **Expectations are pre-registered in a separate, earlier commit** (the D106 standard), cell by cell, derived by
+  reading both engines' curve code. The measurement writes §6 of that file and nothing else in it.
+- **Fixture, generated in the tool, no data files.** Two knot sets — `nonuniform` {0.25, 0.5, 1, 2, 3, 5, 7, 10,
+  15, 20, 30} (the desk-shaped grid; spacing ratios 2:1 to 10:1 are what separate the end-tangent and
+  interior-knot rules) and `uniform` {1 … 8} (the control that tells a spacing-driven difference from a
+  construction-driven one). Four knot-value profiles — `linear` (affine in t, the profile on which several schemes
+  must coincide), `hump`, `step`, `oscillate` (the two that trip a monotonicity limiter). Dense evaluation grid:
+  below the first knot, 16 interior points per knot interval, the knots themselves, and out to 3x the last knot,
+  so knots test the solve while the grid tests the interpolation and the extrapolation.
+- **Three layers, because they localise differently.** (A) scheme-interpolant identity, variable-free — answers
+  whether six shared scheme *names* share a *construction*. (B) whole-curve identity, DF and the instantaneous
+  forward — where the interpolation variable enters and where most of the matrix turns out not to exist.
+  (C) calibration identity — one instrument per knot, maturities at the knots, square, unique root.
+- **The Layer C instrument set is convention-free on purpose**, because a curve-identity probe must not be able to
+  blame a calendar: fixed-vs-OIS par swaps on pure year fractions, annual pays, no calendar, no business-day rule,
+  no day-count fraction, so the time measure on both sides is the knot year fraction and nothing else. The
+  residual *and* the damped Newton are written once in the tool and run against each engine's own curve object, so
+  the solver is a **control**: a differing root is a differing curve.
+- **Every deviation is localised, not just counted.** The shape of the deviation over t decides between units
+  (constant), time measure (grows with t), scheme construction (confined to the knot range) and extrapolation
+  (confined outside it). The roundoff floor is 1e-13 relative and is never widened to make a cell pass.
+- **What it found.** Three of the six shared names are the same construction (`linear`, `hermite`,
+  `natural_cubic`, all at <= 4.3e-16); three share a name only (`flat`, `monotone_cubic`, `bspline`). Their
+  interpolation variable is **not configurable** (always knot forwards) and ours restricts `Variable::forward` to
+  Flat/Linear, so of eighteen cells twelve have no counterpart there, four are not constructible here, and exactly
+  **one** — (forward, linear) — runs the sharpest test end to end and passes it (calibrated knots identical to
+  1.4e-14). A second identity crosses the variable gap: our `logdf`-linear curve and their `Flat` are the same
+  curve on the knot range to 3.1e-16, parting company only in the extrapolation. And the (forward, flat) cell is
+  **structurally singular on our side** — an exact zero column at the last knot, because our Flat anchors a value
+  to the segment that *starts* at its knot while theirs anchors it to the segment that *ends* there.
+
+---
+
 ## MX — G4 multi-currency bundle (stretch)
 - **Currencies:** USD, EUR, GBP, JPY. Collateral/discounting: each currency's OIS; USD SOFR as the cross-currency base.
 - **Curves per currency** (researched, sources in `docs/G4_BUNDLE.md`): the OIS curve from deposits/OIS swaps (and
@@ -355,3 +520,103 @@ interpreter. Parity gate: catalogued groups within 1.05× of the hand-fused refe
   a portfolio of 5,000 swaps across the four currencies (seeded) under 1,000 scenarios (parallel and twist shocks).
 - **Comparison:** the same bundle, instruments, portfolio and scenarios on SwapEngine as a black box (D21); one
   fingerprint; each engine's own timing harness; the report states precisely what each engine computed.
+
+---
+
+## MX-H2H — the head-to-head problems (`tools/h2h`, D78/D90; `bench/compare/README.md`)
+
+The two problems `tools/h2h --problem` takes. Both are **generated from a seed** like every other fixture here;
+neither adds a data file. The problem SHAPE is a parameter of the harness, not a constant of it — which it was until
+2026-10-09, and that is the whole reason this section exists: the comparison carried one USD SOFR curve and a book of
+plain OIS, so every number this project quoted against the other engine covered roughly a quarter of what the engine
+can already price.
+
+| `--problem` | definition | curves | currencies | calibration instruments | book |
+|---|---|---|---|---|---|
+| `compare_ois` | `fixtures::CompareOisOptions` (built in code) | 1, USD SOFR | 1 | `--tenors` fixed-vs-compounded-SOFR OIS, par-rate quoted | `--trades` plain spot-starting OIS |
+| `stage_a_h2h` | `blueprints/problems/stage_a_h2h.json` | **4** | **2** | **70** | **2,000 over 8 blueprints** |
+
+`compare_ois` is D90's and D81 §7's shape and is retained unchanged, so those numbers stay reproducible.
+`stage_a_h2h` is `blueprints/problems/stage_a.json` with each curve naming its `-LOGDF` definition and **nothing else
+changed** — same seed `20260923`, same valuation date, same quote noise, same synthetic fixings, same mix, same tenor
+and notional draws, same 20% seasoned fraction, same 40 netting sets. `tests/compare/h2h_problem_test.cpp` gates that
+clause by clause, in CI, with no second engine.
+
+Why `-LOGDF`: log DF piecewise linear on `{0, knots...}` — equivalently a piecewise-constant instantaneous forward —
+is the **only interpolation family the second engine's curve shares** (D71 measured it to 0.000e+00 relative).
+`stage_a.json`'s linear-zero parameterisation has no counterpart there, because that engine's free variables are its
+curves' own forwards. Comparing the two directly would measure the schemes rather than the engines, so the matched
+problem exists for correctness, not for speed.
+
+### `stage_a_h2h`'s calibration side — 70 quotes, 70 knots, four square blocks
+
+| slot | curve | instruments | quotes |
+|---|---|---|---|
+| 0 | `USD-SOFR-LOGDF` | 1 ON deposit, 3 OIS (1M–3M), 8 SR3 futures, 10 OIS (3Y–30Y) | 22 |
+| 1 | `EUR-ESTR-LOGDF` | 1 ON deposit, 17 €STR OIS (1M–30Y) | 18 |
+| 2 | `EUR-EURIBOR-3M-LOGDF` | 1 3M deposit, 8 FEU3 futures, 9 3s6s basis (3Y–30Y) | 18 |
+| 3 | `EUR-EURIBOR-6M-LOGDF` | 1 6M deposit, 11 fixed-vs-6M IRS (1Y–30Y) | 12 |
+
+Knots are at the instruments' own maturities, so **every block is square** and neither engine needs a pseudo-inverse
+or a regulariser. 16 of the 70 quotes are futures **prices**; the other engine quotes those rows in **rate** units,
+which is the one unit conversion in the comparison (`d(their market)/d(our quote) = −1/100`, applied to our ladder;
+`bench/compare/README.md` §4 item 7). Our solve is **sequential** — one implicit block per curve in the dependency
+order the maths discovers (€STR → 6M → 3M; SOFR alone); theirs is **simultaneous** over one stacked 70-vector. Both
+land on the same curves, and the gate measures that they do rather than assuming it.
+
+### `stage_a_h2h`'s book — 8 blueprints, 5 families
+
+| blueprint | weight | coupon mechanics exercised |
+|---|---|---|
+| `USD-SOFR-OIS` | 25 | compounded in arrears, 2-day payment delay — **telescopes** |
+| `USD-SOFR-OIS-SHIFT2` | 10 | observation shift 2 — **telescopes** |
+| `USD-SOFR-OIS-SHIFT2-LOCKOUT2` | 10 | shift + lockout — **does NOT telescope**, on either side |
+| `USD-SOFR-AVG-SWAP` | 10 | arithmetic daily average — does not telescope |
+| `EUR-ESTR-OIS` | 15 | compounded in arrears |
+| `EUR-EURIBOR-6M-IRS` | 12 | term rate fixed in advance |
+| `EUR-EURIBOR-3M-IRS` | 8 | term rate fixed in advance |
+| `EUR-3S6S-BASIS` | 10 | float vs float, spread on the 3M leg, **two curves per trade** |
+
+~20% of trades are **seasoned** (age uniform in 30–1500 days), so their realised fixings fold into a realised factor
+(compounded), a realised day-weighted sum (averaged) or a known fixing (term). Trades draw 12 tenors from 1Y to 30Y,
+so the book is **not** on one annual grid — the structural-sharing caveat `compare_ois` carries and this problem does
+not (README §4 item 6).
+
+A run may be restricted to ONE family (`--family`), or sweep all of them (`--per-family`). A per-family run is its own
+problem — its own tape, its own agreement gate, its own timings — never a slice of an aggregate, because an aggregate
+hides exactly the thing the sweep exists to show.
+
+### What is measured, and the three parameters that must be quoted with it
+
+Four phases on one `steady_clock`, interleaved round-robin: `calibrate_cold`, `calibrate_hot` (both
+family-independent — the bundle never carries the book), `price`, `risk_ladder`. Agreement on the calibrated curves,
+the book NPV per family and the risk ladder gates all of it (README §5), and a family that disagrees is reported and
+**not timed**.
+
+**Always quoted with a ladder figure, because a figure without them is not a measurement:** `--ladder-rows` (D103 §1:
+D90's flagship number is a ONE-ROW ladder), the **book size** (D92's Jacobian-share decay is a 16-trade book
+throughout), and **`max_batch` / `lane_tile`** (D104 — and `lane_tile` defaults to **8**, not 64).
+
+### Outputs compared
+
+O1 the calibrated curves — discount factors at 200 sample times **per curve, on that curve's own grid**, because one
+shared grid would sample the shorter curves past their last knot, where the two engines extrapolate differently by
+construction; O2 book NPV per family and in total; O3 the 70-bucket ladder d(PV)/d(quote). O4 (the scenario grid),
+cross-currency, FX and second-order risk are **not** compared and no claim here extends to them.
+
+### Measured once, 2026-10-09, fingerprint `d448afd70180`
+
+The whole table is in `bench/compare/README.md` §8 (agreement, four phases, eight families, the
+`max_batch` / `lane_tile` sweep, and D90's shape reproduced in the same session). The shape of the
+result, so this file is not silent on it:
+
+- **Every one of the eight families agrees**, worst 4.023e-14 on book NPV and 6.012e-15 on the ladder;
+  the curves agree to 6.717e-15 over 4 curves and 800 sample times. Nothing went untimed.
+- The **book-level** risk ladder is 5.79x–506.62x in our favour across the families and **297x** on the
+  whole 2,000-trade book; plain OIS (10.35x) is **not** where the advantage is largest.
+- The **per-trade** risk ladder is a different object: 1.83x in our favour at 500 trades / R = 64 and
+  **0.77x — slower** at 2,000 trades / R = 256. The ratio moves by 385x between R = 1 and R = 256 and
+  crosses 1, so a ladder number without its row count is not a number.
+- Cold calibration **reverses with the curve count**: 1.5x slower on one curve, **2.41x faster** on four.
+  Warm calibration does not: 2.6x and 3.6x slower respectively.
+- `lane_tile = 32` costs **22.5%** per ladder row at `max_batch` 64. The shipped default of 8 is right.

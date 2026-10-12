@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "epykos/catalogue/kernel.hpp"
+#include "epykos/exec/lanes.hpp"
 #include "epykos/tape/op.hpp"
 
 namespace epykos::exec::detail {
@@ -45,16 +46,11 @@ enum class PK : std::uint8_t { S = 0, G = 1, None = 2 };
 
 const char* to_string(PK k) noexcept;
 
-// Lane-width variants the kernels are instantiated for. Variant 0 is the runtime-L fallback.
-inline constexpr int lane_variants[] = {0, 1, 4, 8, 16, 32, 64};
-inline constexpr int n_lane_variants = 7;
-inline int lane_variant(int L) noexcept {
-  for (int v = 1; v < n_lane_variants; ++v) {
-    if (lane_variants[v] == L) return v;
-  }
-  return 0;
-}
-
+// `lane_variants`, `n_lane_variants`, `lane_variant` and the chunk cursor live in
+// include/epykos/exec/lanes.hpp, because adjoint::Adjoint chunks a batch by the same rule and
+// nothing under src/ may include another src/ directory's private header. They are in the
+// enclosing namespace `epykos::exec`, so they are still named unqualified from here.
+//
 // Row modes a kernel is instantiated for: index into the fn[][] tables.
 inline constexpr int row_contiguous = 0;
 inline constexpr int row_indirect = 1;
@@ -62,6 +58,15 @@ inline constexpr int row_indirect = 1;
 // Rows a reduction epilogue keeps in flight in local accumulators for lane width L: 32 lanes
 // (eight 4-wide accumulators) at 4 <= L < 32, 16 rows at L = 1, one row at L >= 32. Fused
 // blocks are sized so that their rows fill these accumulators (build_segment).
+//
+// This is the only L-dependent quantity in either runtime, and it tiles ROWS ONLY — it never
+// reorders the members summed within a row. `acc_rows1` / `acc_rowsL` (kernels_impl.hpp) give
+// each of their RJ rows its own accumulator and fold the member positions into it as the inner
+// loop, so row i's fold order is recorded position order at every RJ, and a position run cut
+// into chunks of `kc` carries the partial sum through the accumulator buffer exactly. So a
+// chunk split into two disjoint lane ranges stays bitwise identical (exec/lanes.hpp). Note also
+// that build_segment reads this with the plan-time `Lt`, not a chunk's L, so the segment
+// blocking is fixed in the constructor and does not move when a group is split at all.
 constexpr int acc_rows_in_flight_for(int L) noexcept { return L >= 32 ? 1 : (L == 1 ? 16 : 32 / L); }
 
 struct GroupPlan;
@@ -254,6 +259,20 @@ struct GroupPlan {
   bool scan = false;
   std::vector<std::int32_t> wave_rows;
   std::vector<std::int32_t> wave_begin;  // waves + 1
+
+  // A RECURRENT domain that is not a scan (PRINCIPLES.md §1b invariant I1, stage C3b): rows read
+  // earlier rows of their own domain through a SEGMENT member, not through a scan's carry gather,
+  // so there is no `ir::Scan` to schedule waves from. That is the shape of the reverse of a scan
+  // — `adjoint::adjoint_to_program` lays the reverse scan's rows backwards and the pull's Affine
+  // carries the carry's edge slot as an ordinary member at its true CSR position — and the IR has
+  // accepted it since D41 (`ir::validate` checks only that a recurrent domain's reads are of
+  // EARLIER rows; `ir::Evaluator` runs it; `exec::Interpreter` refused it until C3b).
+  //
+  // Deliberately the slow path: rows strictly in row order, one at a time, no tiling, no fusion,
+  // no inlining, no catalogue, and NOT the whole-segment path — `build_segment` bucket-sorts rows
+  // by segment length, which reorders them, and a recurrence may not be reordered. Correctness
+  // only; no performance claim is made about it in either direction.
+  bool recurrent = false;
 
   // M4/C1 (docs/PROBLEM.md §7, DESIGN.md §7 tier 1): this domain's op sequence matches a
   // registered catalogue kernel AND is eligible for it (a plain per-tile Materialize domain —

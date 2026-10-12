@@ -136,30 +136,110 @@ is a test that fails. **The backlog derives from these**, not from whatever is n
 *Gate:* it passes `ir::validate`, round-trips through `ir::serialize`/`deserialize`, and
 `exec::Interpreter` run on it reproduces `adjoint::Adjoint::run` **bitwise** — the same program and
 the same inputs, so §5.2a case 1, and a failure is a defect.
+**Built 2026-10-07: `tests/adjoint/i1_gate_e0_test.cpp`.**
 
-*Status: **DOES NOT HOLD.*** `Adjoint` is constructed from the FORWARD program and `program()`
-returns that same forward program; `AdjointPlan` is buffer layout plus four reverse-adjacency CSR
-lists with no ops in it; the derivative arithmetic is a `switch` over `Op` in
-`src/adjoint/adjoint_e0.cpp`. The root cause is one decision: **`SlotKind::Gather` is an operand
-ADDRESSING MODE, and the reverse of an addressing mode is a scatter-accumulate, which the IR cannot
-express.** `Op::Gather` and `Op::SegmentSum` are reserved with no recorder support. The twelve
-`acc_*` kernels are not the obstacle — they exist and are correct; they write doubles where they
-would need to emit nodes.
+**A hole the gate does not reach (D112 §6).** `adjoint(adjoint(P))` **throws for a scanning
+program**: `build_plan(Q)` rejects the recurrent non-scan domain the emitter produces for the
+reverse of a scan. The gate applies `adjoint` **once**, so it passes — but the invariant's NAME
+asserts closure, and a set closed under an operation admits applying it again. **Closure fails at
+second order for scans.** Same shape as the blind spot below: the gate is narrower than the name.
+
+**What this gate does NOT establish, stated here because it is easy to misread (D100).** It is a
+**closure check, not a correctness check** — which is the right aim, since I1 is a closure property,
+but a green I1 must never be read as *"the adjoint is correct"*. Both sides of the comparison consume
+the **same `AdjointPlan`**: the emitter builds its pull from `plan.cpp`'s CSR lists and
+`Adjoint::run` walks those same lists. So a defect in `build_plan` moves both answers together and
+passes. Demonstrated, not inferred: **`adjoint.affine_not_transposed` survives this gate**, and its
+real catcher is `curve_composite_vs_dual_test` (14 catchers). The derivative *rules* are carried by
+the 14 vs-`Dual` gates in `scripts/mutation_catchers.tsv`; this gate carries only that the reverse
+is expressible as a program and that the two executions agree.
+
+*Status: **HOLDS as of 2026-10-07 (D98, D99, D100).*** `adjoint::Adjoint::to_program()` returns an
+`ir::Program` for the reverse. The gate passes over **12 programs — 1,184,540 `memcmp` comparisons,
+0 mismatches** — including the Stage A desk problem, both scan fixtures, and two hand-built programs
+covering cases no fixture contains. `program()` keeps its old meaning (the forward program) and the
+header states the contrast at three places.
+
+Reached with **no new op, no `Op` dispatch site changed and `src/adjoint/adjoint_e0.cpp` untouched**,
+so the §5.2a case-1 question D96 reserved to the owner was never raised. The root cause this section
+asserted until 2026-10-06 — that the IR cannot express the reverse of a gather — was wrong; see
+below.
+
+**The root cause stated here until 2026-10-06 was wrong** (D96). It read: *"`SlotKind::Gather` is an
+operand ADDRESSING MODE, and the reverse of an addressing mode is a scatter-accumulate, which the
+IR cannot express."* The IR **can** express it. `Op::Affine` over a `Segment` **is** a
+scatter-accumulate, and `src/adjoint/plan.cpp` already transposes every index array into CSR, so
+the reverse adjacency is computed today and merely never emitted as nodes. A throwaway emitter
+demonstrated the gate — `ir::validate`, `serialize`/`deserialize` round-trip, and **bitwise
+agreement with `Adjoint::run` over 3,906 comparisons on `nearmiss` and 12,156 on `m1_book`**, under
+every interpreter configuration — with **no new op, no `Op` enum change and no change to
+`Adjoint::run`**. `Op::SegmentSum` needs no producer; `Op::Linmap` is a dead name, appearing only
+in `src/tape/op.cpp`'s name table and one string assertion.
+
+So I1 never failed on representation. **It failed because nobody had written the emitter.** The one
+genuine and much narrower gap — `exec::Interpreter` refusing a recurrent non-scan domain, which the
+reverse of a scan needs — was in the executor, not the IR, and was closed in D99.
 
 ---
 
 **I2. Second order is reachable.** Every `Scalar`-templated component instantiates at a NESTING
 scalar.
 
-*Gate:* `Dual<Dual<1>, N>` compiles over the pricing maths, and its second derivatives agree with
-central differences of the first derivatives within a measured tolerance (§5's error contract, case
-2 — a tolerance, stated once measured, never guessed).
+*Gate:* a nested dual compiles over the pricing maths and its second derivatives agree with central
+differences of the first derivatives within a measured tolerance (§5's error contract, case 2 — a
+tolerance, stated once measured, never guessed).
 
-*Status: **DOES NOT HOLD.*** `Dual` is `template <int N>` over a hardcoded `double`, not
-`Dual<Scalar, N>`, so it cannot nest; `adjoint::Adjoint`'s whole interface is `double*`; and the
-adjoint cannot differentiate itself because of I1. There is **no gamma, cross-gamma, vanna or volga
-anywhere** in `include/` or `src/` — the engine cannot compute any second derivative by any route.
-This is a capability wall, not a performance question, and it is reached by the first option added.
+The spelling is **`Dual<N, Dual<1>>`**, amended 2026-10-06 (D95) from the `Dual<Dual<1>, N>` this
+section was written with. `Dual`'s parameter order becomes `template <int N = 1, class S = double>`,
+not `<S, N>`, because all 150 existing call sites pass a single argument (`Dual<1>` ×48, `Dual<N>`
+×47, `Dual<12>`, `Dual<n_knots>`, …) and that order leaves every one of them compiling unchanged.
+The `<S, N>` order would cost 150 mechanical edits and buy no capability. The invariant is
+unaffected: what is gated is that the scalar NESTS, not how the nesting is spelled.
+
+*Status: **HOLDS for the recorded and the calibrated maths as of 2026-10-07 (D97, D101); the
+COMPILED path is a separate capability and does not.*** This paragraph previously gave three causes in one breath — `Dual` not
+nesting, `Adjoint`'s `double*` interface, and I1 — and that conflation is corrected here, because
+two of the three were never what I2's gate measures.
+
+**Met.** `Dual` is now `template <int N = 1, class S = double>`; `Dual<N>` still means
+`Dual<N, double>` and all 150 call sites compile untouched. `Dual<1, Dual<1>>` instantiates over
+**every** templated pricing path — all six schemes, all three variables, the composite at both
+anchors, `curve::linear`, `ois::` compounding, the whole `instrument::` surface and all ten fixture
+pricers — and the pricing maths needed **no edit at all**; four `double`-to-`Scalar`
+copy-initialisations were served by the scalar instead. Third order (`Dual<1, Dual<1, Dual<1>>>`)
+needs no further code, which is the honest test that depth 2 is not special-cased.
+
+**Also met, 2026-10-07 (D101): there IS now a gamma of a book with respect to par quotes.**
+`tangent.hpp`'s `F_z`, LU factorisation and both triangular solves carry the scalar `S`, and
+`implicit_dual<N, S>` remains **only the first-order rule** — the depth recursion lives in the value
+channel, so the second-order IFT term appears nowhere in the file. Measured against central
+differences of the exact first-order sensitivities at the swept floor h = 2e-6: **6.020e-9**
+(tolerance 5e-8), cross-checked by a 5-point O(h⁴) stencil reaching **4.628e-10** at fifteen times
+the step, which is only possible if the nested pass is the accurate side. Hessian symmetry
+**1.569e-15**. First order is **bitwise** unchanged, verified both in-tree and by an out-of-band
+byte-comparison against the pre-nesting header. Third order through the calibration needs no
+further code.
+
+**Correction to this section's own text (D101).** It said the fix *"needs partial pivoting on a
+`Dual`, for which `select`/`DualBool` already has the vocabulary."* **Neither is correct.**
+`structural_if` would **throw** `DualError`, because it asserts the predicate provably does not
+depend on the inputs and here every entry of `F_z` carries a nonzero tangent. `select` is the
+vocabulary for a *value*, but a permutation is one decision for the whole elimination rather than n
+decisions about n values, and `select` cannot resolve the predicate at all. (`DualBool`'s
+`unchecked_value()` is documented *debugging and tests only*, so routing a pivot through it would
+put a debug accessor on an engine path.) The pivot reads the **value channel** explicitly, and the
+reason is not economy: `x = A⁻¹b` does not depend on the pivot order, so neither does its
+derivative — but the **rounding** does. Deciding on the value channel pins the elimination to the
+one the plain-`double` factorisation would take, which is exactly what keeps first order bitwise. A
+pivot allowed to see a tangent would be a different elimination of the same matrix.
+
+**A different capability, tracked separately: second order on the COMPILED path.** `Adjoint` is not
+a `Scalar`-templated component, so I2's gate never reached it. Blocking it, in order: `ir::Program`
+is double-valued throughout (`Column::values`, `literals`, `Segment::coefs`, `input_values`, and
+`serialize` writing hex bit patterns), so there is nowhere to put a dual-valued constant; the
+execution ABI is a `double` ABI, widest at `catalogue::Kernel`; `Adjoint`'s 24 `__restrict` kernels
+are written for lane-innermost SoA, where a lane IS a vector element and a `Dual<N>` element is not;
+and both routes that would avoid a Scalar-parametric IR need I1 first.
 
 ---
 
@@ -170,16 +250,47 @@ produces that a caller can observe is a recorded expression.
 rule exists precisely so nothing differentiates through the iteration. The invariant is about
 QUANTITIES.
 
-*Gate:* a pinned registry of host-computed tape inputs — inputs whose values are written in by
-`Tape::set_input_value` from a quantity computed outside the tape — each with a stated
-justification, and a test that fails when the list grows silently. The same idiom as
-`tests/mutation/registry_test.cpp` pinning the mutant list.
+*Gate:* a pinned registry of host-computed tape inputs, each with a stated justification, and a test
+that fails when the list grows silently — the same idiom as `tests/mutation/registry_test.cpp`.
+**Built 2026-10-06: `tests/invariants/i3_host_inputs_test.cpp`** (18 call sites, six roles, both
+ratchets verified to bite rather than merely to pass).
 
-*Status: **DOES NOT HOLD, with two known entries.*** `diag_iterations_input` is legitimate — an
-iteration count has no derivative and is declared stop-gradient. `diag_jtr_input` is the violation
-D87 found: ‖JᵀF‖∞ is a mathematical expression written in Eigen in `src/solver/residual.cpp` and
-pushed onto the tape as a leaf, so no pass can see it and nothing could have optimised it. D85's
-own fix had to be found by hand for exactly that reason.
+Three corrections to how this gate was first specified (D97):
+
+1. It named only `Tape::set_input_value`. **Three other doors reach the same leaf** —
+   `make_input`/`Tape::input` creating an input *with* a value, and the run-time lane write at
+   `src/solver/implicit_program.cpp:187-189`, which writes the same quantities with no `Tape` in
+   sight and is the path every `run()` actually takes. The gate is phrased by what a leaf IS, not
+   by which API set it.
+2. *"A quantity computed outside the tape"* is the wrong test. ‖JᵀF‖∞ is computed by
+   `ResidualProgram::jt_product`, which runs the engine's own compiled adjoint over the recorded
+   residual slice — not "outside the tape" in any ordinary sense. **The test is narrower: the
+   result is not a node of the recorded program.**
+3. **The gate is blind to engine-computed values flowing OUT around the tape, and a green gate must
+   not be read as "I3 has one violation".** `ImplicitProgram::adjoint` contracts the IFT in Eigen
+   and returns it as `state_bar` — that is the risk ladder, it is hand-written engine maths, a
+   caller observes it directly, and it never passes through a tape input, so no registry entry can
+   ever cover it. I3's *statement* covers it; I3's *gate* cannot. That class is I1's to fix.
+
+A registry entry is a record, **not a licence**.
+
+*Status: **DOES NOT HOLD. Three engine-written roles, not the two this section first claimed**
+(corrected 2026-10-06, D97) — and one violation among them.*
+
+- `unknowns` (`src/solver/implicit.cpp:100`, and the lane write) — **legitimate**, and for a
+  different reason than the iteration count, which is why lumping them together hid it. This
+  section's own carve-out applies: a Newton loop is a fixpoint, not an expression, so there is no
+  recorded expression for `z`. The maths that *defines* `z` is recorded — the residuals are tape
+  outputs — and the derivative is not lost, because `Factors::ift_adjoint` supplies `dz/dp` exactly.
+- `diag_iterations_input` — **legitimate**: an iteration count has no derivative, stop-gradient.
+- `diag_jtr_input` — **THE VIOLATION**, the one D87 found and D94 made concrete: ‖JᵀF‖∞ is pushed
+  onto the tape as a leaf, so no pass can see it, nothing could optimise it, and D85's own fix had
+  to be found by hand for exactly that reason.
+
+Plus three boundary roles the registry records so it is a complete map rather than a selective one:
+`caller_state` (market quotes — the engine did not compute them), `rebuild` (copying an input's
+existing `konst` onto a rebuilt table, introducing no quantity) and `analysis_scratch`
+(`CurveSet::instrument_reads`, where no value is ever evaluated or returned).
 
 ---
 
@@ -747,12 +858,20 @@ roughly nothing:
 12. **Tier 2 opens**, with `ExpMode::poly` as its first citizen — blocked on its own entry
     criterion, that it become lane-width independent (D80).
 
-**Not in this list, because it is not scheduled and the owner has not decided it (D87).** The
-engine's own numerics are not recorded, and cannot be, because a derivative is not expressible as a
-tape node. That is where D68 measures ~95% of an O4 lane to be and where D85's win was hiding. D87
-§7 sets out three options — leave it and instrument by hand; build a derivative operator and
-self-host the thesis; or give the cost model a solver (D68's recommendation 3). It is listed here
-rather than numbered because its priority against steps 8–12 is a decision, not an ordering.
+**SCHEDULED 2026-10-06 (D95): the owner commissioned all three invariants.** D87 §7's three options
+are resolved by taking the second — build the derivative operator and self-host the thesis — and
+§1b's invariants become the work rather than the specification of it. This supersedes the paragraph
+that stood here, which said the item was unscheduled and undecided.
+
+The ordering is set by dependency, not preference. **I3's gate** (the pinned host-input registry) is
+a ratchet that needs no capability and goes first. **I2** is independent of both others. **I1** is
+staged — the scatter-accumulate op, then `adjoint_to_program` on an elementwise subset gated
+bitwise, then gather and segment, then the full gate — and **I3's substantive fix is downstream of
+I1's completion**, because recording ‖JᵀF‖∞ requires an IR that can express a derivative. Each stage
+carries its own gate and lands independently; none of this rewrites anything below the pin.
+
+The capability argument stands where D93 left it: this is justified as *the engine cannot compute a
+gamma*, not as an optimisation case, which D92 priced at roughly nothing.
 
 Nothing in this list rewrites anything below the pin, because nothing below the pin is implicated —
 with one exception already taken: D81 §6(a), a pre-existing interpreter defect the collapse exposed.

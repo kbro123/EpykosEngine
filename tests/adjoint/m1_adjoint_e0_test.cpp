@@ -243,17 +243,28 @@ TEST(M1AdjointE0, EveryTileAndLaneTileIsBitIdentical) {
   std::cout << "[  sweep   ] " << runs << " (tile, lane_tile) configurations, mismatches " << mismatches << '\n';
 }
 
-TEST(M1AdjointE0, OddBatchWidthsUseTheRuntimeLanePathBitIdentically) {
+// Was OddBatchWidthsUseTheRuntimeLanePathBitIdentically. D103 §6's lane-width holes are closed,
+// so by default a group whose width has no kernel of its own is run as a sequence of specialised
+// chunks (exec/lanes.hpp) rather than as one generic runtime-L chunk, and the old name no longer
+// describes what the default exercises. The bitwise assertion is untouched; the sweep now runs
+// BOTH chunkings, which keeps the runtime-L path covered and makes the two agree here too
+// (PRINCIPLES.md §5.2a case 3).
+TEST(M1AdjointE0, OddBatchWidthsAgreeLaneForLaneUnderBothLaneChunkings) {
   const Fixture& f = fixture();
-  adjoint::Options o;
-  o.lane_tile = 64;
-  adjoint::Adjoint ad(f.program, o);
   std::size_t mismatches = 0;
-  for (int B : {2, 3, 5, 7, 13, 31, 63}) {
-    const Result batched = run_batch(ad, f, 1, B);
-    for (int b = 0; b < B; ++b) {
-      const Result single = run_batch(ad, f, 1 + static_cast<std::size_t>(b), 1);
-      mismatches += count_lane_mismatches(batched, B, b, single, "B=" + std::to_string(B) + " lane " + std::to_string(b));
+  for (const bool split : {false, true}) {
+    adjoint::Options o;
+    o.lane_tile = 64;
+    o.split_lane_chunks = split;
+    adjoint::Adjoint ad(f.program, o);
+    const std::string tag = split ? "split " : "generic ";
+    for (int B : {2, 3, 5, 7, 13, 31, 63}) {
+      const Result batched = run_batch(ad, f, 1, B);
+      for (int b = 0; b < B; ++b) {
+        const Result single = run_batch(ad, f, 1 + static_cast<std::size_t>(b), 1);
+        mismatches += count_lane_mismatches(batched, B, b, single,
+                                            tag + "B=" + std::to_string(B) + " lane " + std::to_string(b));
+      }
     }
   }
   EXPECT_EQ(mismatches, 0u);

@@ -48,6 +48,7 @@ const std::vector<std::string> documented = {
     "expander.segment_off_by_one",
     "signature.merge_classes",
     "interpreter.tile_boundary",
+    "lanes.drop_split_remainder",
     "adjoint.wrong_transpose",
     "adjoint.drop_broadcast",
     "adjoint.affine_not_transposed",
@@ -96,6 +97,14 @@ const std::vector<std::string> documented = {
     "simplify.cancel_mismatched_operand",
     "simplify.telescope_wrong_endpoint",
     "adjoint.div_aliased_targets",
+    "a2p.drop_zero_start",
+    "a2p.div_not_aliased",
+    "adjoint.seed_input_pull",
+    "sparsity.gate_never_fires",
+    "sparsity.closure_forward_order",
+    "adjoint.materialise_skip_catalogue",
+    "adjoint.materialise_skip_operands",
+    "a2p.scan_forward_order",
 };
 
 std::vector<std::string> registry_names() {

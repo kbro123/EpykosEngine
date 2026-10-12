@@ -33,7 +33,7 @@ if(NOT SWAPENGINE_API_LIB)
   message(FATAL_ERROR "tools/h2h: no libswaps_api under ${SWAPENGINE_ROOT}/build/api — build it first")
 endif()
 
-add_executable(h2h h2h_main.cpp)
+add_executable(h2h h2h_main.cpp h2h_problem.cpp h2h_bridge.cpp)
 # Its include directories are SYSTEM so that this repository's own warning set (epykos_warnings,
 # -Werror) is not applied to another project's headers: a warning there is not ours to fix, and
 # silencing it by loosening OUR flags would change the code under measurement.

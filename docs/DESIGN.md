@@ -23,7 +23,9 @@ A financial calculation is a function of inputs that change at three different r
 
 Recording the pricing maths against a fixed structure yields a straight-line program over state. EpykosEngine turns that
 program into a **domain-typed array program** (a few array ops over index spaces such as *times*, *coupons*, *legs*), fuses it
-into a small number of pre-compiled kernels, and derives the adjoint mechanically. No JIT.
+into a small number of pre-compiled kernels, and derives the adjoint mechanically. No JIT (D1) — a decision whose
+revisit clause fired on 2026-10-09: D106 measures the catalogue + interpreter at 0.45-0.78x the engine's own naive
+templated `double` on a path-dependent payoff. D1 stands until the owner decides otherwise; it is no longer unexamined.
 
 What that buys, generically (no per-product code):
 - value, gradient (reverse), Hessian-vector (forward-over-reverse);
@@ -131,6 +133,33 @@ dependencies from a scratch recording and solves the strongly connected componen
 Batch lanes recalibrate independently (bitwise the single-lane runs), identical lanes share one solve, and the
 record-point factorisation may drive every lane's steps (`chord`) with a per-lane refresh on a stall. `ir/sharing.hpp`
 asserts the cross-stage sharing: every DF domain feeds both the residuals and the book, and no DF is computed twice.
+
+**The structural gate on a declared block (`solver/sparsity.hpp`).** Which unknowns reach which residuals is a
+reachability property of the **recorded forward program** — a question about F, not about ∂F — so it is answerable with
+no I1, no I3 and no new op, and it escapes §1's limit that a derivative cannot be a tape node (D87).
+`structural_pattern(tape, block)` computes the bipartite pattern by one reverse pass over the operand edges from the
+residual output nodes; `check_structure` is the gate, run **once at block registration** in `detail::implicit_end`
+before any market data exists, and it **throws**: every unknown must reach at least one residual (an exact zero
+Jacobian column) and every residual must be reached by at least one unknown (an exact zero row). The pattern is a
+conservative superset of the nonzero pattern of ∂F/∂z and is **measured TIGHT on every shipped block**, because
+`curve/scheme.hpp`'s `flat_masses` and `linear_masses` omit zero-mass knots from the term list rather than emitting
+them with weight 0. That is what lets a structural analysis see D110 §3's `(forward, flat)` defect — the last knot
+governs only `t >= t_last`, invisible to every instrument maturing at or before it, so the system is square by count
+and singular in substance. `SolveOptions::require_structural_coupling` is the per-block opt-out for a deliberately
+under-determined solve; it is honoured for a dead **row** and cannot be honoured for a dead **column**, because
+`ResidualProgram` binds each unknown to a sub-input ordinal of the slice and an unreached unknown has none — an
+under-determined calibration is not merely undetected in this engine, it is unrepresentable. There is **no numerical
+rank information** here and none is implied: `Factors` uses `PartialPivLU`, which is not rank-revealing.
+
+**Colouring the Jacobian seeds: measured and NOT built.** `ResidualProgram::jacobian` seeds one lane per residual, so
+structurally orthogonal rows could share a lane. `tools/sparsity/` measures the greedy colour count before anything is
+built (`bench/compare/SPARSITY.md`): `compare_ois` at 16 and at 25 tenors is a perfect dense lower triangle and gives
+**1.000x — exactly no reduction**, and that is the configuration D92's 229 us Jacobian figure was measured on. Stage A
+gives **1.250x** in the shipped `Mode::sequential` and 2.000x in `Mode::joint`, and the prize comes from the SR3
+futures strip (rows reading two bracketing knots each), not from curve separation — the per-curve block diagonality was
+already extracted at recording time, since a later block reads an earlier block's unknowns as parameters and never as
+unknowns. Carried across D92's shares that is ~17% of cold calibration once per session, 0% of the warm path and ~0.4%
+of one 256-row ladder (estimates). Verdict: no.
 
 **As built, Stage A scale (M3/G5, D44):** `CurveSet` is Composite-aware (`CurveSpec::regions`; a spec without
 regions keeps the exact M1 linear path unchanged, bitwise) — four curves (SOFR, ESTR, EURIBOR 3M/6M) solved in
@@ -320,6 +349,50 @@ latent (0/0 fires on both shipped fixtures, above), not a live defect in anythin
 3. **Batch mode.** Batch axis innermost on every domain; each element is a SIMD vector of scenarios, so the interpreter's
    dispatch amortises over the batch as well as the tile.
 
+**Lane chunking** (`include/epykos/exec/lanes.hpp`, one definition both runtimes call). A run's B lanes are executed in
+chunks of at most `lane_tile` lanes — 8 by default in both `exec::Options` and `adjoint::Options` — and each chunk goes
+to kernels instantiated for its lane count. Only `lane_variants` = {1, 4, 8, 16, 32, 64} have one; any other width used
+to fall to variant 0, whose inner `for (l = 0; l < L; ++l)` the compiler cannot vectorise against a width it does not
+know. D103 §6 found the hole: a width of 2, 3, 5, 6 or 7 arises as the last group of any B, and as *every* group when
+`max_batch` is one of those. `next_lane_chunk` tiles [0, B) with the largest variant that fits what is left, but **only
+at the three widths whose decomposition is measured faster than the generic kernel in both runtimes** —
+`decomposed_widths` = {2, 5, 6}, so 2 → 1+1, 5 → 4+1, 6 → 4+1+1, and every other non-variant width is emitted whole
+(D113). A chunk need not start on a multiple of `lane_tile`: every buffer is addressed by the chunk's own `b0` and
+`L`, so the only constraints are `L <= lane_tile` and `b0 + L <= B`, and at `lane_tile` 7 a 1,000-lane run is
+therefore 250 chunks of 4 rather than 125 of 4 + a generic 3. Splitting rather than padding up to the next variant is
+forced: a kernel reads `state[ordinal·B + b0 + l]` and writes `out[ordinal·B + b0 + l]`, so a widened chunk would read
+and write outside the caller's buffers.
+
+**Why only three widths (D113).** Every extra piece is another whole pass over the program — the interpreter's chunk
+loop, and in the adjoint `run_chunk`'s `forward()` *and* `reverse()` — while the generic kernel's penalty is large
+only at small widths: in the adjoint the generic kernel at L = 63 is within 3% per lane of the specialised L = 64 one.
+D104 decomposed every width and shipped a regression that reaches **+25% in the adjoint** at `lane_tile` 64 (B = 63
+seven chunks against one; B = 15 five against one), because it measured the split through the whole ladder, where
+`max_batch` 64 and `lane_tile` 8 make every regressing width unreachable. The two runtimes also disagree at a tail of
+7 — the interpreter prefers 4+3 by ~2%, the adjoint prefers one chunk by ~4% on a per-lane cost 4.1x larger — so the
+decision is made on the sum. All five non-variant widths below 8 were measured in both runtimes; 3 and 7 lose. The
+split therefore fires at `max_batch` ∈ {2, 5, 6} and at a run whose remainder is one of those, and nowhere else.
+
+The split is **bitwise**, which is what licenses it. Lanes are independent — one scenario per lane in the forward
+direction, `dst[l] += src[l]` per lane in `pull()` — and the one L-dependent quantity, `acc_rows_in_flight_for`
+(`src/exec/plan.hpp`), blocks a reduction epilogue's ROWS and never reorders the members summed within a row; it is
+also read with the plan-time `lane_tile`, so segment blocking does not move when a group is split.
+`tests/exec/lane_chunking_e0_test.cpp` is the gate (PRINCIPLES.md §5.2a case 1): 360 (B, `lane_tile`) configurations
+across both runtimes, bit-for-bit against the old single-remainder chunking, which `split_lane_chunks = false` still
+runs and which is what keeps the runtime-L kernels exercised at *every* non-variant width rather than only at the ones
+the default leaves whole. Its structural layer pins `decomposed_widths` in both directions — a width outside the list
+is never decomposed, and every width inside it is decomposed somewhere in the matrix — because D104's gate asserted
+only that the decomposition used specialised kernels, which stayed true while the decomposition got slower (D113 §4).
+
+Measured paired on the ladder, `d448afd70180`, release, 1,000 trades / 256 rows, load 2.1–3.3 (`tools/ladder`, three
+replicates): `max_batch` 2 goes **369 → 299 µs/row (−18.9%)**, and R = 5 **237 → 189 (−20.3%)**, R = 6 **218 → 204
+(−6.5%)**. R = 3 (−0.7%) and R = 7 (+2.4%, inside the before-spread) do **not** improve. D113 then measured those two
+widths directly, in both runtimes, at `lane_tile` 8 and 64: they do not merely fail to improve, they **cost** 2.5–10%,
+and so do all six non-variant widths above 6, by up to 25% in the adjoint. The ladder dilutes the component, which is
+why it reported "inside spread"; the three wins above survive unchanged and are the whole of the benefit. The exposure
+is therefore `max_batch` ∈ {2, 5, 6}, and a trailing odd group is **not** flat at a wide lane tile — at `lane_tile` 64
+a batch of 63 was 7 chunks against 1 and cost the adjoint 24–25%.
+
 Adjoints (§3 rules applied group by group in reverse): scatter-add is replaced by a **pull** through the precomputed
 transpose of each index array (CSR "who reads me"), so adjoint groups are conflict-free gathers and vectorise. At the
 `Times` boundary `linmapᵀ` gives `−(G·diag(DF))·W` — the analytic calibration Jacobian, derived. As implemented
@@ -339,6 +412,25 @@ k runs as one tile and the batch lanes are the innermost axis; a scan is never f
 The adjoint runs a scan's forward one row per tile in row order and its reverse one row at a time backwards: the
 carry's edge slot (carry, r + 1) is one of row r's readers, so the reverse scan is the ordinary pull. Bits are
 independent of B, tile and lane tile as for every other domain (the scan fixtures' E0 gates).
+
+**The adjoint is also a PROGRAM (`PRINCIPLES.md` §1b invariant I1; M5 stages C2, C3a, C3b, C4).** Everything above
+describes `adjoint::Adjoint` as a compiled artifact — a `switch` over `Op` in `src/adjoint/adjoint_e0.cpp` driven by
+`AdjointPlan`'s CSR tables — and that is still exactly what `Adjoint::run` is. It is no longer the only form the reverse
+has. `adjoint::adjoint_to_program(P)` and `adjoint::Adjoint::to_program()` (`adjoint/adjoint_to_program.hpp`,
+`adjoint/adjoint.hpp`) emit the reverse of a Program **as an `ir::Program`** Q, so differentiation is now a
+Program → Program map and every pass, cost model and search above or below the pin can see the derivative's operations.
+Q's inputs are P's inputs then one per output ordinal of P (the `out_bar` seed); its outputs are P's outputs then one
+per input ordinal of P (the state adjoint); `ir::Evaluator` or `exec::Interpreter` run on Q reproduces
+`Adjoint::run(state, B, out_bar, out, state_bar)` **bitwise**, batch layout included. **No op was added and no `Op`
+dispatch site changed**: the pull is one `Op::Affine` step over one segment whose members are the concatenated CSR
+lists, which is a scatter-accumulate read backwards, and `Op::Gather`, `Op::SegmentSum` and `Op::Linmap` stay reserved
+and unused. §1b's stated root cause — that the reverse of `SlotKind::Gather` is a scatter the IR cannot express — was
+therefore wrong (D96). Scope: elementwise ops, gathers, segments and scans; a scan's forward half re-emits as an
+`ir::Scan` of Q and its reverse as one recurrent non-scan domain walking the rows backwards, so the carry's edge slot
+stays at its true CSR position in the pull. Still refused with `std::logic_error`: a recurrent domain that is not a
+scan, and a scan reading its own rows through anything but its carry — either needs two carried quantities per row and
+a domain row produces exactly one value. `Adjoint::program()` still returns the FORWARD program and its meaning is
+unchanged; `to_program()` is the derivative. I1's gate is §11's.
 
 **As built (M4/R0, D47):** the tiled interpreter's own planning — which domain materialises, folds into a
 reduction or inlines into a consumer's tiles; which consecutive steps run as one fused-pair kernel and which
@@ -590,6 +682,22 @@ Correctness gates:
   round-trip identity, the interpreter bitwise the double maths at B = 1 and B = 64 over tiles and lane tiles, the
   adjoint vs forward mode at 1e-12 and vs FD at 1e-6, the batched adjoint lane for lane; the M1 book asserted free
   of scans and unchanged;
+- **invariant I1's gate** (`PRINCIPLES.md` §1b; `tests/adjoint/i1_gate_e0_test.cpp`, M5/C4): one named test asserting
+  that `adjoint(P)` is an `ir::Program` that passes `ir::validate`, round-trips through `ir::serialize` /
+  `deserialize`, and that `exec::Interpreter` run on it reproduces `adjoint::Adjoint::run` **bitwise** — `memcmp`, not
+  a tolerance, so a signed zero is a different answer. Over every fixture `tests/adjoint/` gates the adjoint on: the
+  near-miss shapes raw and after the passes, the M1 book, `compare_ois` in both tenor sets (the short one telescopes
+  its recurrence away, the default keeps a scan), `affine_scan` in both recordings, `instrument_sample`, `rfr_book`
+  and **Stage A, the default ~2,000-trade desk problem**. The file also MEASURES, per fixture, whether a defect in the
+  emitted reverse can reach an observable at all — it computes the forward outputs' dependency cone, injures one
+  reverse-half site at a time (an accumulation step's `Add`↔`Sub`, an `Affine` pull coefficient's sign) and asks
+  whether a state adjoint moved — and labels a fixture that cannot a STRUCTURAL CHECK rather than counting it as
+  coverage. The class of every fixture is pinned, so one that goes quietly dead fails the gate. `rfr_book`'s reverse
+  scan is such a check (0 of 2 sites observable, the whole set): its scan compounds realised fixings, so no scan row
+  depends on an input. **What this gate cannot see, by construction:** both sides consume the same `AdjointPlan`, so a
+  defect in `build_plan` moves both answers identically and the comparison passes — measured, `adjoint.affine_not_
+  transposed` survives it (its catchers are the vs-`Dual` gates). I1's gate is a CLOSURE check: what says the
+  derivative is right is the next two bullets, which compare against an independently computed derivative;
 - **mutation testing** on rewrite rules (a mutated rule must fail a gate): every pass carries its mutants as one-line
   defects behind `epykos::mutant("<pass>.<defect>")` (`include/epykos/mutation/`), compiled in only by the `mutation`
   preset and selected one per process by `EPYKOS_MUTANT`; `scripts/mutation_test.sh` runs the whole gate set once
@@ -612,7 +720,26 @@ Correctness gates:
   difference taken at 106 bits. Measured on `d448afd70180` (D72 §4): the naive path's valuation error is 1.792e-15 of
   the D26 leg scale on the M1 book and 7.854e-14 to 1.616e-13 on Stage A, and its SENSITIVITY error is 62x and 656x
   larger respectively;
-- **external oracles** (QuantLib and others) added per product, test-only.
+- **external oracles** — **live since 2026-10-12 (D114), as literals rather than as a dependency.**
+  `tests/curve/scheme_oracle_e0_test.cpp` compares the interpolation schemes to QuantLib 1.35 number for number;
+  `tests/curve/ql_oracle_data.hpp` holds the expectations as exact hex floats, generated once and checked in, so D12
+  acquires nothing. Measured: `Flat`/`ForwardFlat` **exactly 0**, `Linear` 6.9e-18 (value) and 5.6e-17 (integral),
+  `NaturalCubic`/`CubicNaturalSpline` 1.4e-17, `Hermite`/`CubicInterpolation(Parabolic)` 1.4e-17. `monotone_cubic`
+  matches **no** QuantLib scheme — parabolic tangents through a limiter QuantLib does not implement — which settles
+  D110's open question. Every other gate in this section compares one of our evaluations with another; this is the
+  only one where disagreement could mean *we* are wrong about the mathematics rather than about our own passes, which
+  is why it exists (D2, deferred; the review behind D106, which named self-verification as the weakness). Agreement
+  with SwapEngine is **not** this: a shared convention error produces perfect agreement and two wrong engines.
+  **D115 adds the instrument layer**, which matters more: `tests/compare/ois_par_oracle_e0_test.cpp` compares all
+  sixteen `compare_ois` SOFR OIS par rates to QuantLib's `OvernightIndexedSwap::fairRate()` — worst **4.14e-11 bp**,
+  and **5.58e-11 bp** on the engine's own calibrated curve, so QuantLib finds every instrument at par on the curve we
+  solved. It covers the T+2 spot, the forward annual roll on an unadjusted grid, EOM, ACT/360, 249 daily SOFR
+  observations, the two-day payment lag and the discounting. The reason it outranks the scheme oracle is that
+  `blueprints/conventions/instruments.json` records USD-SOFR-OIS as imported from SwapEngine's own conventions file,
+  so **the head-to-head cannot check the conventions** — they came from the other side of it. Both oracles are
+  `_e0_test.cpp` and ungated, so they run in CI where `tools/h2h/` never does.
+  Further product-level oracles follow the same rule — cases and expected numbers, never a routine that computes an
+  expected output (D108 §2).
 
 Performance gates: per machine+toolchain fingerprint; fail on > 1.25× self-regression or an absolute target miss. As
 built (M2/Q5, D29, D34): `bench/run.sh` writes `bench/results/<fingerprint>/<run>.json` (refusing at a 1-minute load

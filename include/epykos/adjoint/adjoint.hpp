@@ -27,6 +27,12 @@
 // sized in the constructor for min(lane_tile, max_batch) lanes.
 //
 // Thread safety: run() is const but uses the object's own buffers; one Adjoint per thread.
+//
+// Two programs, and they are not the same program (PRINCIPLES.md §1b, invariant I1; M5/C4).
+// `program()` returns the FORWARD program this object was built from — an input. `to_program()`
+// returns the REVERSE of it as an `ir::Program` — the derivative, bitwise what `run` computes.
+// Read both declarations below before using either; §1b names `program()`'s meaning as I1's
+// symptom and it is deliberately unchanged.
 #pragma once
 
 #include <cstddef>
@@ -43,6 +49,48 @@ struct Options {
   int tile = 256;      // rows per tile of a group's forward / reverse pass
   int max_batch = 64;  // lanes the buffers are sized for; run(B > max_batch) throws
   int lane_tile = 8;   // lanes per chunk (B is split into chunks of at most this many)
+  // Run a chunk group whose lane count has no kernel of its own as a sequence of specialised
+  // widths (2 -> 1+1, 5 -> 4+1, 7 -> 4+1+1+1) instead of as one generic runtime-L chunk — see
+  // exec/lanes.hpp, which holds the rule, and `exec::Options::split_lane_chunks`, which is the
+  // same switch on the forward runtime. true by default; false is the pre-D103 chunking.
+  bool split_lane_chunks = true;
+  // Seed a value's adjoint with its FIRST contribution instead of zero-filling and then adding
+  // every contribution (D102 §4 item 1; see pull() in src/adjoint/adjoint_e0.cpp for the rule and
+  // its one carve-out). 79.3% of Stage A's pulls have exactly one reader at unit coefficient
+  // (93.6% of `compare_ois`(256)'s), and for those the whole pull becomes a single copy pass.
+  //
+  // **FALSE BY DEFAULT, AND THE DEFAULT IS THE MEASUREMENT, NOT CAUTION.** D102 priced the zero
+  // start at 26% of Stage A's reverse-only arithmetic, and that is a ceiling on the OPERATIONS; in
+  // time, at the shipped `lane_tile = 8`, seeding is a LOSS. Paired interleaved arms in one
+  // process (tools/pullprobe, fingerprint d448afd70180, -O3 -march=x86-64-v3 -fno-math-errno,
+  // load 2.4-3.0): `stage_a` B = 1 **+10.0% to +10.6%** of the whole call, `compare_ois`(256)
+  // B = 1 **+12.5% to +13.2%**, both fixtures +1.3% to +4.2% at B = 8 and +1.4% to +2.4% at
+  // B = 64. Robust to swapping which arm's buffers are allocated first.
+  //
+  // WHY, measured rather than guessed: the cost is per ROW and the saving is per LANE, so the net
+  // scales as 1/L. A `lane_tile` sweep at B = 64 (same tool, `--lane-tile`) gives, as a share of
+  // the reverse-pass bound: `compare_ois` +20.8% at 1, +5.4% at 8, ~0 at 16, **-9.6% at 32**, ~0
+  // at 64; `stage_a` +1.4% at 8, -1.4% at 16, **-7.8% at 32**, +0.2% at 64. The zero fill is an
+  // L1-resident store pass that costs very little, while deciding WHICH contribution comes first
+  // costs a four-way branch and eight CSR offset loads for every row. At L = 32 the saving wins;
+  // at the shipped L = 8 it does not. Turning this on is therefore a `lane_tile` decision and must
+  // not be taken as a free one.
+  //
+  // Both arms are kept: the option is the measurement instrument, false is the reference arm of
+  // the differential gate (tests/adjoint/seed_pull_e0_test.cpp), and a caller running wide lanes
+  // has a switch with a number attached to it.
+  //
+  // IT IS BITWISE, and that is a property of WHERE the elision is applied, not of `0.0 + x == x`.
+  // `0.0 + x` is `x` for every finite non-zero x, and the two forms differ in exactly one case: an
+  // accumulated ZERO one of whose contributions is `-0.0` (reachable — `-1.0 * (+0.0)` is `-0.0`,
+  // and under a zero seed every adjoint is a zero). Such a sign is washed by every consumer of a
+  // pulled adjoint but one: `Op::Input`'s rule writes `state_bar[ordinal] = ybar` by COPY, so an
+  // Input domain's pull is observable, and that pull alone keeps its zero start. Every other
+  // consumer accumulates into a freshly-zeroed step / gather / segment adjoint, where
+  // `(+0.0) + (-0.0)` is `+0.0` again, and the adjoint is never a DIVISOR (`acc_div`,
+  // `acc_plus_div` and `acc_sqrt` all divide by a FORWARD value), which is the only other way a
+  // zero's sign could have become a magnitude.
+  bool seed_pull = false;
   // M4/C1 (PROBLEM.md §7, DESIGN.md §7 "As built (M4/R0...)": "the reverse of a fused group is
   // rewrite / catalogue work (M4)"): the forward pass below materialises every domain's rows
   // unconditionally (unlike exec::Interpreter, Adjoint applies none of the fuse/inline
@@ -51,6 +99,49 @@ struct Options {
   // see adjoint_e0.cpp's forward(). true by default; false disables the lookup entirely (the
   // differential gate's "registry off" side).
   bool use_catalogue = true;
+  // MATERIALISE a group's intermediate steps in the forward instead of recomputing them per tile
+  // in the reverse — the other arm of D31 item 1, built as an option so that both can be timed in
+  // one process (tools/matprobe/, D105's pattern). FALSE BY DEFAULT: shipped behaviour is D31's
+  // recompute, byte for byte.
+  //
+  // WHAT THE TWO ARMS ARE. The split is NOT per value and never has been: `ir::infer` makes a
+  // tape node a domain value — addressable in the value buffer — exactly when it is structural,
+  // is a segment member or an output, or has a use count other than one
+  // (`src/ir/signature.cpp`'s `initial_boundaries`). Everything else is folded into a group's
+  // chain. So a group's LAST step is always materialised, because other domains address it, and
+  // steps 0 .. last-1 are the only open question. This option is that question: false recomputes
+  // them from the stored operands per tile in the reverse (D31), true stores all of them in the
+  // forward and the reverse copies them back.
+  //
+  // WHY READER COUNT CANNOT DECIDE IT, and this is a theorem rather than a measurement: an
+  // intra-chain step has a use count of exactly one, by the boundary rule above. Reader count is
+  // what CONSTRUCTS the partition, so within the recomputed class it is the constant 1 — measured
+  // at 100.00% of 3,029 instances on `compare_ois`(256), 32,602 on `stage_a` and 526,340 on
+  // `exotic_path`(1024x252) (tools/matrec/). It carries no information about the choice.
+  //
+  // WHAT DOES VARY, and it varies between the two ends of the sharing spectrum: the TRANSCENDENTAL
+  // CONTENT of the recomputed cone. D31's stated reason for recomputing — "a group whose value is
+  // an exp / log / sqrt never recomputes the libm call" — holds exactly on the rates book (0 of
+  // 11,087 recomputed transcendentals on `stage_a`, 0 of 81 on `compare_ois`) and fails on a path
+  // grid, where 50.1% of them are intra-chain (259,072 of 517,121 on `exotic_path`(1024x252),
+  // D106's fixture). The recompute is 8.3% of the forward's arithmetic on `stage_a`, 21.2% on
+  // `compare_ois`(256) and 42.2-44.3% on the path grid.
+  //
+  // IT IS BITWISE, by construction and not by an argument about arithmetic. Both arms call the
+  // same `forward_step` with the same operands: an intra-chain step reads only its own group's
+  // earlier steps, columns, literals and gathers of EARLIER domains (`ir::validate` forbids a
+  // forward read), so its operands are identical whether it runs in the forward with the value
+  // buffer partly filled or in the reverse with it complete. That is the same fact that makes
+  // today's recompute bitwise. `tests/adjoint/materialise_steps_e0_test.cpp` asserts it with
+  // `memcmp` over every fixture, seed, tile, lane_tile and batch.
+  //
+  // THE COST, both directions: the buffer is sum over domains of (steps-1) · rows · Lt doubles —
+  // 0.14x the value buffer on `stage_a`, 0.21x on `compare_ois`(256) and on the path grid, NOT
+  // D31's "4-6x", which was `max_steps × rows × L` and so paid every domain the longest group's
+  // chain length. Against that it saves the recompute's arithmetic and pays a copy back into the
+  // tile buffer, because a later step of the group still reads its predecessors through
+  // `c.fs`. See `tools/matprobe/` for what that trade measures at.
+  bool materialise_steps = false;
 };
 
 class Adjoint {
@@ -75,7 +166,43 @@ class Adjoint {
 
   const AdjointPlan& plan() const noexcept;
   const Options& options() const noexcept;
+
+  // THE FORWARD PROGRAM this Adjoint was constructed from. It is an INPUT, not a result: it is
+  // the P of `state -> outputs`, and nothing about the derivative is in it. PRINCIPLES.md §1b
+  // names exactly this as invariant I1's symptom -- "`Adjoint` is constructed from the FORWARD
+  // program and `program()` returns that same forward program". The meaning of this method has
+  // not changed and must not: `to_program()` below is the derivative.
   const ir::Program& program() const noexcept;
+
+  // THE REVERSE OF `program()`, AS A PROGRAM -- I1's `adjoint(P)`, and the public face of the
+  // capability (M5/C4). Not the same object as `program()` and not a view of it: a new
+  // `ir::Program` Q with
+  //
+  //   inputs   P's inputs in P's input order, then one per OUTPUT ordinal of P: the out_bar seed
+  //   outputs  P's outputs in P's output order, then one per INPUT ordinal of P: the state adjoint
+  //
+  // so Q takes (state, out_bar) flat and returns (out, state_bar) flat, and running Q through
+  // `ir::Evaluator` or `exec::Interpreter` reproduces `run(state, 1, out_bar, out, state_bar)`
+  // BITWISE -- §1b's gate, asserted by tests/adjoint/i1_gate_e0_test.cpp over every fixture the
+  // adjoint is gated on, Stage A included. Batch: Q's own layout is Interpreter's, batch
+  // innermost, so a B-lane Interpreter run of Q is the B-lane `run` above lane for lane.
+  //
+  // "Bitwise what `run` computes" means `run`'s OUTPUTS — `out` and `state_bar`, which are Q's
+  // outputs — and not its internal buffers. With `Options::seed_pull` on (not the default) the runtime
+  // elides the leading `+0.0` of a pull while the emitter still writes an `Affine` whose `konst` is
+  // `+0.0`, so the two now hold different bits in v̄ for a pulled zero and the same bits in every
+  // output: the sign is washed by every consumer but `Op::Input`'s, whose pull keeps the zero
+  // start for exactly that reason. See `Options::seed_pull` above and
+  // tests/adjoint/seed_pull_e0_test.cpp. The gate below is unaffected and is not weakened.
+  //
+  // Derived from the plan THIS Adjoint already built, so it cannot disagree with what `run`
+  // does; `adjoint_to_program(P)` in adjoint/adjoint_to_program.hpp is the same function for a
+  // caller that has no Adjoint. O(program) work and a fresh allocation on every call -- hold the
+  // result, do not call it in a loop. Throws what `adjoint_to_program` throws (std::logic_error
+  // on a recurrence whose reverse would carry two values per row).
+  ir::Program to_program() const;
+
+
   int n_inputs() const noexcept;
   int n_outputs() const noexcept;
   int max_batch() const noexcept;

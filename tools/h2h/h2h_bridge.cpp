@@ -60,7 +60,17 @@ px::FloatCoupon float_coupon(const ei::Leg& leg, const ei::Coupon& c, double uni
   switch (c.kind) {
     case ei::CouponKind::RfrCompounded: {
       if (!(c.obs_tau > 0.0)) bad(who + ": a compounded coupon with obs_tau = " + std::to_string(c.obs_tau));
-      f.obs.tau_index = c.obs_tau;
+      // THE SHIFT-ACCRUAL TERM, translated into their model (D130). Their payment is
+      // `(Π − 1 + spread·tau_index)·(tau_pay/tau_index)`, so `tau_index` is *the period the rate is
+      // annualised over* — and that is exactly what the term names. ISDA's own paper (27 Apr 2021,
+      // §1.2) says the rate "will be annualized and apply based on the number of days in the
+      // Calculation Period", which is `tau_pay`; the ARRC's non-recommended option (2) annualises
+      // on the shifted window instead. Handing `obs_tau` unconditionally — which this bridge did
+      // until now, and which their own builder also chooses (`build/observations.hpp`'s Shift
+      // branch) — makes their engine compute option (2) and ours option (1), so the agreement gate
+      // failed on both shifted families with the two engines pricing DIFFERENT CONVENTIONS.
+      // Unshifted coupons are unaffected: obs_tau == accrual there, bit for bit.
+      f.obs.tau_index = c.rate_over_interest_period ? c.obs_tau : c.accrual;
       const bool seasoned = c.realised_factor != 1.0;
       if (m != nullptr && seasoned) ++m->seasoned_coupons;
       if (c.obs_end <= c.obs_begin) {

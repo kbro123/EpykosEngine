@@ -108,7 +108,8 @@ inline double rate_accrual(const Coupon& c) noexcept {
   switch (c.kind) {
     case CouponKind::RfrCompounded:
     case CouponKind::RfrAveraged:
-      return c.obs_tau;
+      // D130: the TERM, resolved from the convention at build time, not a choice made here.
+      return c.rate_over_interest_period ? c.accrual : c.obs_tau;
     case CouponKind::TermRate:
     case CouponKind::Fixed:
       break;

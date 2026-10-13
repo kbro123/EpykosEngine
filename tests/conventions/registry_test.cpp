@@ -227,6 +227,58 @@ TEST(Registry, EurConventionsAsInG4Bundle) {
   EXPECT_EQ(to_iso(r.cb_schedule("EUR").meetings[15]), "2027-12-16");
 }
 
+// D130: the shift accrual is a TERM a convention states, so the registry must read it -- and must
+// REFUSE it where it cannot bite. `accrual` selects what the compounded amount is applied over,
+// which differs from the interest period's own length only under a shift; accepting it on a plain
+// or lookback leg would be a term that silently does nothing, which is the defect class D129 was
+// about. Both halves are pinned here because an unread field and an ignored field look identical
+// from the outside.
+TEST(Registry, ReadsTheShiftAccrualTermAndRefusesItWhereItCannotBite) {
+  // every shipped convention takes the default -- the reading ISDA and the ARRC agree on
+  const Registry& r = reg();
+  for (const char* name : {"USD-SOFR-OIS", "USD-SOFR-OIS-SHIFT2", "USD-SOFR-OIS-SHIFT2-LOCKOUT2",
+                           "USD-SOFR-OIS-LOOKBACK2", "USD-SOFR-AVG-SWAP", "EUR-ESTR-OIS"}) {
+    for (const LegConvention& lc : r.instrument(name).legs) {
+      EXPECT_EQ(lc.observation.accrual, ShiftAccrual::ObservationPeriod)
+          << name << " carries a non-default shift accrual; the oracle literals were generated from the default";
+    }
+  }
+  EXPECT_STREQ(to_string(ShiftAccrual::ObservationPeriod), "observation_period");
+  EXPECT_STREQ(to_string(ShiftAccrual::InterestPeriod), "interest_period");
+  EXPECT_EQ(shift_accrual_from_string("interest_period"), ShiftAccrual::InterestPeriod);
+  EXPECT_THROW(shift_accrual_from_string("interest-period"), DateError);
+
+  // it is READ when a shifted leg states it
+  const char* shifted = R"({"instruments": {"X": {"type": "ois", "currency": "USD", "calendar": "USD-SOFR-SWAP",
+      "spot_lag": 2, "bdc": "Following", "legs": [
+        {"role": "fixed", "frequency": "1Y", "day_count": "ACT/360"},
+        {"role": "float", "index": "USD-SOFR", "compounding": "compounded", "frequency": "1Y",
+         "day_count": "ACT/360",
+         "observation": {"method": "observation_shift", "lookback_days": 2, "accrual": "interest_period"}}],
+      "discount_index": "USD-SOFR"}}})";
+  EXPECT_EQ(error_of(shifted), "") << "a shifted leg may state its accrual term";
+
+  // and REFUSED on a method that cannot distinguish the two
+  const char* plain = R"({"instruments": {"X": {"type": "ois", "currency": "USD", "calendar": "USD-SOFR-SWAP",
+      "spot_lag": 2, "bdc": "Following", "legs": [
+        {"role": "fixed", "frequency": "1Y", "day_count": "ACT/360"},
+        {"role": "float", "index": "USD-SOFR", "compounding": "compounded", "frequency": "1Y",
+         "day_count": "ACT/360",
+         "observation": {"method": "plain", "accrual": "interest_period"}}],
+      "discount_index": "USD-SOFR"}}})";
+  const std::string e = error_of(plain);
+  EXPECT_NE(e.find("only means something under observation_shift"), std::string::npos) << e;
+
+  const char* bad = R"({"instruments": {"X": {"type": "ois", "currency": "USD", "calendar": "USD-SOFR-SWAP",
+      "spot_lag": 2, "bdc": "Following", "legs": [
+        {"role": "fixed", "frequency": "1Y", "day_count": "ACT/360"},
+        {"role": "float", "index": "USD-SOFR", "compounding": "compounded", "frequency": "1Y",
+         "day_count": "ACT/360",
+         "observation": {"method": "observation_shift", "lookback_days": 2, "accrual": "whatever"}}],
+      "discount_index": "USD-SOFR"}}})";
+  EXPECT_NE(error_of(bad).find("unknown shift accrual"), std::string::npos) << error_of(bad);
+}
+
 TEST(Registry, RejectsUnknownKeysAndMissingFields) {
   // unknown top-level key
   EXPECT_NE(error_of(R"({"meta": {"title": "t"}, "foo": {}})").find("unknown key \"foo\""), std::string::npos);

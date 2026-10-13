@@ -62,7 +62,9 @@
 #include <string>
 #include <vector>
 
+#include "epykos/conventions/rfr.hpp"
 #include "epykos/fixtures/compare_ois.hpp"
+#include "epykos/maths/instrument/coupon.hpp"
 #include "epykos/maths/instrument/tables.hpp"
 
 #ifndef EPYKOS_FP_CONTRACT_OFF
@@ -426,4 +428,104 @@ TEST(OisParOracleE0, TheParRateDoesNotConstrainTheFixingCalendar) {
   EXPECT_LT(gap_bp, 1.0e-6) << "the par rates differ by " << gap_bp
                             << " bp across two calendars, so the rate DOES constrain the calendar after all -- then "
                                "the note above is wrong and should be corrected, not deleted";
+}
+
+// ---- D130: the shift accrual is a TERM, and this is the arithmetic it selects ------------------
+//
+// ISDA's own paper settles what D116 could not and what D123 decided from the ARRC alone.
+// *Documenting RFR derivatives using different approaches to compounding/averaging under the 2006
+// ISDA Definitions* (ISDA, 27 April 2021), section 1.2 "Observation Period Shift":
+//
+//   "while the weightings of the fixings used to calculate the compounded rate will be determined
+//    on the basis of the Business Days in the observation period, which may differ from the
+//    Business Days in the Calculation Period, THE RATE WILL BE ANNUALIZED AND APPLY BASED ON THE
+//    NUMBER OF DAYS IN THE CALCULATION PERIOD, using the day count basis applicable to the
+//    relevant RFR."
+//
+// Annualised by d_c and applied over d_c: the two cancel, so the Floating Amount is N·(Π − 1) —
+// the SAME CASH FLOW as the ARRC's option (1), reached by a different route. The two authorities
+// differ only on the quoted rate's basis (ARRC d_o, ISDA d_c), which no PV and no par rate can
+// see. So D123's fix is right under BOTH, and the engine's default needs no argument from
+// preference. (It also refutes D116's unsourced line that the interest-period variant "is ISDA's
+// formal structure": that inference read the Floating Amount's day count fraction and ignored
+// which day count the RATE is annualised by.)
+//
+// Option (2) remains real — the ARRC calls it "widely used in FRNs" and SwapEngine computes it —
+// so `ObservationSpec::accrual` now carries it as a term a convention can state. These two gates
+// pin the arithmetic the term selects and the fact that it cannot bite without a shift.
+TEST(OisParOracleE0, TheShiftAccrualTermSelectsExactlyTheDcOverDoFactor) {
+  fixtures::CompareOisOptions o;
+  o.trades = 1;
+  o.quote_noise_bp = 0.0;
+  o.blueprint = "USD-SOFR-OIS-SHIFT2";
+  const fixtures::CompareOis s = fixtures::make_compare_ois(o);
+  const auto df = [&s](int slot, double tt) { return s.generating_df(slot, tt); };
+
+  // Not every shifted coupon can tell the two apart: the shifted endpoints can land a window of
+  // the SAME calendar length as the interest period, and then d_c/d_o is 1 and the conventions
+  // coincide on that coupon. So the gate checks the ones that CAN distinguish and fails if the
+  // fixture stops producing any — never by asserting a coupon must differ.
+  std::size_t checked = 0, vacuous = 0;
+  double widest = 1.0;
+  for (const epykos::instrument::CalibrationInstrument& ci : s.set.instruments) {
+    for (const epykos::instrument::Leg& leg : ci.instrument.legs) {
+      if (leg.index.empty()) continue;
+      for (const epykos::instrument::Coupon& cp : leg.coupons) {
+        ASSERT_GT(cp.obs_tau, 0.0);
+        epykos::instrument::Coupon ipw = cp;
+        ipw.rate_over_interest_period = true;
+        // The term is the ONLY difference between the two coupons, so the payments differ by
+        // exactly d_c/d_o -- which is also D116's localisation, now pinned as an identity.
+        EXPECT_EQ(epykos::instrument::rate_accrual(cp), cp.obs_tau);
+        EXPECT_EQ(epykos::instrument::rate_accrual(ipw), cp.accrual);
+        const double pv_obs = epykos::instrument::float_coupon_pv<double>(leg, cp, df);
+        const double pv_ipw = epykos::instrument::float_coupon_pv<double>(leg, ipw, df);
+        ASSERT_NE(pv_obs, 0.0);
+        const double expected = cp.accrual / cp.obs_tau;
+        if (expected == 1.0) {
+          EXPECT_EQ(pv_obs, pv_ipw) << "d_c == d_o on this coupon, so the two terms must be bitwise equal";
+          ++vacuous;
+          continue;
+        }
+        EXPECT_NEAR(pv_ipw / pv_obs, expected, 1.0e-15 * std::abs(expected))
+            << "the interest-period term must scale the payment by d_c/d_o and nothing else";
+        if (std::abs(expected - 1.0) > std::abs(widest - 1.0)) widest = expected;
+        ++checked;
+      }
+    }
+  }
+  ASSERT_GT(checked, 0u) << "no coupon in the shifted fixture has d_c != d_o, so this gate cannot see the "
+                            "difference between the two conventions at all";
+  EXPECT_GT(std::abs(widest - 1.0), 1.0e-4) << "the widest d_c/d_o in the fixture is " << widest
+                                            << ", too close to 1 for this gate to mean anything";
+  std::cout << "  [ql-oracle] " << checked << " shifted coupons scale by exactly d_c/d_o (widest " << widest
+            << "), " << vacuous << " with d_c == d_o are bitwise equal\n";
+}
+
+// And it cannot bite where there is no shift: `obs_tau == accrual` there, so BOTH members of the
+// term give bitwise the same payment. That is what makes the field safe to add to any convention.
+TEST(OisParOracleE0, TheShiftAccrualTermIsBitwiseVacuousWithoutAShift) {
+  for (const char* bp : {"USD-SOFR-OIS", "USD-SOFR-OIS-LOOKBACK2", "USD-SOFR-AVG-SWAP"}) {
+    fixtures::CompareOisOptions o;
+    o.trades = 1;
+    o.quote_noise_bp = 0.0;
+    o.blueprint = bp;
+    const fixtures::CompareOis s = fixtures::make_compare_ois(o);
+    const auto df = [&s](int slot, double tt) { return s.generating_df(slot, tt); };
+    std::size_t checked = 0;
+    for (const epykos::instrument::Leg& leg : s.set.instruments[0].instrument.legs) {
+      if (leg.index.empty()) continue;
+      for (const epykos::instrument::Coupon& cp : leg.coupons) {
+        epykos::instrument::Coupon ipw = cp;
+        ipw.rate_over_interest_period = true;
+        EXPECT_EQ(epykos::instrument::float_coupon_pv<double>(leg, cp, df),
+                  epykos::instrument::float_coupon_pv<double>(leg, ipw, df))
+            << bp << ": the shift-accrual term changed an UNSHIFTED payment, so it is not vacuous here and every "
+                     "unshifted number in this repository depends on which member a convention happens to carry";
+        ++checked;
+      }
+    }
+    ASSERT_GT(checked, 0u) << bp;
+    std::cout << "  [ql-oracle] " << bp << ": " << checked << " unshifted coupons, both terms bitwise equal\n";
+  }
 }

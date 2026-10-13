@@ -88,6 +88,11 @@ struct Coupon {
   double obs_days = 0.0;             // obs_end − obs_start in calendar days: the denominator of the average
   conventions::Date obs_start = 0;   // the observation period (equal to the accrual period unless shifted)
   conventions::Date obs_end_date = 0;
+  // The RESOLVED shift-accrual term (D130): false = the compounded amount is the interest
+  // (`obs_tau`, what ISDA and the ARRC agree on), true = it is annualised over the observation
+  // period and applied over the interest period (`accrual`, the ARRC's non-recommended option 2).
+  // Set from the convention at build time so `rate_accrual` reads a term rather than inferring one.
+  bool rate_over_interest_period = false;
 };
 
 struct Leg {

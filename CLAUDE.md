@@ -125,6 +125,39 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D130+D131, 2026-10-13: ISDA's own paper settles the observation shift, the accrual basis becomes a
+TERM, and the whole convention surface is now audited.** The owner asked *"what does ISDA do? why
+did we switch to using ARRC's anti recommendation"* — the premise was inverted (D123 moved us OFF
+the ARRC's non-recommended option (2) onto (1)), but underneath it was a real gap: **the 2021 ISDA
+Definitions had never been read**, and the only ISDA claim in the tree was D116's unsourced "that is
+ISDA's formal structure". Found the primary source: ISDA, *Documenting RFR derivatives using
+different approaches to compounding/averaging under the 2006 ISDA Definitions* (27 Apr 2021) §1.2 —
+*"the rate will be annualized and apply based on the number of days in the Calculation Period"*.
+Annualised by d_c AND applied over d_c: they cancel, so the Floating Amount is **N·(Π−1)**, the same
+cash flow as the ARRC's option (1). **The two authorities differ on the quoted RATE's basis (ARRC
+d_o, ISDA d_c) and agree on the payment**, which no PV or par rate can see — so D123's fix is right
+under both, and my own earlier speculation that ISDA implied option (2) was wrong (it read the
+Floating Amount's day count fraction and ignored which day count the RATE is annualised by, the same
+mistake D116 made). On the owner's *"make it a term"*: `ObservationSpec::accrual` is
+`observation_period` (default) or `interest_period`, resolved once onto `Coupon`, gated three ways —
+default bitwise unchanged, the term scales the payment by **exactly d_c/d_o** (76 of 197 shifted
+coupons can distinguish it, widest 1.00548; the other 121 have d_c == d_o and are bitwise equal, so
+the gate checks the 76 rather than asserting every shifted coupon must differ), and the registry
+**refuses** the field where it cannot bite. **The h2h divergence turned out to be OURS**:
+`h2h_bridge.cpp` handed them `tau_index = obs_tau`, and since their payment is
+`(Π−1+s·tau_index)·(tau_pay/tau_index)`, that made their engine compute option (2) while ours
+computed option (1) — two engines pricing different conventions, which is what the agreement gate
+was saying. The bridge now translates the term. One line remains in the OTHER tree
+(`build/observations.hpp`'s Shift branch annualises on the shifted window), bit-identical for every
+unshifted coupon. **D131 then audits the whole surface** — `docs/CONVENTIONS_AUDIT.md`, 17 rows,
+each TERM / FIXED-sourced / FIXED-one-of-two-sourced / OWN RESEARCH — because all eight convention
+defects to date share one cause: a hard-coded choice stated nowhere. Three rows are unfinished: a
+shifted AVERAGED leg is correct by the source and **exercised by no fixture**, shift ∘ lockout is
+adjudicated by **nobody** (and their model cannot express the pair), and the quoted-rate basis is a
+two-sourced fork we picked silently — worth zero until something reports a shifted coupon's rate.
+The rule the audit enforces: **a convention is a term when two CORRECT implementations given the
+same trade could still disagree about what the trade means.**
+
 **D129, 2026-10-13: the roll convention is now a TERM, not an inference — and D127/D128's problem
 is eliminated rather than worked around.** The owner's conclusion after D128: *"the parameter used
 in swap creation should just be unadj start, unadj end, roll type, etc"*, and *"let's make product

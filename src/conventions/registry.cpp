@@ -452,12 +452,22 @@ void Registry::add_document(const Value& doc, const std::string& origin) {
           }
           if (lv.has("observation")) {
             const Value& ov = lv.at("observation");
-            check_keys(ov, {"method", "lookback_days", "lockout_days"}, {"method"}, (what + " observation").c_str());
+            check_keys(ov, {"method", "lookback_days", "lockout_days", "accrual"}, {"method"},
+                       (what + " observation").c_str());
             leg.observation.method = named(ov.at("method"), observation_method_from_string);
             leg.observation.lookback_days = int_or(ov, "lookback_days", 0);
             leg.observation.lockout_days = int_or(ov, "lockout_days", 0);
+            if (ov.has("accrual")) leg.observation.accrual = named(ov.at("accrual"), shift_accrual_from_string);
             if (leg.observation.lookback_days < 0 || leg.observation.lockout_days < 0) {
               fail(ov, what + ": lookback_days / lockout_days must be >= 0");
+            }
+            // `accrual` selects what the compounded amount is applied over, which only differs
+            // from the interest period's own length under a SHIFT (D130). Stating it anywhere else
+            // is a term that cannot bite, so it is refused rather than silently ignored.
+            if (leg.observation.method != ObservationMethod::ObservationShift &&
+                leg.observation.accrual != ShiftAccrual::ObservationPeriod) {
+              fail(ov, what + ": accrual \"" + std::string(to_string(leg.observation.accrual)) +
+                           "\" only means something under observation_shift");
             }
             if (leg.observation.method == ObservationMethod::Plain && leg.observation.lookback_days != 0) {
               fail(ov, what + ": a plain observation has no lookback_days");

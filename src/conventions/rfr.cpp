@@ -18,6 +18,20 @@ ObservationMethod observation_method_from_string(const std::string& s) {
   throw DateError("rfr: unknown observation method \"" + s + "\" (plain | lookback | observation_shift)");
 }
 
+const char* to_string(ShiftAccrual a) noexcept {
+  switch (a) {
+    case ShiftAccrual::ObservationPeriod: return "observation_period";
+    case ShiftAccrual::InterestPeriod: return "interest_period";
+  }
+  return "?";
+}
+
+ShiftAccrual shift_accrual_from_string(const std::string& s) {
+  if (s == "observation_period") return ShiftAccrual::ObservationPeriod;
+  if (s == "interest_period") return ShiftAccrual::InterestPeriod;
+  throw DateError("rfr: unknown shift accrual \"" + s + "\" (observation_period | interest_period)");
+}
+
 int ObservationPeriod::weight_total() const noexcept {
   int n = 0;
   for (const ObservationDay& d : days) n += d.weight_days;

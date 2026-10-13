@@ -119,6 +119,10 @@ Coupon rfr_coupon(const BuildContext& ctx, Leg& leg, CouponKind kind, const Inde
   c.obs_end_date = period.obs_end;
   c.obs_days = static_cast<double>(period.weight_total());
   c.obs_tau = c.obs_days / basis;
+  // The shift-accrual TERM, resolved once from the convention (D130). Only a shifted coupon can
+  // tell the two apart — elsewhere `obs_tau == accrual` and `rate_accrual` returns the same number
+  // either way — but it is recorded for every RFR coupon so the term never depends on the method.
+  c.rate_over_interest_period = spec.accrual == ShiftAccrual::InterestPeriod;
   c.obs_begin = static_cast<int>(leg.obs.size());
   for (const ObservationDay& od : ro.unfixed) {
     if (od.rate_date < ctx.valuation) {

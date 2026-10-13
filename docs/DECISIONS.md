@@ -10826,3 +10826,143 @@ that is the only transferable lesson here.
 harness still translates it to `DateGeneration::Backward`, and the two are equivalent only because
 our generator rolls backward for a front stub. That equivalence is documented in the gate rather
 than relied on silently.
+
+## D130 — ISDA's own paper settles the observation shift, confirms D123's fix under BOTH authorities, and the accrual basis becomes a TERM (2026-10-13)
+
+The owner asked two things: *"What does ISDA do? Why did we switch to using ARRC's anti
+recommendation"*, and then *"Make it a term."* The first question was based on a premise I had put
+there — in answering the h2h status I speculated that ISDA's Floating Amount structure implied the
+ARRC's option (2). **That speculation was wrong, and ISDA's own text refutes it.**
+
+### 1. The primary source D116 asked for, found at last
+
+ISDA, *Documenting RFR derivatives using different approaches to compounding/averaging under the
+2006 ISDA Definitions* (27 April 2021, A40393158), **§1.2 "Observation Period Shift"**:
+
+> "while the weightings of the fixings used to calculate the compounded rate will be determined on
+> the basis of the Business Days in the observation period, which may differ from the Business Days
+> in the Calculation Period, **the rate will be annualized and apply based on the number of days in
+> the Calculation Period**, using the day count basis applicable to the relevant RFR."
+
+Annualised by `d_c` **and** applied over `d_c`. The two cancel:
+
+| | quoted rate | Floating Amount |
+|---|---|---|
+| ISDA (this paper) | `(Π − 1)·basis/d_c` | **`N·(Π − 1)`** |
+| ARRC option (1) | `(Π − 1)·basis/d_o` | **`N·(Π − 1)`** |
+| ARRC option (2) — "interest-period weighted" | `(Π − 1)·basis/d_o` | `N·(Π − 1)·d_c/d_o` |
+
+**ISDA and the ARRC's recommendation differ on the quoted rate's basis and AGREE on the cash
+flow** — and no PV, par rate or ladder in this repository can see a quoted-rate basis. So **D123's
+fix is correct under both authorities**, and the engine's default needs no appeal to preference.
+Option (2) is the outlier: it is what this engine computed before D123 and what SwapEngine computes
+today.
+
+This also kills the only ISDA claim the repo ever had. D116 wrote that our old form "is ISDA's
+formal structure, a Floating Rate multiplied by the Calculation Period's day count fraction" —
+**unsourced**, and wrong because it read the Floating Amount's day count fraction and never asked
+which day count the RATE is annualised by. D116 said in the same breath that the question "needs a
+primary source, not a preference"; this is that source, fifteen entries later.
+
+### 2. The term
+
+`conventions::ObservationSpec::accrual` — `ShiftAccrual::ObservationPeriod` (default) or
+`InterestPeriod` — states which arithmetic a convention means, and `instrument::Coupon` records the
+resolved term as `rate_over_interest_period`. `rate_accrual` reads it instead of choosing:
+
+```
+return c.rate_over_interest_period ? c.accrual : c.obs_tau;
+```
+
+Three properties, each gated rather than argued:
+
+- **Default unchanged.** Every shipped convention takes `observation_period`; the 70 Stage A
+  quotes, the 16-row shift oracle and every E0 gate are bitwise what they were.
+- **The term selects exactly `d_c/d_o`.** Over the shifted fixture, **76 coupons** have `d_c ≠ d_o`
+  and the two members' payments differ by exactly that ratio (widest 1.00548); **121 coupons have
+  `d_c == d_o`** — the shifted endpoints can land a window of the same calendar length — and there
+  the two are bitwise equal. The gate checks the 76 and fails if the fixture ever produces none; it
+  does **not** assert that a shifted coupon must differ, which was the first draft and was wrong.
+- **It cannot bite without a shift.** Plain, lookback and averaged coupons are bitwise identical
+  under either member, so the field is safe on any convention. The registry **refuses** `accrual`
+  on a non-shift method rather than accepting a term that silently does nothing (D129's lesson,
+  applied at the parse).
+
+### 3. What it is for, given that nothing shipped needs it
+
+Option (2) is real — the ARRC calls it "widely used in FRNs", labels it an "interest-period
+weighted shift", and declines to recommend it ("not the principle recommendation"; it "can at times
+result in a negative daily accrual even if SOFR rates are positive") — and **SwapEngine implements
+it**: `include/swaps/pricing/cashflows.hpp:307`, `pv = DF(pay)·((realized_factor·Π(1+r_k dt_k) − 1)
++ spread·tau_index)·(tau_pay/tau_index)`, read under D107. So the term buys two things: a trade
+documented that way can be priced, and the head-to-head can compare like with like.
+
+### 4. The h2h consequence, stated plainly
+
+h2h currently **fails its agreement gate** on `USD-SOFR-OIS-SHIFT2` (1.68e-3 of gross) and
+`USD-SOFR-OIS-SHIFT2-LOCKOUT2` (8.73e-4), which is 243,430 on a 932.5m gross book and **exactly the
+two families**: 145,755 + 97,675 reproduces the ALL row's difference to the unit. Six of eight
+families agree at ≤2.5e-14. The two that disagree are not timed, and one of them carried the
+largest advantage this project has measured (553x bound / 507x risk, D109 §2), so **D109's ALL row
+is not currently reproducible.**
+
+With the primary source in hand the resolution is not symmetric: **their reading is the one neither
+authority recommends.** Consistency across the two repos therefore means changing SwapEngine's
+accrual basis, not adding a member to Epykos to match it. That is the next step and it is the
+owner's call to make in that tree.
+
+### 5. What is not claimed
+
+The quoted-rate basis is left as the ARRC's `d_o` (`coupon_rate` returns `(Π − 1)/obs_tau`). ISDA's
+`d_c` basis would report a different *rate* for the same *payment*, and nothing in this repository
+reports a shifted coupon's rate — but a desk blotter would, so this is a real gap and it is named
+rather than closed. No blueprint takes `interest_period`: the capability is exercised by the gates,
+not by a fixture, and no Stage A number depends on it.
+
+## D131 — The convention surface audited: 17 rows, 3 unfinished, and the rule that decides which belong in a term (2026-10-13)
+
+Asked what I suggest after D130, the answer was: stop fixing conventions reactively. `docs/CONVENTIONS_AUDIT.md`
+is the enumeration — every place the engine picks an arithmetic a document could reasonably decide
+otherwise, each marked TERM / FIXED-sourced / FIXED-one-of-two-sourced / OWN RESEARCH, with whether
+a test binds it.
+
+### 1. Why this shape
+
+Six harness defects and two engine defects (D114–D130) share one cause, and D130's own three
+drafts repeated it: **a convention that was a hard-coded choice, stated nowhere.** The rule the file
+exists to enforce:
+
+> A convention belongs in the TERM column when two *correct* implementations given the same trade
+> could still disagree about what the trade means.
+
+That is not a question about arithmetic difficulty. It is a question about whether the trade's terms
+determine the answer — and where they do not, no amount of care in either implementation closes the
+gap, because each is faithfully pricing a different contract.
+
+### 2. What the audit found that was not already known
+
+- **Row 5, averaged RFR under a shift: SOURCED, and I had it wrong in the suggestion that led here.**
+  I listed it as an unsourced hard-coded choice. It is covered by the same ISDA §1.2 sentence — the
+  paper is about "compounding/**averaging**" — and our arithmetic already satisfies it:
+  `(Σ r_i n_i / d_o) · (d_o/basis)` cancels to `Σ r_i n_i / basis`, the interest itself, independent
+  of both periods. So the gap is not correctness, it is **coverage**: no fixture shifts an averaged
+  leg, so the agreement holds by construction and nothing would notice if it stopped. That is exactly
+  how D116's shift gap survived — correct-looking, inside a family that WAS tested, found only
+  because an external engine disagreed. Cheapest item on the list.
+- **Row 6, shift ∘ lockout, is adjudicated by nobody.** ARRC and ISDA document each convention
+  separately; neither composes them. We shift the window, then freeze the last *m* days of the
+  SHIFTED window. SwapEngine's model carries one `RfrStyle` and **cannot express the pair at all**,
+  so the h2h comparison of that family runs on our bridge handing over our own day list — the
+  comparison is of arithmetic, not of their convention.
+- **Row 4, the quoted-rate basis, is a two-sourced fork we silently picked.** ARRC annualises on
+  `d_o`, ISDA on `d_c`; same cash flow, different quoted rate. Worth zero today because nothing
+  reports a shifted coupon's rate. It should NOT become a term until something consumes it — a term
+  with no consumer is D129 §2's defect class.
+
+### 3. What is deliberately left closed
+
+Rows 10 and 11 are D117's `disagree` (EURIBOR fixed-leg day count) and `partial` (ESTR payment lag),
+and they stay closed **by measurement rather than by resolution**: exactly 0 on all 54 Stage A
+quotes, and ≤0.019 bp at 1Y. D68's method — price the caveat before fitting it — says that settles
+the priority without settling the convention, and re-opening them would be tidiness rather than
+value.

@@ -36,10 +36,40 @@ enum class ObservationMethod : unsigned char { Plain, Lookback, ObservationShift
 const char* to_string(ObservationMethod m) noexcept;   // "plain", "lookback", "observation_shift"
 ObservationMethod observation_method_from_string(const std::string& s);
 
+// WHICH PERIOD'S DAY COUNT THE COMPOUNDED AMOUNT ACCRUES OVER — a TERM, not an inference (D130).
+//
+// Under a shift the observation period and the interest period can differ in length (365 against
+// 367 on a 1Y SOFR coupon), and then it matters what the compounded product is applied over. Two
+// arithmetics are documented and both are in production code in the wild, so this engine states
+// which one a convention means instead of choosing for it:
+//
+//   ObservationPeriod   interest = N·(Π − 1). The ARRC's option (1) — "apply interest for the
+//                       number of days in the observation period" — and what ISDA's own paper
+//                       describes: "the rate will be annualized and apply based on the number of
+//                       days in the Calculation Period", i.e. annualised by d_c and applied over
+//                       d_c, which cancel. The two authorities DIFFER on the quoted rate's basis
+//                       (ARRC d_o, ISDA d_c) and AGREE on the cash flow. QuantLib computes this.
+//   InterestPeriod      interest = N·(Π − 1)·d_c/d_o: the rate annualised over the observation
+//                       period and applied over the interest period. The ARRC's option (2), which
+//                       it labels an "interest-period weighted shift", records as "widely used in
+//                       FRNs", and does NOT recommend ("not the principle recommendation";
+//                       "can at times result in a negative daily accrual even if SOFR rates are
+//                       positive"). SwapEngine computes this, and so did this engine until D123.
+//
+// It is a NO-OP wherever there is no shift, because the observation weights then sum to the
+// interest period's own length — so a plain or lookback coupon is bit-identical under either.
+enum class ShiftAccrual : unsigned char { ObservationPeriod, InterestPeriod };
+
+const char* to_string(ShiftAccrual a) noexcept;   // "observation_period", "interest_period"
+ShiftAccrual shift_accrual_from_string(const std::string& s);
+
 struct ObservationSpec {
   ObservationMethod method = ObservationMethod::Plain;
   int lookback_days = 0;   // business days; used by Lookback and ObservationShift
   int lockout_days = 0;    // business days frozen at the end of the period
+  // The default is the reading ISDA and the ARRC agree on; a convention that means the other one
+  // says so (`"accrual": "interest_period"`).
+  ShiftAccrual accrual = ShiftAccrual::ObservationPeriod;
 };
 
 struct ObservationDay {

@@ -75,7 +75,7 @@
       "discount_index": "USD-SOFR",
       "tenors": ["1Y", "2Y", "3Y", "5Y", "7Y", "10Y"],
       "sources": {
-        "observation": "ARRC User's Guide to SOFR (2021): 'A lookback with observation shift is one of the conventions that has been recommended by the ARRC for FRNs' ('Two-Day Backward Shifted Observation Period and No Lockouts'); ISDA 2021 Definitions 'OIS Compounding with Observation Period Shift' (ISDA Good Friday 2026 guidance fn 7)",
+        "observation": "ARRC User's Guide to SOFR (2021): 'A lookback with observation shift is one of the conventions that has been recommended by the ARRC for FRNs' ('Two-Day Backward Shifted Observation Period and No Lockouts'); ISDA 2021 Definitions 'OIS Compounding with Observation Period Shift' (ISDA Good Friday 2026 guidance fn 7). The ACCRUAL BASIS is ISDA, 'Documenting RFR derivatives using different approaches to compounding/averaging under the 2006 ISDA Definitions' (27 April 2021) s1.2: 'the rate will be annualized and apply based on the number of days in the Calculation Period' -- annualised by d_c and applied over d_c, which cancel, so the payment is N*(prod-1): the SAME cash flow as the ARRC's option (1) and what this engine computes (accrual term 'observation_period', D130).",
         "other_fields": "as USD-SOFR-OIS",
         "status": "own research: a customised convention for the seeded book (ARRC: 'dealers may be able to offer customized over-the-counter derivatives ... to facilitate client hedging')"
       },
@@ -99,7 +99,7 @@
       "discount_index": "USD-SOFR",
       "tenors": ["1Y", "2Y", "3Y", "5Y", "7Y", "10Y"],
       "sources": {
-        "observation": "ARRC User's Guide (2021): lockout - 'the SOFR rate applied for the last k days of the interest period is frozen at the rate observed k days before the period ends'; 'A 2-5 day lockout has been used in some SOFR FRNs'; ISDA 2021 Definitions 'OIS Compounding with Lockout' (ISDA Good Friday 2026 guidance fn 7)",
+        "observation": "ARRC User's Guide (2021): lockout - 'the SOFR rate applied for the last k days of the interest period is frozen at the rate observed k days before the period ends'; 'A 2-5 day lockout has been used in some SOFR FRNs'; ISDA 2021 Definitions 'OIS Compounding with Lockout' (ISDA Good Friday 2026 guidance fn 7). The accrual basis is as USD-SOFR-OIS-SHIFT2 (D130).",
         "other_fields": "as USD-SOFR-OIS",
         "status": "own research: a customised convention for the seeded book"
       },

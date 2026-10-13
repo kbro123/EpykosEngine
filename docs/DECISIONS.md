@@ -10431,3 +10431,80 @@ to par quotes, with no external check of any kind, and it is now the largest rem
 Stage A's own 2,000-trade book and 70-bucket ladder, which are compared only to SwapEngine (D109);
 and the exotics surface of D106, where the engine's measured weakness lives and where QuantLib has
 counterparts for some of the payoffs.
+
+## D126 — The first external check on a SECOND derivative: the nested-Dual Hessian matches a QuantLib four-point difference to 1.6e-08 (2026-10-13)
+
+D93 §1b recorded that `Dual<N>` over a hardcoded `double` "forecloses every second derivative — the
+engine cannot compute a gamma by any route". D97 and D101 reopened it with `Dual<Scalar, N>`, and
+D101 computed a book gamma with respect to par quotes. **Nothing external had ever checked one** —
+not QuantLib, not SwapEngine, not a finite difference. D125 §4 named it the largest remaining gap.
+
+### 1. The result
+
+`tests/compare/second_order_oracle_e0_test.cpp`: `compare_ois`, 8 trades, 16 knots. One pass of
+`Dual<16, Dual<16>>` over the templated pricing maths against QuantLib's four-point mixed second
+difference of the same book on the same curve.
+
+| | result |
+|---|---|
+| book PV | **1.52e-13** relative |
+| Hessian, all 256 entries | **1.62e-08** of \|H\|max (= 1.256e8) |
+| the two gradient channels | **0.0 — bitwise** |
+| Clairaut symmetry | **2.36e-15** of \|H\|max |
+
+### 2. What is differentiated, stated as precisely as D120 §2 had to be
+
+The variable is the **curve knot**, not the par quote. `compare_ois`'s region is linear in log DF,
+so a knot *is* its log discount factor and a perturbation means the same thing to both engines
+exactly. **No solver is involved on either side**, so this isolates the second-order channel of the
+PRICING MATHS — the layer D93 said was foreclosed, and the foundation the IFT's second order stands
+on.
+
+It does **not** cover the IFT's second-order channel — gamma with respect to par QUOTES, which is
+what D101 computes and what a desk asks for. That adds `solver::implicit_dual`'s own nesting and
+needs a four-point difference over re-solves. It is the remaining piece, and the distinction is the
+same one D120 §2 drew for the first-order ladder.
+
+### 3. Why the residual is the finite difference's
+
+Swept, worst deviation as a fraction of |H|max:
+
+| h | worst | ratio |
+|---|---|---|
+| 1e-3 | 3.36e-07 | — |
+| 3e-4 | 2.95e-08 | 11.4x for a 3.33x step — h², FD **truncation** |
+| 1e-4 | **1.62e-08** | 1.8x, flattening |
+| 3e-5 | 2.00e-07 | **rising 12.3x** — round-off |
+
+The same V as D120 §3 one order up, and steeper on the small-h side because a second difference
+divides by h². The engine's analytic Hessian is the accurate side; 1.6e-08 of |H|max is the floor of
+what a four-point difference resolves on a 3.6e6 book PV.
+
+### 4. Two properties the finite difference cannot constrain, and one that keeps it honest
+
+Gated alongside, because **a Hessian that matched an FD to 1e-8 while being asymmetric at 1e-6 would
+be wrong in a way the FD check would miss**:
+
+- The **two gradient channels agree bitwise**, 0.0 — the outer tangent and the inner tangent are the
+  same expressions in the same IEEE operations, which is a theorem only because this TU pins
+  contraction off (§5.2a case 1, D8/D25).
+- **Clairaut symmetry** to 2.36e-15 of |H|max: the two mixed partials are different operation
+  orders and agree to roundoff rather than to a tolerance.
+
+And a degeneracy control, as D120 §4: **52 off-diagonal entries exceed 1e-6 of |H|max and the
+largest is 3.35% of it**, so the mixed partials — the entries a nested pass can get wrong on their
+own, independently of the diagonal — carry real weight in the comparison.
+
+### 5. Scope
+
+Independent numbers now exist for: four interpolation schemes; five single-curve SOFR observation
+conventions; the SOFR fixing calendar day for day; all 70 of Stage A's calibration quotes across
+four par-rate families, two futures families and four deposits; the solve; a book NPV; the 16-bucket
+first-order risk ladder; the realised prefix of a straddling coupon; and now a 16x16 second
+derivative.
+
+Still absent: the **IFT's second-order channel** (§2), Stage A's own 2,000-trade book and 70-bucket
+ladder (compared only to SwapEngine, D109), and the **exotics surface of D106** — where the engine's
+measured weakness lives, where the kill test says it runs at 0.45–0.78x its own naive `double`, and
+where QuantLib has counterparts for some of the payoffs. That last is the one with something at
+stake beyond coverage.

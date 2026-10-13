@@ -436,6 +436,13 @@ the order their evidence-to-effort ratio puts them:
    slice of it.
 5. **`bspline_oracle_test.cpp`** — the sixth scheme, and the only one of ours with a QuantLib counterpart still
    uncompared.
+5b. **The IFT's SECOND-order channel — gamma with respect to par QUOTES.** D126 checked the second-order channel
+   of the pricing maths (the variable is the curve knot, no solver on either side) to 1.62e-08 against a QuantLib
+   four-point difference. The quotes channel adds `solver::implicit_dual`'s own nesting and is what D101 computes
+   and what a desk asks for; it needs a four-point difference over RE-SOLVES, which stacks another layer of FD
+   noise on an already 1/h² -amplified comparison. Pick h from a sweep, as D120 §3 and D126 §3 both did, rather
+   than by default.
+
 6. **`scheme_value_oracle_test.cpp`'s primitive half, for the cubics.** Not liftable yet: `Hermite`,
    `NaturalCubic`, `MonotoneCubic` and `BSpline` have a `value` and no `integral`, which is the same gap
    `curve::Variable::forward`'s static_assert encodes. D114 §6 makes it visible as missing oracle coverage rather

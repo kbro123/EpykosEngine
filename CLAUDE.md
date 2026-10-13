@@ -125,6 +125,22 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D126, 2026-10-13: the first external check on a SECOND derivative — 1.6e-08 against a QuantLib
+four-point difference.** D93 §1b said `Dual<N>` over hardcoded `double` "forecloses every second
+derivative — the engine cannot compute a gamma by any route"; D97/D101 reopened it with
+`Dual<Scalar,N>` and computed a book gamma, and **nothing external had ever checked one**. One pass
+of `Dual<16, Dual<16>>` over the templated maths against QuantLib's four-point mixed second
+difference, 8 trades and 16 knots: **book PV 1.52e-13**, all **256 Hessian entries to 1.62e-08 of
+|H|max** (1.256e8), the **two gradient channels bitwise identical (0.0)**, and **Clairaut symmetry
+2.36e-15**. The residual is the FD's own: swept, the error falls 11.4x for a 3.33x step (h²,
+truncation) to 1.62e-08 at h = 1e-4 and then RISES 12.3x — the D120 V one order up, steeper because
+a second difference divides by h². **What it covers**: the variable is the CURVE KNOT, no solver on
+either side, so this is the second-order channel of the PRICING MATHS — the layer D93 called
+foreclosed. **What it does not**: the IFT's second-order channel, gamma w.r.t. par QUOTES, which is
+what a desk asks for and needs a difference over re-solves. Gated alongside are two properties an FD
+cannot constrain (a Hessian matching an FD at 1e-8 while asymmetric at 1e-6 would pass otherwise)
+and a degeneracy control: 52 off-diagonal entries exceed 1e-6 of |H|max, largest 3.35%.
+
 **D125, 2026-10-13: the realised prefix matches QuantLib to 1.3e-11 bp — the seasoned gap is
 closed.** D123's convention error lived in the BACK half of the compounded-SOFR formula (which day
 count the annualised rate is applied over); the realised prefix is the FRONT half, where published
@@ -320,7 +336,7 @@ noise floor, the three wins keep full size, and the absolute default-path gains 
 kernels, which stayed true while the decomposition got slower — *a gate binds only what it can observe*, for the
 sixth time in this repository and the first on a performance quantity.
 
-`ctest`: **154/154** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
+`ctest`: **155/155** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
 tests; the default configuration's count is lower). **CI green on all four jobs** (ubuntu
 release / reference / mutation, macos release) at `6d68b09`. **`integrate/invariants` was merged into
 `main` on 2026-10-12 (`046427d`): 82 commits, D95–D116** — §1b's three invariants, the exotics kill

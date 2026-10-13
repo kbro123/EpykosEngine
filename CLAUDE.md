@@ -399,7 +399,7 @@ sixth time in this repository and the first on a performance quantity.
 
 `ctest`: **156/156** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
 tests; the default configuration's count is lower) and **131/131** on the reference preset. **CI green on all four
-jobs** (ubuntu release / reference / mutation, macos release) at `4b31f81`. **`integrate/invariants` was merged into
+jobs** (ubuntu release / reference / mutation, macos release) at `90164eb`, which is D129 and what `main` points at. **`integrate/invariants` was merged into
 `main` on 2026-10-12 (`046427d`): 82 commits, D95–D116** — §1b's three invariants, the exotics kill
 test, the head-to-head lifted to Stage A, and the first independent oracles. The merged tree is
 byte-identical to the CI-green tip. **`main` is the line of development**; `origin/integrate/rebuild`

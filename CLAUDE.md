@@ -125,6 +125,23 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D125, 2026-10-13: the realised prefix matches QuantLib to 1.3e-11 bp — the seasoned gap is
+closed.** D123's convention error lived in the BACK half of the compounded-SOFR formula (which day
+count the annualised rate is applied over); the realised prefix is the FRONT half, where published
+fixings hand over to forwards, and no oracle had reached it — `compare_ois` is unseasoned by
+construction. Stage A's trade 39, a 10Y SOFR OIS seasoned 52 days, has a straddling coupon with **51
+realised calendar days** (realised_factor 1.005437477536187) ahead of 212 projected observations;
+QuantLib counts 248 business days in the period, the same decomposition read the other way.
+**Coupon rate 1.31e-11 bp, trade PV 5.01e-14 relative.** The fixings are the engine's own synthetic
+series handed to QuantLib verbatim — the right direction of travel, since a published history is an
+INPUT to both engines like the curve and the trade, so sharing it shares a fixture and not an
+implementation; what is compared is what each does WITH it. Only pre-valuation fixings are loaded,
+which is `realised_observations`' own rule — the fourth instance of the harness trap anticipated
+rather than walked into. The control is what makes it mean something: **neutralising the realised
+prefix moves the rate 55.6 bp**, so the comparison constrains that contribution to ~5e12x its
+tolerance. **Largest remaining gap: SECOND DERIVATIVES** — I2 is reachable, D101 computes a book
+gamma, and nothing external has ever checked one.
+
 **D124, 2026-10-13: Stage A's calibration surface is COMPLETE — all 70 quotes independently
 verified.** The owner's ruling that futures **quotes are inclusive of any convexity** settles what a
 futures oracle compares: `convexity zero` is the CONVENTION, not an approximation being excused, so
@@ -303,7 +320,7 @@ noise floor, the three wins keep full size, and the absolute default-path gains 
 kernels, which stayed true while the decomposition got slower — *a gate binds only what it can observe*, for the
 sixth time in this repository and the first on a performance quantity.
 
-`ctest`: **153/153** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
+`ctest`: **154/154** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
 tests; the default configuration's count is lower). **CI green on all four jobs** (ubuntu
 release / reference / mutation, macos release) at `6d68b09`. **`integrate/invariants` was merged into
 `main` on 2026-10-12 (`046427d`): 82 commits, D95–D116** — §1b's three invariants, the exotics kill

@@ -10370,3 +10370,64 @@ Nothing on Stage A's calibration side. Still absent across the whole oracle prog
 - **The book and the ladder beyond `compare_ois`.** D120 gated a 64-trade OIS book and its
   16-bucket ladder; Stage A's 2,000-trade book across eight families and its 70-bucket ladder are
   compared only to SwapEngine (D109).
+
+## D125 — The realised prefix of a straddling coupon matches QuantLib to 1.3e-11 bp: the seasoned gap is closed (2026-10-13)
+
+D124 §4 named seasoned trades the largest uncovered area, and D123 is why it mattered. The
+convention error D123 found lived in the **back** half of the compounded-SOFR formula — which day
+count the annualised rate is applied over. The realised prefix is the **front** half of the same
+formula: a period straddling the valuation date compounds published fixings up to today and forwards
+after it, and `coupon_rate`'s `realised_factor` seam is where the two meet. No oracle had reached
+it, and `compare_ois` cannot: it is unseasoned by construction, one of its four deliberate agreement
+controls.
+
+### 1. The result
+
+Stage A's trade 39 — a 10-year USD SOFR OIS seasoned by 52 days, paying fixed on 99,563,730. Its
+current coupon runs 2026-08-03 → 2027-08-02 with **51 realised calendar days** (a `realised_factor`
+of 1.005437477536187 over ~36 published business days) ahead of **212 projected observations**;
+QuantLib counts 248 business days in the period, which is the same decomposition read the other way
+and is the first thing that had to agree.
+
+| | result |
+|---|---|
+| straddling coupon's rate | **1.31e-11 bp** |
+| whole trade PV | **5.01e-14** relative |
+
+### 2. Why this is an independent check and not a shared one
+
+The fixings are the engine's own synthetic series (D16: deterministic from the seed, labelled
+synthetic, never market data) and they are handed to QuantLib's index verbatim through `addFixings`.
+**That is the right direction of travel**: a published history is an INPUT to both engines, like the
+curve and the trade, so sharing it shares a fixture rather than an implementation. What is compared
+is what each engine does *with* it — how many of those fixings fall inside the period, which
+calendar days each one carries, how they compound, and where the realised prefix hands over to the
+projection.
+
+Only fixings strictly before the evaluation date are loaded, which is the rule
+`realised_observations` applies. Feeding QuantLib a fixing dated today would have it use a published
+rate where the engine projects one, and the disagreement would have been the harness's — the fourth
+instance of that trap anticipated rather than walked into.
+
+### 3. The control, which is the part that makes the agreement mean something
+
+Neutralising the realised prefix — `realised_factor = 1`, `realised_sum = 0`, `fixed_days = 0`, with
+the projected observations untouched — moves the coupon's rate by **55.6 bp**. So the comparison
+constrains the realised contribution to about 5e12 times the tolerance it is held to. Without this
+a test that passed because *both* engines ignored the fixings would be indistinguishable from one
+that passed because both used them, which is the same failure mode D117 §3 found in the fixing
+calendar: an oracle constrains only the quantities its comparison is sensitive to.
+
+### 4. Scope
+
+Independent numbers now exist for: four interpolation schemes (D114), five single-curve SOFR
+observation conventions (D115, D116, D123), the SOFR fixing calendar day for day (D117), **all 70 of
+Stage A's calibration quotes** across four par-rate families, two futures families and four deposits
+(D119, D121, D124), the solve (D122), a book NPV and the 16-bucket risk ladder (D120), and now the
+realised prefix of a straddling coupon.
+
+Still absent: **second derivatives** — I2 is reachable and D101 computes a book gamma with respect
+to par quotes, with no external check of any kind, and it is now the largest remaining gap. Then
+Stage A's own 2,000-trade book and 70-bucket ladder, which are compared only to SwapEngine (D109);
+and the exotics surface of D106, where the engine's measured weakness lives and where QuantLib has
+counterparts for some of the payoffs.

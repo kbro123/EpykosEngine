@@ -8,8 +8,9 @@
 // pricing. The curves are Stage A's four generating curves; the fixings are its own synthetic
 // series, loaded pre-valuation only (D125 §2's rule).
 //
-//   1,997 of 2,000 trades agree to better than 1e-10 of notional.
-//   3 disagree, all for ONE reason, and it is a convention question — see §EOM below.
+//   ALL 2,000 trades agree to better than 1e-10 of notional; every family to 1.9e-14 of its gross
+//   PV. Book NPV: engine 68,395,553.471440 against QuantLib 68,395,553.471439 — **1.35e-14
+//   relative**.
 //
 //   family                         n   worst/notional   |family diff| / family GROSS
 //   EUR-3S6S-BASIS               212   9.07e-17         1.07e-15
@@ -21,25 +22,29 @@
 //   USD-SOFR-OIS-SHIFT2          195   7.85e-15         4.42e-15
 //   USD-SOFR-OIS-SHIFT2-LOCKOUT2 209   1.01e-14         3.9e-15
 //
-//   ALL 2,000 trades agree to better than 1e-10 of notional; every family to 1.9e-14 of its gross
-//   PV. Book NPV: engine 68,395,553.471440 against QuantLib 68,395,553.471439 — **1.35e-14
-//   relative**.
+// ---- §ROLL: the roll convention is a TERM, and this harness READS it --------------------------
 //
-// ---- §EOM: the flag this comparison must pass, and the trap in passing `true` ------------------
+// `endOfMonth` is not passed as a blanket `true`, and it is no longer inferred twice either: the
+// generator takes it per leg from the engine's own dump of `leg.roll_eom` — the roll convention
+// the engine RESOLVED when it built the trade (D129). Over the book that term is 3,972
+// day-of-month legs and 28 EOM legs, and the three modes measure:
 //
-// `endOfMonth` is NOT passed as a blanket `true`. It is computed per trade as the LITERAL calendar
-// month-end test on the generation seed — `t.term == Date::endOfMonth(t.term)` — which is what the
-// engine's own convention means (`conventions/date.hpp:98`'s `is_end_of_month`, used at
-// `conventions/schedule.cpp:43` as the EOM-roll gate for backward generation).
+//   what the generator is passed                         book vs QuantLib
+//   the engine's resolved roll term (`leg.roll_eom`)      1.3508e-14   <- what produced the literals
+//   the literal calendar test, re-derived in the harness  1.3508e-14
+//   a blanket `true`                                      3.4554e-06
 //
-// Passing `true` and letting QuantLib decide costs exactly three trades, and the reason is worth
-// keeping because it is a distinction between two different jobs that the name "end of month" is
-// doing:
+// The middle row is D128's fix and the top row is D129's: same answer, one source of truth. The
+// first two agree because the engine's own inference IS that literal test, which is the point —
+// reading the term cannot drift from it, while re-deriving it can.
 //
-//   * the EOM ROLL gate — "was this swap written to roll on month ends?" — which is a question
-//     about the CALENDAR, and
+// The blanket row cost exactly three trades, and WHY is worth keeping, because it is a distinction
+// between two different jobs the name "end of month" does:
+//
+//   * the EOM ROLL gate — "was this swap written to roll on month ends?" — a question about the
+//     CALENDAR, and
 //   * ModifiedFollowing's rollback test — "did adjusting this date cross into the next month?" —
-//     which is necessarily a question about BUSINESS days.
+//     necessarily a question about BUSINESS days.
 //
 // Both engines keep those separate and implement the second identically: ours is
 // `month_of(next_business_day(d)) == month_of(d) ? … : previous_business_day(d)`
@@ -67,15 +72,32 @@
 // `calendar_.endOfMonth`, the last BUSINESS day of each month, which is a third business-day notion
 // in the same neighbourhood and the one that actually produced trade 129's 45930 / 46295.
 //
-// So this is not a convention disagreement and the engine is not in question — an earlier version
-// of this file recorded it as an open question needing a primary source (D127 §2), which D128
-// withdraws. It is a harness obligation: pass the flag the convention implies, not the flag that
-// invites a gate built for a different input.
+// None of this is a convention disagreement and the engine was never in question: an earlier
+// version of this file recorded it as an open question needing a primary source (D127 §2), which
+// D128 withdrew as the sixth harness defect of the oracle programme, and D129 then removed the
+// inference it rested on. There are 8 legs in this book (4 trades, 3 of them priced differently)
+// where QuantLib's business-day gate would infer a roll the engine does not — findable now by
+// reading the term rather than by diffing prices.
+//
+// ---- the other seven schedule parameters, audited ---------------------------------------------
+//
+// `conventions::ScheduleSpec` has eight fields. Six cross to QuantLib unchanged (effective,
+// termination, frequency, bdc, calendar, and the termination convention). Two need TRANSLATION and
+// both were got wrong on the first attempt: `stub = ShortFront` -> `DateGeneration::Backward`
+// (D119 §2) and `eom`, which is now READ off the leg rather than translated (§ROLL, D129). The
+// eighth, `term` ("one period from effective to termination"), is **not passed at all** — and
+// that is safe by construction rather
+// than by luck: no leg in `blueprints/conventions/instruments.json` has `term_up_to != frequency`
+// (checked: 0 of 14), so a trade short enough to fire `term` is also short enough that one period
+// of `frequency` spans it, and `Period(frequency)` reproduces it. It fires on 180 of the 2,000
+// book trades and 30 calibration legs, so this is load-bearing and not a corner.
 //
 // ---- provenance (D108's rule, as D114-D126) ---------------------------------------------------
 //
 // Nine exact hex-float literals from QuantLib 1.35 — one per family and the book total. No
-// dependency; D12 untouched. TO REGENERATE: see D127 §1. The traps of D115 §3 and D119 §2 apply,
+// dependency; D12 untouched. TO REGENERATE: see D127 §1, with one step changed by §ROLL — the
+// generator takes `endOfMonth` per leg from the engine's own dump (`roll <trade> <eom> <dom>`
+// rows, generator mode 3) instead of re-deriving it. The traps of D115 §3 and D119 §2 apply,
 // and two more were found writing this one: the basis arm must skip cashflows that
 // `hasOccurred(valuation)` (46 seasoned basis trades threw "negative time" without it, because a
 // paid coupon's past fixing was being demanded), and the serial arithmetic for a roll date must be
@@ -111,7 +133,7 @@ struct Fam {
   double tol_rel;   // tolerance on |engine - QL| as a fraction of the family's GROSS PV
 };
 
-// QuantLib 1.35, endOfMonth = true.
+// QuantLib 1.35, `endOfMonth` per leg from the engine's resolved roll term (§ROLL).
 //
 // THE DENOMINATOR IS THE FAMILY'S GROSS PV, sum |pv_i|, NOT its net total — and that is not a
 // convenience. A family of offsetting trades has a net that is a small difference of large
@@ -121,9 +143,10 @@ struct Fam {
 // measures the cancellation, not the engine; the first version of this test did exactly that and
 // failed EUR-ESTR-OIS for it.
 //
-// The five clean families are held to 1e-12 of gross; the three carrying one EOM-affected trade
-// each are held to the cost that trade imposes, stated rather than hidden, and §EOM's test is what
-// pins WHY they are loose.
+// All eight families are held to 1e-12 of gross and all eight are inside 1.9e-14, so every bound
+// here has ~50x of headroom and nothing is loosened to accommodate a known disagreement. Until
+// D128 three of them carried a trade that disagreed and were held to the cost it imposed; those
+// bounds went with the defect, and the book total is held the same way rather than at 1e-6.
 inline const Fam kFamilies[] = {
     {"EUR-3S6S-BASIS", 0x1.bfa59a74be4ddp+20, 1.0e-12},
     {"EUR-ESTR-OIS", 0x1.53b2ca5447df8p+19, 1.0e-12},
@@ -193,18 +216,69 @@ TEST(StageABookOracleE0, EveryFamilyAndTheBookTotalMatchQuantLib) {
     std::cout << "  [ql-oracle] " << f.name << ": engine " << ours[f.name] << ", QuantLib " << f.ql
               << ", |diff|/gross " << rel << " (gross " << g << ")\n";
     EXPECT_LT(rel, f.tol_rel) << f.name << " is " << rel
-                              << " of its gross PV from QuantLib. If this family has no EOM-affected trade its "
-                                 "bound is 1e-12 and a failure is a real disagreement; read §EOM otherwise.";
+                              << " of its gross PV from QuantLib against a 1e-12 bound it normally clears by 50x. "
+                                 "Every family is clean, so this is a real disagreement and not a known one.";
   }
   const double book_rel = std::abs(total - kQlBookPv) / book_gross;
   std::cout << "  [ql-oracle] BOOK: engine " << total << ", QuantLib " << kQlBookPv << ", |diff|/gross " << book_rel
             << " (gross " << book_gross << ")\n";
-  EXPECT_LT(book_rel, 1.0e-6) << "the 2,000-trade book NPV is " << book_rel << " of the book's gross PV from "
-                                 "QuantLib. The three EOM trades of §EOM account for 2.4e-7 of it; more than that "
-                                 "is something new.";
+  EXPECT_LT(book_rel, 1.0e-12) << "the 2,000-trade book NPV is " << book_rel << " of the book's gross PV from "
+                                  "QuantLib, against 1.35e-14 when the literals were generated. Nothing is "
+                                  "expected to disagree: read §ROLL before loosening this.";
 }
 
-// §EOM, pinned as the harness obligation it is: the literal calendar test and QuantLib's
+// §ROLL, the half that is the ENGINE's obligation (D129): the roll term the engine reports must be
+// the term its own dates were generated on. This is what lets the harness READ `leg.roll_eom`
+// instead of re-deriving it, and it is the only thing standing between "one source of truth" and
+// "a second inference that happens to agree today".
+//
+// Measured over the book, both directions, zero exceptions: `roll_eom` is exactly
+// `is_end_of_month(unadjusted termination)` and `roll_dom` is exactly its day of month. The
+// termination is the anchor because every convention here rolls backward from a short front stub;
+// a convention with a back stub would anchor on the effective date and this gate would need the
+// other branch.
+TEST(StageABookOracleE0, EveryLegReportsTheRollTermItsDatesWereGeneratedOn) {
+  const fixtures::StageA& s = book();
+  int legs = 0, eom = 0, dom = 0;
+  std::map<std::string, int> eom_by_family;
+  for (int i = 0; i < s.n_trades(); ++i) {
+    const epykos::instrument::Instrument& in = s.instruments[static_cast<std::size_t>(i)];
+    ASSERT_NE(in.termination, 0) << in.id << " has no unadjusted termination to anchor the roll on";
+    const bool anchor_is_month_end = conventions::is_end_of_month(in.termination);
+    for (const epykos::instrument::Leg& leg : in.legs) {
+      ++legs;
+      EXPECT_EQ(leg.roll_eom, anchor_is_month_end)
+          << in.id << ": the leg reports roll_eom = " << leg.roll_eom << " but its roll anchor "
+          << conventions::to_iso(in.termination) << " is "
+          << (anchor_is_month_end ? "a calendar month end" : "not a calendar month end")
+          << ". The reported term and the term the dates obey have come apart.";
+      if (leg.roll_eom) {
+        ++eom;
+        eom_by_family[in.blueprint]++;
+      } else {
+        ++dom;
+        EXPECT_EQ(leg.roll_dom, conventions::civil_from_days(in.termination).d)
+            << in.id << ": roll_dom = " << leg.roll_dom << " but the anchor "
+            << conventions::to_iso(in.termination) << " rolls on day "
+            << conventions::civil_from_days(in.termination).d;
+      }
+    }
+  }
+  // The census, pinned as data: this is the term the literals were generated from.
+  EXPECT_EQ(legs, 4000);
+  EXPECT_EQ(eom, 28) << "the book's EOM leg count moved; the oracle literals were generated from 28";
+  EXPECT_EQ(dom, 3972);
+  const std::map<std::string, int> kEomByFamily = {{"EUR-3S6S-BASIS", 2},
+                                                   {"EUR-EURIBOR-6M-IRS", 6},
+                                                   {"USD-SOFR-AVG-SWAP", 4},
+                                                   {"USD-SOFR-OIS", 14},
+                                                   {"USD-SOFR-OIS-SHIFT2-LOCKOUT2", 2}};
+  EXPECT_EQ(eom_by_family, kEomByFamily) << "which families carry an EOM leg changed";
+  std::cout << "  [ql-oracle] roll term over 4,000 legs: " << eom << " EOM, " << dom
+            << " day-of-month, 0 that disagree with their own dates\n";
+}
+
+// §ROLL's obligation, pinned: the literal calendar test and QuantLib's
 // business-day one must still DISAGREE on the three dates below, and must AGREE on a true month
 // end. If QuantLib ever changes `isEndOfMonth`, or if the engine's `is_end_of_month` becomes a
 // business-day test, this fails and the per-trade flag above needs re-deriving rather than the
@@ -214,7 +288,7 @@ TEST(StageABookOracleE0, TheTwoEndOfMonthGatesStillDisagreeOnALastBusinessDay) {
   const conventions::Calendar& usd = s.registry.calendar("USD-SOFR-SWAP");
   const conventions::Calendar& eur = s.registry.calendar("EUR-TARGET");
   struct C { const char* iso; bool is_eur; };
-  // The three roll dates that cost three trades when `endOfMonth = true` was passed blanket: each
+  // The three roll dates that cost three trades when `endOfMonth = true` was passed blanket (D127): each
   // a Saturday that is the last business day of its month without being its last calendar day.
   const C cases[] = {{"2029-09-29", false}, {"2027-10-30", false}, {"2028-04-29", true}};
   for (const C& c : cases) {

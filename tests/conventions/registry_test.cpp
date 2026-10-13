@@ -319,7 +319,7 @@ TEST(Registry, AnExtraConventionFileNeedsNoCode) {
   s.bdc = p.bdc;
   s.calendar = &c;
   s.stub = p.stub;
-  s.eom = p.eom;
+  s.eom_auto = p.eom;   // the blueprint flag is the ISDA inference, as the builder maps it (D129)
   const Schedule sched = generate_schedule(s);
   EXPECT_EQ(sched.periods(), 2u);
   const auto pay = payment_dates(sched, p.payment_lag, c);

@@ -125,6 +125,40 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D129, 2026-10-13: the roll convention is now a TERM, not an inference — and D127/D128's problem
+is eliminated rather than worked around.** The owner's conclusion after D128: *"the parameter used
+in swap creation should just be unadj start, unadj end, roll type, etc"*, and *"let's make product
+creation standardised with other commercial products as SwapEngine is and I think this problem
+eliminates."* It does. `eom` was not a term but a boolean plus an INFERENCE STEP —
+`eom && is_end_of_month(anchor)` — evaluated inside `generate_schedule`, so two implementations
+handed the same trade were free to disagree *about its terms*. `ScheduleSpec` now splits it the way
+FpML's `RollConventionEnum` and SwapEngine's `build/schedule.hpp` do (read under D107, **named
+rather than presented as independently arrived at**, D92 §5): `eom` FORCES, `eom_auto` is the ISDA
+inference, and `blueprints/`'s `"eom": true` means the latter — so **every date in the engine is
+unchanged**, 156/156 release and 131/131 reference including every bitwise E0 gate. The resolved
+term is reported on `Schedule` and recorded on `instrument::Leg` (`roll_eom` / `roll_dom`), so it
+has **one definition and one place it is decided**: the oracle harness now READS `leg.roll_eom`
+(book 1.3508e-14) instead of re-deriving the test (1.3508e-14 — same answer, two sources of truth)
+or passing a blanket `true` (3.4554e-06). It is also auditable for the first time: **3,972
+day-of-month legs, 28 EOM legs, and 8 legs where QuantLib's business-day gate would infer
+something else** (4 trades, 3 of them priced differently), findable by reading the term rather than
+by diffing prices. A new gate pins the engine's half — over all 4,000 legs the reported term is
+exactly what its own dates obey, zero exceptions both directions — because otherwise reading it is
+just a second inference that happens to agree. **Writing this change committed the very defect it
+fixes, three times**: an explicit `roll_dom` INPUT that generation never consulted (gone — only the
+resolved report remains); a `term`-branch term that depended on the period count rather than the
+trade; and an `eom` FORCE flag that did not force, because it was handed to `add_months`, whose own
+eom rule carries an existing month end forward and cannot create one. Each was caught by writing
+the test that pins what the name claims — the force flag by the new unit gate, the moment it
+existed. Forcing now snaps with `end_of_month`: the identity wherever `eom_auto` resolves true, so
+the production path is bit-identical, and on a non-month-end anchor **exactly QuantLib's
+`endOfMonth` reading** — the one that moved three trades in D127, now expressible here instead of
+only observable there. That makes the
+shared shape of all six harness defects a two-layer finding — a parameter accepted at its name
+rather than its definition, and underneath it, **a parameter that was not a parameter**: a flag
+needing an inference to interpret cannot be passed correctly between two implementations, however
+carefully, and the only robust fix is to make it a value.
+
 **D127+D128, 2026-10-13: Stage A's 2,000-trade book — ALL 2,000 agree to 1.35e-14, and D127's
 "third convention question" was a sixth HARNESS defect.** The problem D109's h2h measured against
 SwapEngine, whose conventions ours were imported from, so that comparison is blind to this layer.
@@ -364,8 +398,8 @@ kernels, which stayed true while the decomposition got slower — *a gate binds 
 sixth time in this repository and the first on a performance quantity.
 
 `ctest`: **156/156** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
-tests; the default configuration's count is lower). **CI green on all four jobs** (ubuntu
-release / reference / mutation, macos release) at `6d68b09`. **`integrate/invariants` was merged into
+tests; the default configuration's count is lower) and **131/131** on the reference preset. **CI green on all four
+jobs** (ubuntu release / reference / mutation, macos release) at `4b31f81`. **`integrate/invariants` was merged into
 `main` on 2026-10-12 (`046427d`): 82 commits, D95–D116** — §1b's three invariants, the exotics kill
 test, the head-to-head lifted to Stage A, and the first independent oracles. The merged tree is
 byte-identical to the CI-green tip. **`main` is the line of development**; `origin/integrate/rebuild`

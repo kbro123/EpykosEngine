@@ -10704,3 +10704,125 @@ rather than at its definition. D122's pillar error was the same thing one level 
 *default*. The remedy is not more caution about conclusions; it is reading the definition of every
 parameter the harness passes, and the gate now pins the distinction rather than the verdict.
 
+
+## D129 — The roll convention is a TERM, not an inference: product creation standardised, and D127/D128's problem is eliminated rather than worked around (2026-10-13)
+
+The owner's conclusion after D128: *"the parameter used in swap creation should just be unadj start,
+unadj end, roll type, etc"*, and *"let's make product creation standardised with other commercial
+products as swapengine is and I think this problem eliminates."* It does.
+
+### 1. The root cause D128 only worked around
+
+D128 fixed the oracle by translating `eom` into QuantLib's vocabulary. That was correct and
+insufficient: **`eom` is not a term.** It was a boolean plus an INFERENCE STEP —
+`spec.eom && is_end_of_month(anchor)` — evaluated inside `generate_schedule`, in the middle of the
+trade's terms. Two implementations handed the same terms were therefore free to disagree *about the
+terms*, and did: QuantLib's gate is `Calendar::isEndOfMonth`, a business-day test, and it moved
+three of Stage A's 2,000 trades.
+
+An NPV is a function of the coupon dates; the dates are a function of the unadjusted endpoints, the
+frequency, the stub rule and the roll convention. Four of those five were explicit terms. The fifth
+was a guess made twice, once per engine.
+
+### 2. The standardised decomposition
+
+FpML's `RollConventionEnum` carries an explicit roll — `EOM`, `IMM`, or a day-of-month 1..30 — so
+there is nothing to infer. SwapEngine's `build/schedule.hpp` splits the same thing three ways, and
+**that split is where this design came from**: read under D107, named here rather than presented as
+independently arrived at (D92 §5's laundering guard, which exists for exactly this).
+`conventions::ScheduleSpec` now carries:
+
+| field | meaning |
+|---|---|
+| `eom` | **force** every rolled boundary to the month end — an instruction |
+| `eom_auto` | the ISDA inference: set `eom` when the roll ANCHOR is a calendar month end |
+
+`blueprints/`'s `"eom": true` is semantically the AUTO flag — "roll on month ends *if* the anchor is
+one" — which is exactly what the old single `ScheduleSpec::eom` meant, so it maps to `eom_auto` and
+**every date in the engine is unchanged**. `ss.eom` is now the force instruction and no convention
+sets it.
+
+Forcing needed code, and the draft did not have it: `ss.eom` was passed to `add_months`, whose own
+eom rule only carries an EXISTING month end forward and cannot create one, so a field documented as
+FORCE quietly did nothing on the only inputs that distinguish it from the inference. It now snaps
+each rolled date with `end_of_month`. That snap is the identity on every anchor `eom_auto` resolves
+true — so the production path is bit-identical — and on a non-month-end anchor it is **exactly
+QuantLib's `endOfMonth` reading**, the one that moved three trades in D127. The engine can now
+express that interpretation instead of only observing it in another library. Endpoints never move;
+only rolled boundaries do.
+
+`tests/conventions/schedule_test.cpp`'s `EndOfMonthForcedVersusInferred` is what caught that, **the
+moment it existed**, and it pins seven things: the inference not firing on a non-month-end anchor
+and the dates it leaves alone; forcing from that same anchor (2027-02-28, 2028-02-29 — the leap
+year); that force and inference COINCIDE on a month-end anchor, which is the subset relation the
+oracle harness depends on; that a calendar-day frequency never resolves an EOM term; that a back
+stub reads the EFFECTIVE date as its anchor; and that one period still reports a term.
+
+**SwapEngine's third field, an explicit `roll_dom` INPUT, is deliberately not taken** — and the
+first draft of this change did take it, which is worth recording. It was accepted, copied into the
+`Schedule`'s report and **never consulted by the generator**: this generator rolls whole months
+from an anchor endpoint, so the roll day is the anchor's day by construction, and `roll_dom = 15`
+against a 20th anchor would have produced dates on the 20th while the reported term said the 15th.
+That is this entry's own defect class, committed while writing the fix for it. An explicit roll day
+needs the generator to change first (both endpoints become stubs), nothing in `blueprints/` asks
+for one, so the input is gone and only the **resolved** `Schedule::roll_dom` report remains.
+
+### 3. The term is resolved once and recorded
+
+`generate_schedule` resolves `eom_auto` against the anchor (the termination for a front stub, the
+effective for a back stub) and reports the outcome on its `Schedule`; `instrument::Leg` records it
+as `roll_eom` / `roll_dom`. So the roll convention has **one definition and one place it is
+decided**, and a consumer — a report, an exchange format, an oracle harness — states the term
+instead of re-deriving it from a date.
+
+The one-period (`term`) branch resolves and reports it too, though it rolls nothing: the term is a
+property of the trade, not of how many periods it turned out to have. On this book that is
+unobservable — 0 of the 330 single-period legs has a month-end termination — which is exactly why
+it should not be left to the coincidence.
+
+That makes it auditable, which it was not: over Stage A's 2,000 trades the resolved term is **3,972
+day-of-month legs and 28 EOM legs**, and **8 legs where QuantLib's business-day gate would have
+inferred something else** — 4 trades, of which 3 moved a price, the fourth because the EOM snap
+happens to land on the same dates. Before this change that could only be found by diffing prices.
+
+A new gate in `stage_a_book_oracle_e0_test.cpp` pins the engine's half of the obligation: over all
+4,000 legs the reported `roll_eom` is exactly `is_end_of_month(unadjusted termination)` and
+`roll_dom` exactly its day of month, **zero exceptions in both directions**, plus the 28/3,972
+census and which five families carry an EOM leg. Without that, reading the term is just a second
+inference that happens to agree today.
+
+### 4. Verified value-neutral, and the oracle now reads the term
+
+`ctest` 156/156 release and 131/131 reference, including every bitwise E0 gate and the whole-book
+oracle at 1.35e-14 — this touches every schedule the engine generates, so value-neutrality is the
+whole claim and the E0 gates are what establish it.
+
+The harness now reads `leg.roll_eom` rather than recomputing the literal test, and the three modes
+agree as they must:
+
+| what the harness passes | book vs QuantLib |
+|---|---|
+| the engine's **resolved roll term** | **1.3508e-14** |
+| the literal test, re-derived | 1.3508e-14 |
+| a blanket `true` | 3.4554e-06 |
+
+The middle row is the D128 workaround and the top row is the fix: same answer, one source of truth.
+
+### 5. What this says about the other five harness defects
+
+All six had the same shape — a parameter accepted at its name rather than its definition. This one
+had a second cause underneath: **the parameter was not a parameter.** A flag that requires an
+inference to interpret cannot be passed correctly between two implementations, however carefully;
+the only robust fix is to make it a value.
+
+And the fix for it shipped the same defect **three times** before the gates were written: an input
+`roll_dom` nothing consulted, a reported term that depended on the period count rather than on the
+trade, and a FORCE flag that did not force. All three were in the first draft; all three were found
+by writing the test that pins what the name claims, two of them within minutes of each other.
+Knowing the defect class evidently does not prevent committing it — **writing the gate does**, and
+that is the only transferable lesson here.
+
+`stub` is the one of that kind still standing in this struct: `ShortFront` is explicit, but the
+harness still translates it to `DateGeneration::Backward`, and the two are equivalent only because
+our generator rolls backward for a front stub. That equivalence is documented in the gate rather
+than relied on silently.

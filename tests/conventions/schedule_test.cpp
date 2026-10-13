@@ -23,6 +23,8 @@ std::vector<std::string> iso(const std::vector<Date>& ds) {
   return out;
 }
 
+// `eom` here is the FORCE flag (D129); the cases below anchor on a month end, where forcing and
+// the ISDA `eom_auto` inference coincide. `EndOfMonthForcedVersusInferred` is what separates them.
 ScheduleSpec spec(const char* eff, const char* term, const char* freq, StubKind stub, bool eom) {
   ScheduleSpec s;
   s.effective = parse_iso(eff);
@@ -96,4 +98,74 @@ TEST(Schedule, PaymentAndFixingDates) {
   EXPECT_EQ(spot_date(parse_iso("2026-04-01"), 0, t), parse_iso("2026-04-01"));
   EXPECT_EQ(stub_from_string("LongBack"), StubKind::LongBack);
   EXPECT_THROW(stub_from_string("Short"), DateError);
+}
+
+// D129: `eom` and `eom_auto` are two different things and this is where that is pinned. On an
+// anchor that is NOT a month end they disagree — FORCE snaps every rolled boundary to the month
+// end, the ISDA inference does nothing at all — and `Schedule` reports which one it ran on, so a
+// consumer records the term instead of re-deriving it from a date.
+TEST(Schedule, EndOfMonthForcedVersusInferred) {
+  // Anchor 2029-02-27: a Tuesday, not its month's end.
+  const char* kEff = "2026-11-30";
+  const char* kAnchor = "2029-02-27";
+
+  // (a) `eom_auto` alone: the anchor is not a month end, so nothing fires and the day of month is
+  //     kept. This is what every convention in blueprints/ asks for.
+  ScheduleSpec a = spec(kEff, kAnchor, "1Y", StubKind::ShortFront, false);
+  a.eom_auto = true;
+  const Schedule sa = generate_schedule(a);
+  EXPECT_EQ(iso(sa.unadjusted), (std::vector<std::string>{"2026-11-30", "2027-02-27", "2028-02-27", "2029-02-27"}));
+  EXPECT_FALSE(sa.roll_eom) << "an anchor that is not a month end must not resolve to an EOM roll";
+  EXPECT_EQ(sa.roll_dom, 27);
+
+  // (b) `eom` forces it: every rolled boundary becomes its month's end, 2028 included (a leap
+  //     year, so 02-29), and the schedule says so.
+  ScheduleSpec f = spec(kEff, kAnchor, "1Y", StubKind::ShortFront, true);
+  const Schedule sf = generate_schedule(f);
+  EXPECT_EQ(iso(sf.unadjusted), (std::vector<std::string>{"2026-11-30", "2027-02-28", "2028-02-29", "2029-02-27"}));
+  EXPECT_TRUE(sf.roll_eom);
+  EXPECT_EQ(sf.roll_dom, 27) << "roll_dom still reports the anchor's day; roll_eom is what overrides it";
+
+  // (c) neither: identical dates to (a), which is why passing the AUTO flag where FORCE is meant
+  //     is invisible on most books and visible on exactly the EOM trades.
+  const Schedule sn = generate_schedule(spec(kEff, kAnchor, "1Y", StubKind::ShortFront, false));
+  EXPECT_EQ(iso(sn.unadjusted), iso(sa.unadjusted));
+  EXPECT_FALSE(sn.roll_eom);
+
+  // (d) on a month-end anchor the two coincide, and both report the EOM term. This is the subset
+  //     relation the oracle harness relies on (stage_a_book_oracle_e0_test.cpp §ROLL).
+  ScheduleSpec m = spec(kEff, "2029-02-28", "1Y", StubKind::ShortFront, false);
+  m.eom_auto = true;
+  const Schedule sm = generate_schedule(m);
+  const Schedule smf = generate_schedule(spec(kEff, "2029-02-28", "1Y", StubKind::ShortFront, true));
+  EXPECT_EQ(iso(sm.unadjusted), iso(smf.unadjusted));
+  EXPECT_TRUE(sm.roll_eom);
+  EXPECT_TRUE(smf.roll_eom);
+  EXPECT_EQ(sm.roll_dom, 28);
+
+  // (e) a calendar-day frequency cannot roll on month ends, and the guard is on the ROLLING
+  //     branch: 2W from a month-end anchor keeps its 14-day grid and reports no EOM term.
+  ScheduleSpec w = spec("2026-09-30", "2026-10-28", "2W", StubKind::ShortFront, false);
+  w.eom_auto = true;
+  const Schedule sw = generate_schedule(w);
+  EXPECT_EQ(iso(sw.unadjusted), (std::vector<std::string>{"2026-09-30", "2026-10-14", "2026-10-28"}));
+  EXPECT_FALSE(sw.roll_eom);
+
+  // (f) a back stub anchors on the EFFECTIVE date, so that is the date the inference reads.
+  ScheduleSpec b = spec("2026-01-31", "2027-04-30", "6M", StubKind::ShortBack, false);
+  b.eom_auto = true;
+  const Schedule sb = generate_schedule(b);
+  EXPECT_EQ(iso(sb.unadjusted), (std::vector<std::string>{"2026-01-31", "2026-07-31", "2027-01-31", "2027-04-30"}));
+  EXPECT_TRUE(sb.roll_eom);
+  EXPECT_EQ(sb.roll_dom, 31);
+
+  // (g) one period rolls nothing, but the TERM is still reported — it is a property of the trade,
+  //     not of how many periods it turned out to have.
+  ScheduleSpec one = spec("2026-09-30", "2027-03-31", "1Y", StubKind::ShortFront, false);
+  one.term = true;
+  one.eom_auto = true;
+  const Schedule so = generate_schedule(one);
+  EXPECT_EQ(so.periods(), 1u);
+  EXPECT_TRUE(so.roll_eom);
+  EXPECT_EQ(so.roll_dom, 31);
 }

@@ -230,11 +230,17 @@ Instrument build_swap(const BuildContext& ctx, const Blueprint& bp, const Instru
     ss.bdc = conv.bdc;
     ss.calendar = &roll_cal;
     ss.stub = conv.stub;
-    ss.eom = conv.eom;
+    // `blueprints/`'s "eom" is the ISDA AUTO flag -- "roll on month ends IF the anchor is one" --
+    // which is what the old single `ScheduleSpec::eom` meant, so it maps to `eom_auto` and the
+    // dates are unchanged (D129). `ss.eom` is now the FORCE instruction and no convention sets it.
+    // The resolved term is read back off the schedule below, never re-inferred from a date.
+    ss.eom_auto = conv.eom;
     const Schedule sched = generate_schedule(ss);
     const std::vector<Date> pays = payment_dates(sched, leg.payment_lag, roll_cal);
     leg.schedule = sched.adjusted;
     leg.payments = pays;
+    leg.roll_eom = sched.roll_eom;
+    leg.roll_dom = sched.roll_dom;
     const IndexDef* index = nullptr;
     ObservationSpec spec;
     if (kind != CouponKind::Fixed) {

@@ -33,6 +33,12 @@ Schedule generate_schedule(const ScheduleSpec& spec) {
   Schedule out;
   if (spec.term) {
     out.unadjusted = {spec.effective, spec.termination};
+    // One period rolls nothing, but the TERM is a property of the trade and not of how many
+    // periods it happened to have, so it is resolved and reported here too (D129). No date
+    // depends on it: there are no interior boundaries to snap. The frequency guard below does not
+    // apply — `spec.frequency` is ignored on this branch, so it must not reach the term either.
+    out.roll_eom = spec.eom || (spec.eom_auto && is_end_of_month(spec.termination));
+    out.roll_dom = civil_from_days(spec.termination).d;
   } else {
     if (spec.frequency.n <= 0) throw DateError("schedule: frequency must be positive");
     const bool front = spec.stub == StubKind::ShortFront || spec.stub == StubKind::LongFront;
@@ -40,12 +46,22 @@ Schedule generate_schedule(const ScheduleSpec& spec) {
     std::vector<Date> dates;
     if (front) {
       // roll backward from the termination date
-      const bool eom = spec.eom && !spec.frequency.is_calendar_days() && is_end_of_month(spec.termination);
+      // The roll convention, RESOLVED ONCE from the anchor (D129). `eom` forces; `eom_auto` is the
+      // ISDA inference and is the only thing that looks at a date.
+      const bool eom = !spec.frequency.is_calendar_days() &&
+                       (spec.eom || (spec.eom_auto && is_end_of_month(spec.termination)));
+      out.roll_eom = eom;
+      out.roll_dom = civil_from_days(spec.termination).d;
       dates.push_back(spec.termination);
       for (int k = 1;; ++k) {
         Period p{spec.frequency.n * k, spec.frequency.unit};
         Date d = spec.frequency.is_calendar_days() ? spec.termination - p.days()
                                                    : add_months(spec.termination, -p.months(), eom);
+        // `add_months`'s own eom rule only carries a month end FORWARD; it cannot create one from
+        // an anchor that is not one. Forcing is this snap (D129). On every anchor that IS a month
+        // end — which is every case `eom_auto` resolves true — it is the identity, so the
+        // inference path is bit-identical to what it was.
+        if (eom) d = end_of_month(d);
         if (d <= spec.effective) {
           if (d < spec.effective) {
             // stub between effective and dates.back()
@@ -61,12 +77,16 @@ Schedule generate_schedule(const ScheduleSpec& spec) {
       std::reverse(dates.begin(), dates.end());
     } else {
       // roll forward from the effective date
-      const bool eom = spec.eom && !spec.frequency.is_calendar_days() && is_end_of_month(spec.effective);
+      const bool eom = !spec.frequency.is_calendar_days() &&
+                       (spec.eom || (spec.eom_auto && is_end_of_month(spec.effective)));
+      out.roll_eom = eom;
+      out.roll_dom = civil_from_days(spec.effective).d;
       dates.push_back(spec.effective);
       for (int k = 1;; ++k) {
         Period p{spec.frequency.n * k, spec.frequency.unit};
         Date d = spec.frequency.is_calendar_days() ? spec.effective + p.days()
                                                    : add_months(spec.effective, p.months(), eom);
+        if (eom) d = end_of_month(d);   // force: see the backward branch
         if (d >= spec.termination) {
           if (d > spec.termination) {
             out.back_stub = true;

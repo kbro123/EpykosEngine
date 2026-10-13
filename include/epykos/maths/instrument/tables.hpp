@@ -102,6 +102,16 @@ struct Leg {
   // Reporting: the whole schedule (paid coupons included), for the tables of PROBLEM.md O2.
   std::vector<conventions::Date> schedule;   // adjusted roll dates
   std::vector<conventions::Date> payments;   // one per period
+  // The ROLL CONVENTION this leg was generated on, resolved once by `generate_schedule` (D129).
+  // An NPV is a function of the coupon dates, and the dates are a function of the unadjusted
+  // endpoints, the frequency, the stub rule and THIS. Recording it means a consumer — a report, an
+  // exchange format, an oracle harness — states the term rather than re-inferring it from a date,
+  // which is the mistake that moved three of Stage A's 2,000 trades (D127, D128).
+  // `roll_dom = 0` means there is no rolled boundary to have a day: a deposit or a future is built
+  // from its one explicit period and never goes through `generate_schedule`, so it has no roll
+  // convention to report. Every swap leg reports a day in 1..31.
+  bool roll_eom = false;                     // every rolled boundary is its month's end
+  int roll_dom = 0;                          // otherwise, the day of month they land on
 };
 
 enum class Kind : unsigned char { Ois = 0, Irs = 1, Basis = 2, Deposit = 3, Future = 4 };

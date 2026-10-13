@@ -457,6 +457,16 @@ generate their schedule backward from the ADJUSTED termination and so leave a sp
 weekend roll — **a disagreement localises to the harness before it localises to an engine**, and the control that
 separates the two is worth more than the write-up.
 
+One more, from D129, which is about the ENGINE's side of a lift. Six of these oracles' seven defects were a
+parameter accepted at its name rather than its definition, and the sixth (D127/D128's EOM) had a second cause
+underneath: **the parameter was not a parameter.** `eom` was a boolean plus an inference step evaluated inside the
+schedule generator, so no amount of care in the harness could pass it correctly — the two engines were inferring
+the terms, not reading them. The fix is not a better translation but a value: `ScheduleSpec` now splits FORCE from
+the ISDA inference, `Schedule` and `instrument::Leg` report the RESOLVED roll term, and the harness reads it.
+**When a harness has to translate a parameter, ask first whether that parameter should be a term** — and expect to
+commit the same defect while fixing it (D129 §2 did, three times, each caught by the gate that pins what the name
+claims).
+
 ---
 
 ## Risk register

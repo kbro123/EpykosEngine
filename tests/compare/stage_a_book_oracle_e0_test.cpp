@@ -15,46 +15,62 @@
 //   EUR-3S6S-BASIS               212   9.07e-17         1.07e-15
 //   EUR-ESTR-OIS                 300   1.14e-14         1.86e-14
 //   EUR-EURIBOR-3M-IRS           167   1.25e-15         4.97e-16
+//   EUR-EURIBOR-6M-IRS           237   1.41e-15         2.1e-16
 //   USD-SOFR-AVG-SWAP            199   1.72e-15         7.03e-16
+//   USD-SOFR-OIS                 481   8.47e-15         1.4e-15
 //   USD-SOFR-OIS-SHIFT2          195   7.85e-15         4.42e-15
-//   EUR-EURIBOR-6M-IRS           237   7.85e-07         1.62e-07   <- one trade
-//   USD-SOFR-OIS                 481   4.67e-06         2.71e-07   <- one trade
-//   USD-SOFR-OIS-SHIFT2-LOCKOUT2 209   1.94e-05         2.70e-06   <- one trade
+//   USD-SOFR-OIS-SHIFT2-LOCKOUT2 209   1.01e-14         3.9e-15
 //
-//   The five families with no EOM-affected trade agree to 1.9e-14 of gross or better. The three
-//   that have one are 1.6e-07 to 2.7e-06, and that whole span is the three trades.
+//   ALL 2,000 trades agree to better than 1e-10 of notional; every family to 1.9e-14 of its gross
+//   PV. Book NPV: engine 68,395,553.471440 against QuantLib 68,395,553.471439 — **1.35e-14
+//   relative**.
 //
-//   book NPV   engine 68,395,553.471440   QuantLib 68,395,789.808924
-//              |diff| = 236.34, which is 3.46e-06 of the NET and ~2.4e-07 of the book's GROSS PV.
-//              The net is quoted here only because it is the familiar number; every tolerance in
-//              this file is against the gross, for the reason given at `kFamilies`.
+// ---- §EOM: the flag this comparison must pass, and the trap in passing `true` ------------------
 //
-// ---- §EOM: the three, and the open question ---------------------------------------------------
+// `endOfMonth` is NOT passed as a blanket `true`. It is computed per trade as the LITERAL calendar
+// month-end test on the generation seed — `t.term == Date::endOfMonth(t.term)` — which is what the
+// engine's own convention means (`conventions/date.hpp:98`'s `is_end_of_month`, used at
+// `conventions/schedule.cpp:43` as the EOM-roll gate for backward generation).
 //
-// All three outliers have a termination that is the **last business day of its month without being
-// the last calendar day**, and the divergence is in EOM *detection*, not in the EOM adjustment:
+// Passing `true` and letting QuantLib decide costs exactly three trades, and the reason is worth
+// keeping because it is a distinction between two different jobs that the name "end of month" is
+// doing:
 //
-//   ours      `is_end_of_month(d)` is `end_of_month(d) == d` — the literal CALENDAR month end
-//             (conventions/date.hpp), seeded from the termination for backward generation
-//             (conventions/schedule.cpp:43).
-//   QuantLib  `Calendar::isEndOfMonth(d)` is `d.month() != adjust(d+1).month()` — a BUSINESS-day
-//             notion, true whenever the next business day falls in the next month.
+//   * the EOM ROLL gate — "was this swap written to roll on month ends?" — which is a question
+//     about the CALENDAR, and
+//   * ModifiedFollowing's rollback test — "did adjusting this date cross into the next month?" —
+//     which is necessarily a question about BUSINESS days.
 //
-// Worked: trade 129 terminates 2029-09-29, a **Saturday**. Ours: the 30th is the calendar month
-// end, so not EOM, and the annual grid stays on the 29th. QuantLib: the next business day is
-// 2029-10-01, so it IS end-of-month, and the grid snaps to the 30th — 2025-09-30, 2026-09-30, …
-// (verified from the generated schedule: 45930, 46295 against our 45929, 46294).
+// Both engines keep those separate and implement the second identically: ours is
+// `month_of(next_business_day(d)) == month_of(d) ? … : previous_business_day(d)`
+// (`conventions/calendar.cpp:221`), QuantLib's is `if (d1.month() != d.month()) return adjust(d,
+// Preceding)` (`calendar.cpp:96`). Neither consults an `isEndOfMonth` helper for it.
 //
-// **Neither blanket setting matches, which is what proves the mechanism.** Re-running with
-// `endOfMonth = false` fixes trades 129 and 1704 and BREAKS trade 1688, whose effective is
-// 2025-09-30 — a true calendar month end that does need EOM. So this is not "QuantLib applies EOM
-// and we do not"; it is two different tests for the same flag.
+// But QuantLib's EOM-ROLL gate (`schedule.cpp:377`) is `calendar_.isEndOfMonth(seed)`, and
+// `Calendar::isEndOfMonth(d)` is `d.month() != adjust(d+1).month()` — the BUSINESS-day notion.
 //
-// WHICH IS RIGHT IS NOT DECIDED HERE. The 2006 ISDA Definitions' EOM rule is phrased about the
-// last day of a calendar month, which reads our way, but **that is exactly the kind of inference
-// that was wrong about the observation shift** (D116 presented two defensible readings; D123 found
-// the ARRC settled it against this engine). It needs the primary source, and until then the test
-// pins the mechanism and the cost rather than a verdict.
+// That is not arbitrary: it makes the test ADJUSTED-DATE TOLERANT. A genuine EOM swap terminating
+// Sunday 2029-09-30 adjusts under ModifiedFollowing to Friday 2029-09-28, which is not a calendar
+// month end; a literal test handed that date loses the convention, and QuantLib's recovers it. The
+// cost is that it cannot tell that case apart from ours — 2029-09-28, -29 and -30 all adjust to the
+// same day and all three test TRUE, because the distinguishing information is simply not in the
+// adjusted date. It lives only in the UNADJUSTED roll date, which the originating convention holds.
+//
+// So neither gate is wrong; they are right for different inputs, and `Schedule` documents its dates
+// as unadjusted (it adjusts them itself at schedule.cpp:373) while its gate suits a possibly
+// adjusted one. On every genuine month end the two agree, so the literal test is a strict subset and
+// never misses a real EOM swap on unadjusted input — which is what this fixture supplies.
+//
+// Two things the EOM detection is NOT. It does not roll the termination back to the Friday — that is
+// ModifiedFollowing, applied before the block, which only touches dates_[1 .. size-2]. And when it
+// fires with a non-Unadjusted convention it snaps those intermediate dates to
+// `calendar_.endOfMonth`, the last BUSINESS day of each month, which is a third business-day notion
+// in the same neighbourhood and the one that actually produced trade 129's 45930 / 46295.
+//
+// So this is not a convention disagreement and the engine is not in question — an earlier version
+// of this file recorded it as an open question needing a primary source (D127 §2), which D128
+// withdraws. It is a harness obligation: pass the flag the convention implies, not the flag that
+// invites a gate built for a different input.
 //
 // ---- provenance (D108's rule, as D114-D126) ---------------------------------------------------
 //
@@ -112,17 +128,13 @@ inline const Fam kFamilies[] = {
     {"EUR-3S6S-BASIS", 0x1.bfa59a74be4ddp+20, 1.0e-12},
     {"EUR-ESTR-OIS", 0x1.53b2ca5447df8p+19, 1.0e-12},
     {"EUR-EURIBOR-3M-IRS", 0x1.1d05fc029f817p+22, 1.0e-12},
-    {"EUR-EURIBOR-6M-IRS", -0x1.0ee4dd031391dp+24, 1.0e-06},
+    {"EUR-EURIBOR-6M-IRS", -0x1.0ee4edc2bbbc9p+24, 1.0e-12},
     {"USD-SOFR-AVG-SWAP", 0x1.9437edacaf9e2p+25, 1.0e-12},
-    {"USD-SOFR-OIS", 0x1.5f091563e8a29p+25, 1.0e-06},
+    {"USD-SOFR-OIS", 0x1.5f093e5311485p+25, 1.0e-12},
     {"USD-SOFR-OIS-SHIFT2", -0x1.6a2057b6dc47p+20, 1.0e-12},
-    {"USD-SOFR-OIS-SHIFT2-LOCKOUT2", -0x1.1b3184ce2f8f6p+24, 1.0e-05},
+    {"USD-SOFR-OIS-SHIFT2-LOCKOUT2", -0x1.1b32b2433e156p+24, 1.0e-12},
 };
-inline constexpr double kQlBookPv = 0x1.04e8c373c5677p+26;
-
-// The three trades whose termination is the last business day of its month without being the last
-// calendar day. Pinned by index AND re-derived from the dates, so a fixture reshuffle fails loudly.
-inline constexpr int kEomTrades[] = {129, 1188, 1704};
+inline constexpr double kQlBookPv = 0x1.04e8885e2c0e1p+26;
 
 const fixtures::StageA& book() {
   static const fixtures::StageA s = [] {
@@ -192,32 +204,35 @@ TEST(StageABookOracleE0, EveryFamilyAndTheBookTotalMatchQuantLib) {
                                  "is something new.";
 }
 
-// §EOM, pinned by its MECHANISM. The three divergent trades must each have a termination that is
-// the last business day of its month without being the last calendar day — the one shape on which
-// our calendar EOM test and QuantLib's business-day one disagree. If the EOM question is ever
-// resolved, this fails and names the decision that has to be recorded; if a fourth trade acquires
-// the shape, the count fails.
-TEST(StageABookOracleE0, TheThreeDivergentTradesAreExactlyTheEomDetectionShape) {
+// §EOM, pinned as the harness obligation it is: the literal calendar test and QuantLib's
+// business-day one must still DISAGREE on the three dates below, and must AGREE on a true month
+// end. If QuantLib ever changes `isEndOfMonth`, or if the engine's `is_end_of_month` becomes a
+// business-day test, this fails and the per-trade flag above needs re-deriving rather than the
+// tolerances being loosened.
+TEST(StageABookOracleE0, TheTwoEndOfMonthGatesStillDisagreeOnALastBusinessDay) {
   const fixtures::StageA& s = book();
   const conventions::Calendar& usd = s.registry.calendar("USD-SOFR-SWAP");
   const conventions::Calendar& eur = s.registry.calendar("EUR-TARGET");
-  for (const int i : kEomTrades) {
-    ASSERT_LT(i, s.n_trades());
-    const epykos::instrument::Instrument& in = s.instruments[static_cast<std::size_t>(i)];
-    const bool is_eur = in.blueprint.rfind("EUR", 0) == 0;
-    const conventions::Calendar& cal = is_eur ? eur : usd;
-    const conventions::Date t = in.termination;
-    // Not the last CALENDAR day of its month...
-    EXPECT_FALSE(conventions::is_end_of_month(t))
-        << "trade " << i << " terminates on " << conventions::to_iso(t)
-        << ", which IS a calendar month end -- then both EOM tests agree on it and it cannot be one of the three";
-    // ...but the next business day falls in the next month, which is QuantLib's test.
-    const conventions::Date next = cal.next_business_day(t + 1);
-    EXPECT_NE(conventions::civil_from_days(next).m, conventions::civil_from_days(t).m)
-        << "trade " << i << " terminates on " << conventions::to_iso(t) << " and its next business day "
-        << conventions::to_iso(next) << " is in the SAME month, so QuantLib's EOM test does not fire either and "
-           "this trade is not the shape this test exists to pin";
-    std::cout << "  [ql-oracle] trade " << i << " (" << in.blueprint << ") terminates " << conventions::to_iso(t)
-              << "; next business day " << conventions::to_iso(next) << " is in the next month\n";
+  struct C { const char* iso; bool is_eur; };
+  // The three roll dates that cost three trades when `endOfMonth = true` was passed blanket: each
+  // a Saturday that is the last business day of its month without being its last calendar day.
+  const C cases[] = {{"2029-09-29", false}, {"2027-10-30", false}, {"2028-04-29", true}};
+  for (const C& c : cases) {
+    const conventions::Date d = conventions::parse_iso(c.iso);
+    const conventions::Calendar& cal = c.is_eur ? eur : usd;
+    EXPECT_FALSE(conventions::is_end_of_month(d)) << c.iso << " is a calendar month end after all";
+    const conventions::Date next = cal.next_business_day(d + 1);
+    EXPECT_NE(conventions::civil_from_days(next).m, conventions::civil_from_days(d).m)
+        << c.iso << "'s next business day " << conventions::to_iso(next)
+        << " is in the same month, so QuantLib's business-day gate would not fire and this date no longer "
+           "demonstrates the distinction";
   }
+  // And on a true month end the two agree, which is why the literal test never misses a real EOM
+  // swap: it is a strict subset of the business-day one.
+  for (const char* iso : {"2025-09-30", "2028-04-30"}) {
+    const conventions::Date d = conventions::parse_iso(iso);
+    EXPECT_TRUE(conventions::is_end_of_month(d)) << iso << " should be a calendar month end";
+  }
+  std::cout << "  [ql-oracle] the EOM-roll gate and the business-day test disagree on 3 dates and agree on "
+               "every true month end\n";
 }

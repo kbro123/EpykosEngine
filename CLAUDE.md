@@ -125,23 +125,32 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
-**D127, 2026-10-13: Stage A's 2,000-trade book — 1,997 agree to 1e-10 of notional, and the 3 that do
-not are one convention question about EOM DETECTION.** The problem D109's h2h measured against
+**D127+D128, 2026-10-13: Stage A's 2,000-trade book — ALL 2,000 agree to 1.35e-14, and D127's
+"third convention question" was a sixth HARNESS defect.** The problem D109's h2h measured against
 SwapEngine, whose conventions ours were imported from, so that comparison is blind to this layer.
-Every trade rebuilt in QuantLib from its terms, so **2,000 schedules** are under test: five families
-agree to **1.9e-14 of gross or better**, book NPV differs by 236.34 = **2.53e-07 of the book's gross
-PV** of 9.33e8, and the whole of it is three trades. All three have a termination that is the **last
-business day of its month without being the last calendar day** — ours `is_end_of_month` tests the
-literal CALENDAR end, QuantLib's `Calendar::isEndOfMonth` tests whether the next BUSINESS day is in
-the next month. Trade 129 terminates Saturday 2029-09-29: we keep the 29th, QuantLib snaps to the
-30th. **Neither blanket setting matches** — `endOfMonth = false` fixes two and breaks a third whose
-effective IS a month end — which proves it is two tests for one flag, not a missing adjustment.
-**Not decided here**: ISDA's EOM is phrased about the last CALENDAR day, which reads our way, but
-that is the inference that was wrong about the observation shift (D123), so it needs the primary
-source. Third convention question the programme has surfaced, and the first with a measured cost on
-the book. Also: the gate's tolerance is against each family's GROSS PV, because **holding a
-near-cancelling net to a relative tolerance measures the cancellation, not the engine** — the first
-version did that and failed EUR-ESTR-OIS, whose net is 695,702 out of millions in notional.
+Every trade rebuilt in QuantLib from its terms, so **2,000 schedules** are under test. D127 first
+reported 3 trades disagreeing and recorded it as an open EOM convention question with a measured
+cost. The owner asked what the EOM detection was FOR — *"there is a difference between EOM detect
+for EOM rolls and EOM detection for ModifiedFollowing rollback"* — and it dissolved the finding.
+Two different jobs: the **EOM ROLL gate** asks "was this swap written to roll on month ends", a
+CALENDAR question; **ModifiedFollowing's rollback** asks "did adjusting cross a month", necessarily
+a BUSINESS-day question. Neither engine confuses the second and they implement it identically.
+QuantLib's roll gate, though, is `Calendar::isEndOfMonth` — the business-day test — so it is
+seed-dependent: trade 129's effective 2022-09-29 (Thu) is not EOM by it, its termination 2029-09-29
+(Sat) is, same swap and same day of month. **That is not an accident, which the first draft of this
+said**: the business-day flavour makes the test ADJUSTED-DATE TOLERANT, because a true EOM swap
+terminating Sunday 2029-09-30 adjusts to Friday 2029-09-28, which no literal test would recognise.
+The cost is that 09-28, -29 and -30 all adjust to the same day and all test TRUE — **the
+distinguishing information is not in the adjusted date at all**, only in the unadjusted roll date
+the convention holds. Neither gate is wrong; they are right for different inputs. Passing the flag
+our convention implies (the literal test, per trade) takes the book to **1.35e-14 relative, 0 of
+2,000 trades above 1e-10 of notional**, every family to 1e-12 of gross. And the detection is NOT
+what rolls the termination back to the Friday — that is ModifiedFollowing, before the block, which
+only touches the intermediate dates. **Six harness defects to
+one engine defect**, and this was the costly one: it produced a written finding that was wrong. The
+shared shape of all six — `MakeOIS`'s rule, `Forward` against `ShortFront`, `quote_noise_bp`,
+`hasOccurred`, D122's pillar default, and this — is **a parameter accepted at its name rather than
+at its definition.**
 
 **D126, 2026-10-13: the first external check on a SECOND derivative — 1.6e-08 against a QuantLib
 four-point difference.** D93 §1b said `Dual<N>` over hardcoded `double` "forecloses every second

@@ -10559,6 +10559,12 @@ business day 2027-11-01).
 2025-09-30 — a true calendar month end that does need EOM. So this is not "QuantLib applies EOM and
 we do not"; it is two different tests for the same flag.
 
+> **WITHDRAWN by D128: this was never a convention question and the engine was never in doubt.**
+> `endOfMonth` was passed to QuantLib as a blanket `true`, which lets QuantLib apply its OWN gate —
+> a BUSINESS-day test used for a CALENDAR question. Passing the flag the convention implies, per
+> trade, takes all 2,000 trades to agreement and the book to **1.35e-14**. A sixth harness defect,
+> not a third convention question.
+
 **Which is right is NOT decided here.** The 2006 ISDA Definitions' EOM rule is phrased about the
 last day of a calendar month, which reads our way — but that is exactly the inference that was wrong
 about the observation shift, where D116 presented two defensible readings and D123 found the ARRC
@@ -10589,3 +10595,112 @@ those that `hasOccurred(valuation)`, so 46 seasoned basis trades threw *"negativ
 coupon's past fixing being demanded. And the EOM diagnosis turned on a single day, which I first
 established by arithmetic on serial numbers and then had to print: inferring that 2026-09-29 is
 46294 was right, but it was a guess at the time and the whole conclusion rested on it.
+
+## D128 — D127's "third convention question" was a sixth HARNESS defect: all 2,000 trades agree to 1.35e-14, and EOM-roll detection is not ModifiedFollowing's rollback test (2026-10-13)
+
+D127 reported three of Stage A's 2,000 trades disagreeing with QuantLib and recorded it as an open
+convention question about EOM detection, needing a primary source. The owner asked one question —
+*"What purpose is this EOM detection being used for? There is a difference between EOM detect for
+EOM rolls and EOM detection for ModifiedFollowing rollback"* — and it dissolves the finding.
+
+### 1. The two purposes, and both engines keep them separate
+
+The name "end of month" is doing two different jobs:
+
+- **the EOM ROLL gate** — *was this swap written to roll on month ends?* A question about the
+  CALENDAR.
+- **ModifiedFollowing's rollback** — *did adjusting this date cross into the next month?*
+  Necessarily a question about BUSINESS days.
+
+Neither engine confuses the second. Ours is
+`month_of(next_business_day(d)) == month_of(d) ? … : previous_business_day(d)`
+(`conventions/calendar.cpp:221`); QuantLib's is
+`while (isHoliday(d1)) ++d1; if (d1.month() != d.month()) return adjust(d, Preceding)`
+(`calendar.cpp:96`). **Neither consults an `isEndOfMonth` helper for it**, and the two agree —
+1,997 of 2,000 trades did, across 2,000 generated schedules.
+
+The engine's `is_end_of_month` has exactly two call sites, both the EOM-roll gate in
+`conventions/schedule.cpp` (the termination for backward generation, the effective for forward).
+QuantLib's `isEndOfMonth` has exactly one caller: `schedule.cpp:377`'s
+`if (*endOfMonth_ && calendar_.isEndOfMonth(seed))` — also the roll gate. So the two engines
+disagree in precisely one place, and it is the gate, not the adjustment.
+
+### 2. QuantLib's roll gate expects a DIFFERENT INPUT, and that is defensible
+
+`Calendar::isEndOfMonth(d)` is `d.month() != adjust(d + 1).month()`. Used as the roll gate it fires
+on any roll date that merely happens to be the last BUSINESS day of its month, so on trade 129 — a
+seven-year swap rolling on the 29th — it is seed-dependent:
+
+| | `isEndOfMonth` | literal calendar EOM |
+|---|---|---|
+| effective 2022-09-29 (Thu) | false | false |
+| termination 2029-09-29 (Sat) | **TRUE** | false |
+
+Same swap, same day of month, same calendar: generating backward applies the EOM roll and forward
+would not.
+
+**But the business-day flavour has a reason, and the first draft of this entry called it an accident
+when it is not.** It makes the test ADJUSTED-DATE TOLERANT. A genuine EOM swap terminating on
+Sunday 2029-09-30 adjusts, under ModifiedFollowing, to Friday 2029-09-28 — which is not a calendar
+month end. Handed that adjusted date, a literal test loses the convention entirely; QuantLib's
+recovers it:
+
+| date | ModFol → | `isEndOfMonth` | literal |
+|---|---|---|---|
+| true EOM termination 2029-09-30 (Sun) | 47389 | TRUE | TRUE |
+| **the same date, adjusted: 2029-09-28 (Fri)** | 47389 | **TRUE** | **false** |
+| trade 129's roll 2029-09-29 (Sat) | 47389 | TRUE | false |
+
+All three adjust to the same day and all three test TRUE, and that is the point: **the information
+distinguishing "an EOM swap whose date was rolled back to the Friday" from "a 29th-rolling swap that
+fell on a Saturday" is not present in the adjusted date at all.** It exists only in the unadjusted
+roll date, which the originating convention holds and the date itself cannot carry.
+
+So neither gate is wrong; they are correct for different inputs. The tension is that QuantLib's
+`Schedule` constructor documents its effective and termination as UNADJUSTED — it adjusts them
+itself at `schedule.cpp:373` — while its EOM gate is the test one would want for a possibly-adjusted
+one. On every genuine month end the two agree (including a Sunday one, 2028-04-30), so the literal
+test is a strict SUBSET and never misses a real EOM swap on unadjusted input.
+
+Also worth separating, since it was the owner's first reading: the EOM detection is **not** what
+rolls the termination back to the Friday. That is ModifiedFollowing's own doing, applied at
+`schedule.cpp:373` before the EOM block, and the block only touches `dates_[1 .. size-2]` — the
+intermediate dates. When it does fire with a non-`Unadjusted` convention it snaps those to
+`calendar_.endOfMonth`, the last BUSINESS day of each month, which is a third business-day notion in
+the same neighbourhood and the one that actually produced trade 129's 45930 / 46295.
+
+### 3. The harness obligation, and the result
+
+The oracle must pass the flag **the engine's convention implies** — the literal calendar month-end
+test on the generation seed — not a blanket `true` that invites QuantLib's different gate. With
+`endOfMonth` computed per trade as `t.term == Date::endOfMonth(t.term)`:
+
+| | D127 (blanket `true`) | D128 (the flag the convention implies) |
+|---|---|---|
+| trades above 1e-10 of notional | 3 of 2,000 | **0 of 2,000** |
+| worst family, of gross | 2.70e-06 | **3.50e-14** |
+| book NPV, of gross | 2.53e-07 | **9.90e-16** |
+
+Book: engine 68,395,553.471440 against QuantLib 68,395,553.471439, **1.35e-14 relative**. Every one
+of the eight families is now held to 1e-12 of gross, where three were held to 1e-05 or looser and
+the loosening was *documented as an open question*.
+
+### 4. What this costs, as a lesson
+
+**Six harness defects to one engine defect** across this oracle programme, and this is the most
+expensive of the six: it did not merely delay a result, it produced a *written finding that was
+wrong* — a "third convention question" with a measured cost, a request for a primary source, and
+three loosened tolerances presented as the price of an open question. D127 §2 even argued itself
+into caution ("that is exactly the inference that was wrong about the observation shift") and
+reached the wrong conclusion anyway, because the caution was aimed at the verdict rather than at the
+harness.
+
+The specific failure is one worth naming: **I passed a flag whose meaning I had not established, to
+a library whose implementation of it I had not read** — and then, having read it, characterised its
+design as an accident before working out what it was for (§2). Every other harness defect this session had
+the same shape — `MakeOIS`'s schedule rule, `DateGeneration::Forward` against `ShortFront`, the
+fixture's `quote_noise_bp` default, a paid coupon's `hasOccurred` — a parameter accepted at its name
+rather than at its definition. D122's pillar error was the same thing one level up, in a library's
+*default*. The remedy is not more caution about conclusions; it is reading the definition of every
+parameter the harness passes, and the gate now pins the distinction rather than the verdict.
+

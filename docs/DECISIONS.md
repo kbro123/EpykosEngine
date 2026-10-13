@@ -10303,3 +10303,70 @@ convention, the ARRC documents it, and `ObservationMethod` could carry it as a d
 `USD-SOFR-OIS-SHIFT2` is a "customised" blueprint and nothing in the shipped Stage A problem depends
 on which variant it means. What is decided is that the name `observation_shift` now means what the
 ARRC says it means.
+
+## D124 — Stage A's calibration surface is COMPLETE: all 70 quotes independently verified, futures and deposits included (2026-10-13)
+
+The owner's ruling on the remaining question — **"Quotes are inclusive of any convexity"** — makes
+the futures oracle decidable, and with it Stage A's whole calibration side.
+
+### 1. The ruling, and what it settles
+
+D121 §"the par-rate surface is now complete" left the 16 futures rows blocked on a question rather
+than on effort: they are quoted as *prices* with convexity stated zero, and what a futures oracle
+compares depends on whether that zero is the convention under test or an approximation being
+excused. An oracle built on the wrong side of it would have gated the approximation.
+
+The quotes being inclusive of any convexity settles it: **`convexity zero` is the CONVENTION.** The
+market price embeds whatever convexity there is, the engine takes the quote as the rate, and
+applying a Hull-White adjustment to either side would be measuring the wrong thing. So the
+comparison is of the price itself, with a zero adjustment on both sides.
+
+### 2. The result, and the surface is now closed
+
+| family | rows | quoted as | worst |
+|---|---|---|---|
+| `EUR-ESTR-OIS` | 17 | rate | 5.25e-11 bp |
+| `USD-SOFR-OIS` | 13 | rate | 5.15e-11 bp |
+| `EUR-EURIBOR-6M-IRS` | 11 | rate | 7.63e-13 bp |
+| `EUR-3S6S-BASIS` | 9 | spread | 8.46e-14 bp |
+| `USD-SOFR-3M-FUTURE` (SR3) | 8 | **price** | **6.25e-11 bp of rate** |
+| `EUR-EURIBOR-3M-FUTURE` (FEU3) | 8 | **price** | **exactly 0** |
+| the four deposits, one per curve | 4 | rate | **exactly 0** |
+
+**70 of 70. Every calibration quote in the Stage A problem now has an independent number.** Two
+currencies, three calendars, one/two/three-curve pricing, par rates, par spreads, prices and
+deposits.
+
+SR3 is QuantLib's `OvernightIndexFuture(sofr, valueDate, maturityDate, 0, Compound)` — 100 minus
+compounded daily SOFR over the IMM quarter, which is the engine's convention verbatim. FEU3 has no
+QuantLib instrument class and needs none: 100·(1 − forwardRate(eff, term, ACT/360, Simple)) off the
+3M forecast curve, the deposit running from the third Wednesday for three months. The deposits are
+the same shape without the 100 − x, each on its own curve and day count.
+
+### 3. Two gates that keep the comparison honest about its own units
+
+**A price point is 100 bp of rate**, so a tolerance stated in price is a hundred times looser in
+rate than the same number on a par rate. The measured figures are therefore quoted in rate, and the
+test file says plainly that its printed column for a price-quoted family is price×1e4 — SR3's
+"−6.25e-09" in that column is the 6.25e-11 bp of rate. Flattering a comparison by reporting it in
+the larger unit would have been free and silent.
+
+**And the quoting convention itself is gated**: exactly the Future-kind rows may carry the
+fixture's `quote_is_price` flag, every price must exceed 50 and every rate must be under 1 in
+absolute value, and the counts are pinned at 16 and 54. A family that silently changed quoting
+convention would otherwise be compared against the wrong kind of number and the agreement would
+look like a defect — or worse, a defect would look like agreement.
+
+### 4. What is left
+
+Nothing on Stage A's calibration side. Still absent across the whole oracle programme:
+
+- **Seasoned trades** with realised fixings. `compare_ois` is unseasoned by construction (one of
+  its four agreement controls) and Stage A's BOOK is 20% seasoned, but no oracle reaches a coupon
+  with a realised day. This is now the largest uncovered area and the ARRC's compounding of a
+  partially-fixed period is exactly where a convention error would hide.
+- **Second derivatives.** I2 is reachable (D97, D101 compute a book gamma with respect to par
+  quotes) and has no external check of any kind.
+- **The book and the ladder beyond `compare_ois`.** D120 gated a 64-trade OIS book and its
+  16-bucket ladder; Stage A's 2,000-trade book across eight families and its 70-bucket ladder are
+  compared only to SwapEngine (D109).

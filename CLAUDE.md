@@ -125,6 +125,22 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D124, 2026-10-13: Stage A's calibration surface is COMPLETE — all 70 quotes independently
+verified.** The owner's ruling that futures **quotes are inclusive of any convexity** settles what a
+futures oracle compares: `convexity zero` is the CONVENTION, not an approximation being excused, so
+no adjustment on either side. SR3 against QuantLib's `OvernightIndexFuture(..., 0, Compound)`
+**6.25e-11 bp of rate**; FEU3 as 100·(1 − 3M forward) **exactly 0**; the four deposits **exactly 0**.
+With D119/D121's 50 par-rate rows that is **70 of 70** — two currencies, three calendars,
+one/two/three-curve pricing, par rates, par spreads, prices and deposits. Two gates keep it honest
+about units: a **price point is 100 bp of rate**, so the measured figures are quoted in rate and the
+file says its printed column for a price family is price×1e4 (reporting the larger unit would have
+flattered it for free); and the quoting convention itself is pinned — exactly the Future rows may
+carry `quote_is_price`, counts fixed at 16 and 54 — because a family that silently changed
+convention would be compared against the wrong kind of number. **Largest uncovered area now:
+SEASONED trades** — `compare_ois` is unseasoned by construction and Stage A's book is 20% seasoned,
+but no oracle yet reaches a coupon with a realised fixing, which is exactly where a compounding
+convention error would hide.
+
 **D123, 2026-10-13: the ARRC settles the observation shift and THE ENGINE WAS WRONG.** At the
 owner's direction the authority is the ARRC's *Updated User's Guide to SOFR*, whose **Appendix 4** is
 titled "Methods for Calculating Daily Accrual in an Interest-Period Weighted Observation Shift" and

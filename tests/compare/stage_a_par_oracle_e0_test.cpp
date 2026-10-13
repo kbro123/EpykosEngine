@@ -12,11 +12,19 @@
 //   USD-SOFR-OIS         (SIFMA n FED)       13   5.15e-11 bp
 //   EUR-EURIBOR-6M-IRS   (6M fwd / ESTR)     11   7.63e-13 bp
 //   EUR-3S6S-BASIS       (3M/6M fwd/ESTR)     9   8.46e-14 bp   <- THREE curves, float-vs-float
+//   USD-SOFR-3M-FUTURE   (SR3, a PRICE)        8   6.25e-11 bp of rate
+//   EUR-EURIBOR-3M-FUTURE (FEU3, a PRICE)      8   exactly 0
+//   the four DEPOSITS    (one per curve)        4   exactly 0
 //
-// 50 instruments, two currencies, three calendars, and the two- and THREE-curve paths. With the
-// basis row this is **every par-rate calibration family Stage A has**; what remains uncompared on
-// its calibration side is the futures (16 rows, quoted as prices with convexity stated zero, so a
-// convention decision precedes the measurement). What that covers beyond
+// **70 instruments: ALL of Stage A's calibration quotes**, two currencies, three calendars, one,
+// two and three curves, par rates, prices and deposits. Nothing on its calibration side is left
+// uncompared.
+//
+// The futures are quoted as PRICES and are compared as prices, with **convexity zero on both
+// sides** — the owner ruled on 2026-10-13 that the quotes are inclusive of any convexity, so
+// `convexity zero` is the CONVENTION and not an approximation being excused, and applying a
+// Hull-White adjustment to either side would be measuring the wrong thing. A price point is 100 bp
+// of rate, which is why their tolerance below is stated in price and read in rate. What that covers beyond
 // D115: a second currency's calendar end to end; the EURIBOR-6M index; a 30/360 annual fixed leg
 // against an ACT/360 SEMIANNUAL float leg; forecast != discount; and the STUB RULE, which the 18M
 // ESTR row is the only instrument in Stage A to exercise (see below).
@@ -101,6 +109,23 @@ inline constexpr double kQlSofrOis[] = {
 // The spread enters the 3M leg linearly, so QuantLib's par spread is solved in CLOSED FORM,
 // s = (PV6 - PV3)/A3 with A3 the 3M annuity sum(tau_i * N * DF(pay_i)), rather than by a root find:
 // importing a solver into an oracle would be a second thing to be wrong.
+// The futures, as PRICES, in Stage A's own contract order (Z26 H27 M27 U27 Z27 H28 M28 U28).
+// SR3 is 100 − compounded daily SOFR over the IMM quarter, ACT/360 → QuantLib's
+// `OvernightIndexFuture(sofr, valueDate, maturityDate, 0, Compound)`. FEU3 is 100 − the 3M EURIBOR
+// fixing whose deposit runs from the third Wednesday for three months → 100·(1 − forwardRate(eff,
+// term, ACT/360, Simple)) off the 3M forecast curve. Both with a zero convexity adjustment.
+inline constexpr double kQlSr3Price[] = {
+    0x1.80b71dfa4d13bp+6, 0x1.8092fea4ff94ap+6,  // Z26, H27
+    0x1.8071bcc2e29a1p+6, 0x1.80532135d7f72p+6,  // M27, U27
+    0x1.8036f5fdc9cp+6,   0x1.801a8786bf589p+6,  // Z27, H28
+    0x1.80036c8480f69p+6, 0x1.7fed9b5589c52p+6,  // M28, U28
+};
+inline constexpr double kQlFeu3Price[] = {
+    0x1.8798f57548218p+6, 0x1.87627406778e7p+6,  // Z26, H27
+    0x1.873419f244546p+6, 0x1.8709bc3c55432p+6,  // M27, U27
+    0x1.86e27df40d6c8p+6, 0x1.86be15d945e6ep+6,  // Z27, H28
+    0x1.869a25f1bcfb4p+6, 0x1.867c2c533b674p+6,  // M28, U28
+};
 inline constexpr double kQlBasisParSpread[] = {
     0x1.a2820a9a214cep-11, 0x1.a2b90d49e0135p-11,  // 3Y, 4Y
     0x1.a2e0f80c3272ep-11, 0x1.a3191ce8d211dp-11,  // 5Y, 7Y
@@ -195,6 +220,53 @@ TEST(StageAParOracleE0, SofrOisMatchesQuantLib) {
 // The two-curve one: the float leg forecasts off curve 3 and discounts off curve 1.
 TEST(StageAParOracleE0, Euribor6mIrsMatchesQuantLibAcrossTwoCurves) {
   compare("EUR-EURIBOR-6M-IRS", 3, "EUR-EURIBOR-6M-IRS", kQlEuribor6mIrs, std::size(kQlEuribor6mIrs));
+}
+
+// The futures, compared as prices. A price point is 100 bp of rate, so `kTolBp` read as a price
+// tolerance is a hundred times LOOSER in rate than it is for a par rate — which is why the measured
+// figures are quoted in RATE in this file's header (6.25e-11 bp for SR3, exactly 0 for FEU3) rather
+// than reported as a price difference and left flattering.
+//
+// NOTE the console line these two tests print: `compare` scales by 1e4 for every family, so for a
+// price-quoted one that column is price×1e4, i.e. **100× the rate bp**. SR3's "-6.25e-09" there is
+// the 6.25e-11 bp of rate quoted above. The shared helper is left alone rather than given a
+// per-family scale, because one honest sentence is cheaper than a parameter nothing else needs.
+TEST(StageAParOracleE0, SofrFuturesPricesMatchQuantLib) {
+  compare("USD-SOFR-3M-FUTURE", 0, "USD-SOFR-3M-FUTURE", kQlSr3Price, std::size(kQlSr3Price));
+}
+
+TEST(StageAParOracleE0, EuriborFuturesPricesMatchQuantLib) {
+  compare("EUR-EURIBOR-3M-FUTURE", 2, "EUR-EURIBOR-3M-FUTURE", kQlFeu3Price, std::size(kQlFeu3Price));
+}
+
+// The futures really are quoted as PRICES and the par-rate families really are not: the fixture's
+// own flag says which, and the two are compared on different scales. Without this, a family that
+// silently changed quoting convention would be compared against the wrong kind of number.
+TEST(StageAParOracleE0, OnlyTheFuturesAreQuotedAsPrices) {
+  const fixtures::StageA& s = exact_par_stage_a();
+  std::size_t prices = 0, rates = 0;
+  int k = 0;
+  for (int c = 0; c < s.n_curves(); ++c) {
+    for (const epykos::instrument::CalibrationInstrument& ci : s.sets[static_cast<std::size_t>(c)].instruments) {
+      const bool is_price = s.quote_is_price[static_cast<std::size_t>(k)] != 0;
+      const bool is_future = ci.instrument.kind == epykos::instrument::Kind::Future;
+      EXPECT_EQ(is_price, is_future) << ci.key << ": quoted as a " << (is_price ? "price" : "rate")
+                                     << " but its kind is " << (is_future ? "Future" : "not Future");
+      if (is_price) {
+        ++prices;
+        EXPECT_GT(s.quotes[static_cast<std::size_t>(k)], 50.0)
+            << ci.key << ": a futures PRICE near " << s.quotes[static_cast<std::size_t>(k)]
+            << " is not a price at all -- the quoting convention has changed";
+      } else {
+        ++rates;
+        EXPECT_LT(std::abs(s.quotes[static_cast<std::size_t>(k)]), 1.0) << ci.key << ": a rate quote out of range";
+      }
+      ++k;
+    }
+  }
+  EXPECT_EQ(prices, 16u) << "Stage A no longer has 16 futures rows";
+  EXPECT_EQ(rates, 54u) << "Stage A no longer has 54 rate-quoted rows";
+  std::cout << "  [ql-oracle] " << prices << " price-quoted and " << rates << " rate-quoted calibration rows\n";
 }
 
 // The basis is quoted as a SPREAD, around 8 bp rather than 2.7%, so the same absolute tolerance is

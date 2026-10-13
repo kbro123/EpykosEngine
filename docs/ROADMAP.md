@@ -410,8 +410,9 @@ the order their evidence-to-effort ratio puts them:
    9 rows at **8.46e-14 bp**, three curves, first attempt and no harness correction. **The par-rate surface is now
    complete — 50 instruments, every par-rate calibration family Stage A has.**
 
-1c. **Futures as calibration rows (16: 8 SR3, 8 FEU3) — the decision is TAKEN (owner, 2026-10-13): the quotes are
-   inclusive of any convexity.** So the quoted price IS the market's view of the compounded (SR3) or averaged (SR1,
+1c. ~~**Futures as calibration rows (16: 8 SR3, 8 FEU3)**~~ **DONE 2026-10-13, D124.** The owner ruled that the
+   quotes are inclusive of any convexity, so `convexity zero` is the CONVENTION; SR3 6.25e-11 bp of rate, FEU3 and
+   the four deposits exactly 0. **Stage A's calibration surface is now 70 of 70.** The ruling, for the record: So the quoted price IS the market's view of the compounded (SR3) or averaged (SR1,
    FEU3) rate over the contract period, no adjustment is applied on either side, and `convexity zero` is the
    CONVENTION rather than an approximation being excused. That makes the oracle decidable and plain: QuantLib's
    `OvernightIndexFuture` with `convexityAdjustment = 0` for SR3, and `100(1 − forward)` with no `futuresConvAdj`

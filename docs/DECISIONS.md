@@ -10508,3 +10508,84 @@ ladder (compared only to SwapEngine, D109), and the **exotics surface of D106** 
 measured weakness lives, where the kill test says it runs at 0.45–0.78x its own naive `double`, and
 where QuantLib has counterparts for some of the payoffs. That last is the one with something at
 stake beyond coverage.
+
+## D127 — Stage A's 2,000-trade book against QuantLib: 1,997 agree to 1e-10 of notional, and the 3 that do not are one convention question about EOM DETECTION (2026-10-13)
+
+The problem D109's head-to-head measured against SwapEngine — whose conventions ours were imported
+from (D117 §1), so that comparison is structurally blind to exactly the layer this one checks. Every
+trade is rebuilt in QuantLib from its terms, so **2,000 schedules** are under test and not only the
+pricing.
+
+### 1. The result
+
+Stage A, `quote_noise_bp = 0`, the four generating curves, the engine's own synthetic fixings loaded
+pre-valuation only (D125 §2's rule). 2,000 trades, eight families, two currencies, 378 seasoned.
+
+| family | n | worst/notional | \|family diff\| / family GROSS |
+|---|---|---|---|
+| `EUR-3S6S-BASIS` | 212 | 9.07e-17 | 1.07e-15 |
+| `EUR-ESTR-OIS` | 300 | 1.14e-14 | 1.86e-14 |
+| `EUR-EURIBOR-3M-IRS` | 167 | 1.25e-15 | 4.97e-16 |
+| `USD-SOFR-AVG-SWAP` | 199 | 1.72e-15 | 7.03e-16 |
+| `USD-SOFR-OIS-SHIFT2` | 195 | 7.85e-15 | 4.42e-15 |
+| `EUR-EURIBOR-6M-IRS` | 237 | **7.85e-07** | 1.62e-07 |
+| `USD-SOFR-OIS` | 481 | **4.67e-06** | 2.71e-07 |
+| `USD-SOFR-OIS-SHIFT2-LOCKOUT2` | 209 | **1.94e-05** | 2.70e-06 |
+
+**1,997 of 2,000 trades agree to better than 1e-10 of notional.** Book NPV: engine
+68,395,553.471440 against QuantLib 68,395,789.808924 — a difference of 236.34, which is 2.53e-07 of
+the book's gross PV of 9.33e8. The whole of it is three trades.
+
+### 2. The three, and it is EOM DETECTION
+
+All three have a termination that is the **last business day of its month without being the last
+calendar day**, and the divergence is in EOM *detection*, not in the EOM adjustment:
+
+- **ours**: `is_end_of_month(d)` is `end_of_month(d) == d` — the literal CALENDAR month end
+  (`conventions/date.hpp:98`), seeded from the termination for backward generation
+  (`conventions/schedule.cpp:43`).
+- **QuantLib**: `Calendar::isEndOfMonth(d)` is `d.month() != adjust(d + 1).month()` — a BUSINESS-day
+  notion, true whenever the next business day falls in the next month.
+
+Worked, and verified from the generated schedule rather than inferred: trade 129 terminates
+**2029-09-29, a Saturday**. Ours — the 30th is the calendar month end, so not EOM, and the annual
+grid stays on the 29th (45929, 46294). QuantLib — the next business day is 2029-10-01, so it *is*
+end-of-month, and the grid snaps to the 30th (45930, 46295). The other two are the same shape:
+trade 1188 terminates 2028-04-29 (next business day 2028-05-02) and trade 1704 2027-10-30 (next
+business day 2027-11-01).
+
+**Neither blanket setting matches, and that is what proves the mechanism.** Re-running with
+`endOfMonth = false` fixes trades 129 and 1704 and **breaks** trade 1688, whose effective is
+2025-09-30 — a true calendar month end that does need EOM. So this is not "QuantLib applies EOM and
+we do not"; it is two different tests for the same flag.
+
+**Which is right is NOT decided here.** The 2006 ISDA Definitions' EOM rule is phrased about the
+last day of a calendar month, which reads our way — but that is exactly the inference that was wrong
+about the observation shift, where D116 presented two defensible readings and D123 found the ARRC
+settled it against this engine. It needs the primary source. This is the **third** convention
+question the oracle programme has surfaced (D117's two were priced at ≤0.019 bp and exactly 0); this
+one has a measured cost of 2.53e-07 of the book's gross PV.
+
+### 3. The gate, and the denominator that nearly fooled it
+
+Nine hex literals — one per family and the book total — with the five unaffected families held to
+1e-12 and the three to the cost their one trade imposes, stated rather than hidden. §EOM's own test
+pins **why** they are loose: each of the three must have a termination that is not a calendar month
+end but whose next business day is in the next month, re-derived from the dates rather than trusted
+to the index, so a resolved EOM question or a fourth trade of that shape fails loudly.
+
+**The tolerance is against each family's GROSS PV, not its net**, and the first version of this test
+got that wrong and failed `EUR-ESTR-OIS` for it. That family nets 695,702 out of trades with
+notionals in the millions, so an absolute disagreement of 1.6e-6 reads as 2.4e-12 against the net
+and 1.9e-14 against the gross, while the per-trade measure is 1.14e-14 of notional. **Holding a
+near-cancelling net to a relative tolerance measures the cancellation, not the engine** — the same
+error in a new costume as D124 §3's price-versus-rate unit, and worth the same vigilance: pick the
+denominator that does not vanish.
+
+### 4. Two harness defects found writing it, both mine
+
+Consistent with the session's running tally. The basis arm summed **all** coupons without skipping
+those that `hasOccurred(valuation)`, so 46 seasoned basis trades threw *"negative time"* — a paid
+coupon's past fixing being demanded. And the EOM diagnosis turned on a single day, which I first
+established by arithmetic on serial numbers and then had to print: inferring that 2026-09-29 is
+46294 was right, but it was a guess at the time and the whole conclusion rested on it.

@@ -378,6 +378,12 @@ Rate x Calculation-Period-DCF structure) or taken as the interest directly (Quan
 defensible and the resolution is the owner's** — it needs the 2021 ISDA Definitions, not a preference. The gate pins
 the mechanism, not the verdict.
 
+**A THIRD convention question, from D127**: `EOM detection`. Ours tests the literal calendar month end; QuantLib's
+`Calendar::isEndOfMonth` tests whether the next BUSINESS day is in the next month. They differ on a roll date that
+is the last business day of a month without being the last calendar day — 3 of Stage A's 2,000 trades, costing
+2.53e-07 of the book's gross PV. ISDA's EOM is phrased about the last calendar day, which reads our way, but D123 is
+the warning against settling that by inference. **Needs the primary source; the gate pins the mechanism meanwhile.**
+
 **D117 audited the provenance and the answer is worse than D115's one quotation suggested: 17 of 17 instrument
 conventions, 7 of 7 calendars and 4 of 4 indices were imported from SwapEngine.** The head-to-head is sound on
 arithmetic and structurally blind on conventions. Three convention questions are recorded as unresolved by the import

@@ -125,6 +125,24 @@ term-level e-graph is a *different* object: that one's e-nodes are whole `ir::Pr
 below the pin. R1, R2 and R5 now find **zero sites** on both fixtures, because the algebra removed
 the near-duplicate structure they matched.
 
+**D127, 2026-10-13: Stage A's 2,000-trade book — 1,997 agree to 1e-10 of notional, and the 3 that do
+not are one convention question about EOM DETECTION.** The problem D109's h2h measured against
+SwapEngine, whose conventions ours were imported from, so that comparison is blind to this layer.
+Every trade rebuilt in QuantLib from its terms, so **2,000 schedules** are under test: five families
+agree to **1.9e-14 of gross or better**, book NPV differs by 236.34 = **2.53e-07 of the book's gross
+PV** of 9.33e8, and the whole of it is three trades. All three have a termination that is the **last
+business day of its month without being the last calendar day** — ours `is_end_of_month` tests the
+literal CALENDAR end, QuantLib's `Calendar::isEndOfMonth` tests whether the next BUSINESS day is in
+the next month. Trade 129 terminates Saturday 2029-09-29: we keep the 29th, QuantLib snaps to the
+30th. **Neither blanket setting matches** — `endOfMonth = false` fixes two and breaks a third whose
+effective IS a month end — which proves it is two tests for one flag, not a missing adjustment.
+**Not decided here**: ISDA's EOM is phrased about the last CALENDAR day, which reads our way, but
+that is the inference that was wrong about the observation shift (D123), so it needs the primary
+source. Third convention question the programme has surfaced, and the first with a measured cost on
+the book. Also: the gate's tolerance is against each family's GROSS PV, because **holding a
+near-cancelling net to a relative tolerance measures the cancellation, not the engine** — the first
+version did that and failed EUR-ESTR-OIS, whose net is 695,702 out of millions in notional.
+
 **D126, 2026-10-13: the first external check on a SECOND derivative — 1.6e-08 against a QuantLib
 four-point difference.** D93 §1b said `Dual<N>` over hardcoded `double` "forecloses every second
 derivative — the engine cannot compute a gamma by any route"; D97/D101 reopened it with
@@ -336,7 +354,7 @@ noise floor, the three wins keep full size, and the absolute default-path gains 
 kernels, which stayed true while the decomposition got slower — *a gate binds only what it can observe*, for the
 sixth time in this repository and the first on a performance quantity.
 
-`ctest`: **155/155** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
+`ctest`: **156/156** on this box's release preset (with `EPYKOS_LEGACY_SEARCH=ON` and `EPYKOS_H2H=ON`, which add
 tests; the default configuration's count is lower). **CI green on all four jobs** (ubuntu
 release / reference / mutation, macos release) at `6d68b09`. **`integrate/invariants` was merged into
 `main` on 2026-10-12 (`046427d`): 82 commits, D95–D116** — §1b's three invariants, the exotics kill
